@@ -1,0 +1,937 @@
+using System.Text.Json.Nodes;
+using Microsoft.UI.Text;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
+using FontWeight = Windows.UI.Text.FontWeight;
+
+namespace NatuiHost;
+
+/// <summary>
+/// VStack/HStack. A Grid rather than a StackPanel: StackPanel offers children
+/// unlimited main-axis space, so "Spacer fills the leftover" cannot be
+/// expressed. Each child gets its own Auto track; Spacers (and other greedy
+/// children) get Star tracks. RebuildLayout must be called after every
+/// children mutation.
+/// </summary>
+internal sealed class NatuiStack : Grid
+{
+    public Orientation Orientation { get; set; } = Orientation.Vertical;
+
+    /// <summary>
+    /// Protocol alignment string: leading/center/trailing for vertical stacks,
+    /// top/center/bottom for horizontal ones. Null means the default (stretch
+    /// for vertical stacks, center for horizontal ones).
+    /// </summary>
+    public string? CrossAlignment { get; set; }
+
+    public double Spacing { get; set; }
+
+    /// <summary>
+    /// True when some child wants all leftover space on this axis (Spacer, an
+    /// "infinity" frame, or an inherently greedy control). A greedy child stack
+    /// becomes a star track in its parent, which is how SwiftUI's "propose the
+    /// full size down the tree" behaves in a Grid world.
+    /// </summary>
+    public bool HGreedy { get; private set; }
+    public bool VGreedy { get; private set; }
+
+    // Kinds that expand to fill an axis in SwiftUI without an explicit frame.
+    private static readonly HashSet<string> GreedyHorizontalKinds =
+        ["TextField", "Slider", "ProgressView", "List", "ScrollView"];
+    private static readonly HashSet<string> GreedyVerticalKinds = ["List", "ScrollView"];
+
+    public void RebuildLayout()
+    {
+        var vertical = Orientation == Orientation.Vertical;
+        RowDefinitions.Clear();
+        ColumnDefinitions.Clear();
+        RowSpacing = vertical ? Spacing : 0;
+        ColumnSpacing = vertical ? 0 : Spacing;
+
+        var anyMainStar = false;
+        var anyCrossStretch = false;
+        for (var i = 0; i < Children.Count; i++)
+        {
+            if (vertical) RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            else ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            if (Children[i] is not FrameworkElement child) continue;
+
+            var node = child.Tag as NatuiNode;
+            var mainStar = IsMainStar(child, node, vertical);
+            var crossStretch = IsCrossStretch(child, node, vertical);
+            anyMainStar |= mainStar;
+            anyCrossStretch |= crossStretch;
+
+            if (vertical)
+            {
+                if (mainStar) RowDefinitions[i].Height = new GridLength(1, GridUnitType.Star);
+                SetRow(child, i);
+                SetColumn(child, 0);
+                // Main axis always stretches into its own track (an Auto track
+                // is content-sized anyway); this also clears a stale value left
+                // by a previous horizontal parent after a move.
+                child.VerticalAlignment = VerticalAlignment.Stretch;
+                child.HorizontalAlignment = crossStretch
+                    ? HorizontalAlignment.Stretch
+                    : CrossToHorizontal();
+            }
+            else
+            {
+                if (mainStar) ColumnDefinitions[i].Width = new GridLength(1, GridUnitType.Star);
+                SetColumn(child, i);
+                SetRow(child, 0);
+                child.HorizontalAlignment = HorizontalAlignment.Stretch;
+                child.VerticalAlignment = crossStretch
+                    ? VerticalAlignment.Stretch
+                    : CrossToVertical();
+            }
+
+            switch (node?.Kind)
+            {
+                case "Spacer":
+                {
+                    var min = node.Num("minLength") ?? 0;
+                    child.MinHeight = vertical ? min : 0;
+                    child.MinWidth = vertical ? 0 : min;
+                    break;
+                }
+                case "Divider":
+                    // A Divider is a 1px line across the cross axis.
+                    child.Height = vertical ? 1 : double.NaN;
+                    child.Width = vertical ? double.NaN : 1;
+                    break;
+            }
+        }
+
+        var hGreedy = vertical ? anyCrossStretch : anyMainStar;
+        var vGreedy = vertical ? anyMainStar : anyCrossStretch;
+        if (hGreedy != HGreedy || vGreedy != VGreedy)
+        {
+            HGreedy = hGreedy;
+            VGreedy = vGreedy;
+            // Greediness bubbles up: a stack containing a greedy child is
+            // itself greedy. Terminates because it only recurses on change.
+            (Parent as NatuiStack)?.RebuildLayout();
+        }
+    }
+
+    private static bool IsMainStar(FrameworkElement child, NatuiNode? node, bool vertical)
+    {
+        if (node is null) return false;
+        if (node.Kind == "Spacer") return true;
+        return vertical
+            ? node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
+                || child is NatuiStack { VGreedy: true }
+            : node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
+                || child is NatuiStack { HGreedy: true };
+    }
+
+    private static bool IsCrossStretch(FrameworkElement child, NatuiNode? node, bool vertical)
+    {
+        if (node is null) return false;
+        if (node.Kind == "Divider") return true;
+        return vertical
+            ? node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
+                || child is NatuiStack { HGreedy: true }
+            : node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
+                || child is NatuiStack { VGreedy: true };
+    }
+
+    private HorizontalAlignment CrossToHorizontal() => CrossAlignment switch
+    {
+        "leading" => HorizontalAlignment.Left,
+        "center" => HorizontalAlignment.Center,
+        "trailing" => HorizontalAlignment.Right,
+        _ => HorizontalAlignment.Stretch,
+    };
+
+    private VerticalAlignment CrossToVertical() => CrossAlignment switch
+    {
+        "top" => VerticalAlignment.Top,
+        "bottom" => VerticalAlignment.Bottom,
+        _ => VerticalAlignment.Center,
+    };
+}
+
+/// <summary>
+/// Builds WinUI elements for nodes, applies props, refreshes labels, and wires
+/// user events back to the protocol channel. UI thread only.
+/// </summary>
+internal sealed class NodeMapper(NatuiStack rootStack)
+{
+    public NatuiStack RootStack { get; } = rootStack;
+
+    /// <summary>
+    /// Depth counter, positive while remote ops mutate controls. WinUI raises
+    /// TextChanged/Checked/ValueChanged for programmatic writes too (unlike
+    /// SwiftUI bindings), so change handlers must know to stay silent. Change
+    /// handlers additionally compare against the stored prop value, because a
+    /// few WinUI events can arrive after this guard has been released.
+    /// </summary>
+    private int _applyingRemote;
+
+    private static readonly HashSet<string> LabelKinds = ["Text", "Button", "Toggle"];
+
+    /// <summary>
+    /// #text nodes are consumed by their parent's label everywhere except at
+    /// the root, where the Swift host renders them as plain text views.
+    /// </summary>
+    public static bool IsAttachable(int parentId, NatuiNode child) =>
+        child.Kind != "#text" || parentId == NodeStore.RootId;
+
+    // -- element construction ---------------------------------------------------
+
+    public void CreateElement(NatuiNode node) => EnsureElement(node);
+
+    private FrameworkElement EnsureElement(NatuiNode node)
+    {
+        if (node.Element is null)
+        {
+            node.Element = Build(node);
+            node.Element.Tag = node; // NatuiStack layout reads the node back
+            ApplyProps(node);
+        }
+        return node.Element;
+    }
+
+    private FrameworkElement Build(NatuiNode node) => node.Kind switch
+    {
+        "VStack" => new NatuiStack { Orientation = Orientation.Vertical },
+        "HStack" => new NatuiStack { Orientation = Orientation.Horizontal },
+        "ZStack" => new Grid(),
+        "Text" or "#text" => BuildText(node),
+        "Button" => BuildButton(node),
+        "TextField" => BuildTextField(node),
+        "Toggle" => BuildToggle(node),
+        "Slider" => BuildSlider(node),
+        "Picker" => BuildPicker(node),
+        "ScrollView" => BuildScrollView(node),
+        "List" => BuildList(),
+        "Image" => new FontIcon { FontFamily = IconFontFamily() },
+        "Spacer" => new Border(),
+        "Divider" => new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0x4D, 0x88, 0x88, 0x88)),
+        },
+        // ProgressView swaps between ProgressBar and ProgressRing depending on
+        // whether "value" is present; the Grid shell keeps that swap local.
+        "ProgressView" => new Grid(),
+        _ => new TextBlock
+        {
+            Text = $"unknown kind: {node.Kind}",
+            Foreground = new SolidColorBrush(Colors.Red),
+        },
+    };
+
+    private static FrameworkElement BuildText(NatuiNode node)
+    {
+        // TextBlock has no Background/CornerRadius, so every Text gets a
+        // Border shell that carries the common box props.
+        var label = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        node.Label = label;
+        return new Border { Child = label };
+    }
+
+    private static Button BuildButton(NatuiNode node)
+    {
+        var button = new Button();
+        button.Click += (_, _) => Ipc.Event(node.Id, "press");
+        return button;
+    }
+
+    private FrameworkElement BuildTextField(NatuiNode node)
+    {
+        // The secure flag is fixed at creation; flipping it later would need
+        // an element swap and is not supported.
+        if (node.Flag("secure"))
+        {
+            var box = new PasswordBox();
+            box.PasswordChanged += (_, _) => OnTextInput(node, box.Password);
+            box.KeyDown += (_, e) =>
+            {
+                if (e.Key == Windows.System.VirtualKey.Enter) EmitSubmit(node);
+            };
+            return box;
+        }
+        var text = new TextBox();
+        text.TextChanged += (_, _) => OnTextInput(node, text.Text);
+        text.KeyDown += (_, e) =>
+        {
+            if (e.Key == Windows.System.VirtualKey.Enter) EmitSubmit(node);
+        };
+        return text;
+    }
+
+    private void OnTextInput(NatuiNode node, string value)
+    {
+        if (_applyingRemote > 0) return;
+        if (value == (node.Str("value") ?? "")) return;
+        // Optimistic local write plus seq so JS echoes can be staleness-checked
+        // (protocol seq/ack).
+        node.Props["value"] = value;
+        node.LastSentSeq++;
+        Ipc.Event(node.Id, "change", new JsonObject { ["value"] = value }, node.LastSentSeq);
+    }
+
+    private static void EmitSubmit(NatuiNode node) =>
+        Ipc.Event(node.Id, "submit", new JsonObject { ["value"] = node.Str("value") ?? "" });
+
+    private CheckBox BuildToggle(NatuiNode node)
+    {
+        // CheckBox is the closest native analogue of SwiftUI's macOS checkbox
+        // Toggle (label on the trailing side, compact).
+        var box = new CheckBox { MinWidth = 0 };
+        box.Checked += (_, _) => OnToggle(node, true);
+        box.Unchecked += (_, _) => OnToggle(node, false);
+        return box;
+    }
+
+    private void OnToggle(NatuiNode node, bool value)
+    {
+        if (_applyingRemote > 0) return;
+        if (value == (Json.Bool(node.Props, "value") ?? false)) return;
+        node.Props["value"] = value;
+        node.LastSentSeq++;
+        Ipc.Event(node.Id, "change", new JsonObject { ["value"] = value }, node.LastSentSeq);
+    }
+
+    private Slider BuildSlider(NatuiNode node)
+    {
+        var slider = new Slider();
+        slider.ValueChanged += (_, e) =>
+        {
+            if (_applyingRemote > 0) return;
+            if (e.NewValue == (node.Num("value") ?? 0)) return;
+            node.Props["value"] = e.NewValue;
+            node.LastSentSeq++;
+            Ipc.Event(node.Id, "change", new JsonObject { ["value"] = e.NewValue }, node.LastSentSeq);
+        };
+        return slider;
+    }
+
+    private ComboBox BuildPicker(NatuiNode node)
+    {
+        var combo = new ComboBox();
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (_applyingRemote > 0) return;
+            var value = (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+            if (value == (node.Str("value") ?? "")) return;
+            node.Props["value"] = value;
+            node.LastSentSeq++;
+            Ipc.Event(node.Id, "change", new JsonObject { ["value"] = value }, node.LastSentSeq);
+        };
+        return combo;
+    }
+
+    private static ScrollViewer BuildScrollView(NatuiNode node)
+    {
+        var viewer = new ScrollViewer();
+        ConfigureScrollAxis(viewer, node);
+        return viewer;
+    }
+
+    private static void ConfigureScrollAxis(ScrollViewer viewer, NatuiNode node)
+    {
+        var horizontal = node.Str("axis") == "horizontal";
+        if (viewer.Content is not NatuiStack stack
+            || (stack.Orientation == Orientation.Horizontal) != horizontal)
+        {
+            var previous = viewer.Content as NatuiStack;
+            stack = new NatuiStack
+            {
+                Orientation = horizontal ? Orientation.Horizontal : Orientation.Vertical,
+                // Mirrors the Swift host's wrapper stacks: VStack(.leading)
+                // for vertical scrolling, HStack (center) for horizontal.
+                CrossAlignment = horizontal ? null : "leading",
+            };
+            if (previous is not null)
+            {
+                var moved = previous.Children.ToList();
+                previous.Children.Clear();
+                foreach (var child in moved) stack.Children.Add(child);
+            }
+            viewer.Content = stack;
+            stack.RebuildLayout();
+        }
+        viewer.HorizontalScrollBarVisibility =
+            horizontal ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+        viewer.HorizontalScrollMode = horizontal ? ScrollMode.Enabled : ScrollMode.Disabled;
+        viewer.VerticalScrollBarVisibility =
+            horizontal ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
+        viewer.VerticalScrollMode = horizontal ? ScrollMode.Disabled : ScrollMode.Enabled;
+    }
+
+    private static ListView BuildList()
+    {
+        var list = new ListView { SelectionMode = ListViewSelectionMode.None };
+        // Rows must span the full list width or Spacer children collapse
+        // (the default item container left-aligns its content).
+        var itemStyle = new Style(typeof(ListViewItem));
+        itemStyle.Setters.Add(new Setter(
+            Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        list.ItemContainerStyle = itemStyle;
+        return list;
+    }
+
+    private static FontFamily IconFontFamily()
+    {
+        try
+        {
+            if (Application.Current.Resources["SymbolThemeFontFamily"] is FontFamily family)
+            {
+                return family;
+            }
+        }
+        catch (Exception)
+        {
+            // Resource lookup throws on a missing key; fall through.
+        }
+        return new FontFamily("Segoe MDL2 Assets");
+    }
+
+    // -- attach / detach ----------------------------------------------------------
+
+    public void AttachVisual(int parentId, NatuiNode? parent, NatuiNode child, int index)
+    {
+        if (parent is not null && LabelKinds.Contains(parent.Kind))
+        {
+            RefreshLabel(parent);
+            return;
+        }
+        if (!IsAttachable(parentId, child)) return;
+        var element = EnsureElement(child);
+        switch (ParentSurface(parentId, parent))
+        {
+            case NatuiStack stack:
+                stack.Children.Insert(index, element);
+                stack.RebuildLayout();
+                break;
+            case Panel panel: // ZStack: overlapping children, no tracks
+                panel.Children.Insert(index, element);
+                break;
+            case ListView list:
+                list.Items.Insert(index, element);
+                break;
+            case null:
+                // Parent kind cannot hold visual children; the Swift host
+                // silently ignores them too.
+                break;
+        }
+    }
+
+    public void DetachVisual(int parentId, NatuiNode? parent, NatuiNode child)
+    {
+        if (parent is not null && LabelKinds.Contains(parent.Kind))
+        {
+            RefreshLabel(parent);
+            return;
+        }
+        if (child.Element is not { } element) return;
+        switch (ParentSurface(parentId, parent))
+        {
+            case NatuiStack stack:
+                stack.Children.Remove(element);
+                stack.RebuildLayout();
+                break;
+            case Panel panel:
+                panel.Children.Remove(element);
+                break;
+            case ListView list:
+                list.Items.Remove(element);
+                break;
+        }
+    }
+
+    /// <summary>The object that holds a parent's visual children, if any.</summary>
+    private object? ParentSurface(int parentId, NatuiNode? parent)
+    {
+        if (parentId == NodeStore.RootId) return RootStack;
+        return parent?.Element switch
+        {
+            NatuiStack stack => stack,
+            ListView list => list,
+            ScrollViewer viewer => viewer.Content as NatuiStack,
+            // parent is provably non-null here (its Element just matched),
+            // but the flow analysis cannot see through the switch target.
+            Grid grid when parent!.Kind == "ZStack" => grid,
+            _ => null,
+        };
+    }
+
+    public void ClearRoot()
+    {
+        RootStack.Children.Clear();
+        RootStack.RebuildLayout();
+    }
+
+    // -- labels -------------------------------------------------------------------
+
+    /// <summary>
+    /// WinUI is retained, not reactive: when #text children change, the parent
+    /// Text/Button/Toggle must recompute its label by hand.
+    /// </summary>
+    public void TextChanged(NatuiNode textNode, NatuiNode? parent)
+    {
+        if (textNode.Label is { } label) label.Text = textNode.Text; // root-attached raw text
+        if (parent is not null && LabelKinds.Contains(parent.Kind)) RefreshLabel(parent);
+    }
+
+    private void RefreshLabel(NatuiNode node)
+    {
+        _applyingRemote++;
+        try
+        {
+            switch (node.Element)
+            {
+                case Border when node.Label is { } label:
+                    label.Text = node.JoinedText();
+                    break;
+                case ContentControl control: // Button, CheckBox
+                    RefreshContent(control, node);
+                    break;
+            }
+        }
+        finally
+        {
+            _applyingRemote--;
+        }
+    }
+
+    private void RefreshContent(ContentControl control, NatuiNode node)
+    {
+        // Drop whatever we parented last time so elements can be re-added.
+        if (control.Content is Panel wrapper) wrapper.Children.Clear();
+        control.Content = null;
+
+        var elements = node.Children.Where(c => c.Kind != "#text").ToList();
+        if (elements.Count == 0)
+        {
+            control.Content = node.JoinedText();
+        }
+        else if (elements.Count == 1)
+        {
+            control.Content = EnsureElement(elements[0]);
+        }
+        else
+        {
+            var stack = new NatuiStack { Orientation = Orientation.Horizontal, Spacing = 4 };
+            foreach (var child in elements) stack.Children.Add(EnsureElement(child));
+            stack.RebuildLayout();
+            control.Content = stack;
+        }
+    }
+
+    // -- prop application ------------------------------------------------------------
+
+    public void ApplyProps(NatuiNode node)
+    {
+        if (node.Element is not { } element) return;
+        _applyingRemote++;
+        try
+        {
+            ApplyKindProps(node, element);
+            ApplyCommonProps(node, element);
+        }
+        finally
+        {
+            _applyingRemote--;
+        }
+        // Frame stretch, spacing, or spacer changes affect the parent's tracks.
+        if (element.Parent is NatuiStack parent) parent.RebuildLayout();
+    }
+
+    private void ApplyKindProps(NatuiNode node, FrameworkElement element)
+    {
+        switch (node.Kind)
+        {
+            case "VStack" or "HStack":
+            {
+                var stack = (NatuiStack)element;
+                // SwiftUI's default (nil) stack spacing is about 8pt.
+                stack.Spacing = node.Num("spacing") ?? 8;
+                stack.CrossAlignment = node.Str("alignment");
+                stack.RebuildLayout();
+                break;
+            }
+            case "Text" or "#text":
+                ApplyTextProps(node);
+                break;
+            case "Button":
+                ApplyButtonProps(node, (Button)element);
+                break;
+            case "TextField":
+                switch (element)
+                {
+                    case TextBox box:
+                    {
+                        box.PlaceholderText = node.Str("placeholder") ?? "";
+                        var value = node.Str("value") ?? "";
+                        if (box.Text != value) box.Text = value;
+                        break;
+                    }
+                    case PasswordBox box:
+                    {
+                        box.PlaceholderText = node.Str("placeholder") ?? "";
+                        var value = node.Str("value") ?? "";
+                        if (box.Password != value) box.Password = value;
+                        break;
+                    }
+                }
+                break;
+            case "Toggle":
+                ((CheckBox)element).IsChecked = Json.Bool(node.Props, "value") ?? false;
+                break;
+            case "Slider":
+            {
+                var slider = (Slider)element;
+                var min = node.Num("min") ?? 0;
+                var max = Math.Max(node.Num("max") ?? 1, min + 0.001);
+                slider.Minimum = min;
+                slider.Maximum = max;
+                // WinUI's default StepFrequency is 1, which would quantize a
+                // 0..1 slider to its endpoints.
+                var step = node.Num("step");
+                slider.StepFrequency = step > 0 ? step!.Value : 0.0001;
+                var value = node.Num("value") ?? 0;
+                if (slider.Value != value) slider.Value = value;
+                break;
+            }
+            case "Picker":
+                ApplyPickerProps(node, (ComboBox)element);
+                break;
+            case "ScrollView":
+                ConfigureScrollAxis((ScrollViewer)element, node);
+                break;
+            case "Image":
+            {
+                var icon = (FontIcon)element;
+                icon.Glyph = GlyphFor(node.Str("systemName"));
+                icon.FontSize = node.Num("size") ?? 15;
+                break;
+            }
+            case "ProgressView":
+                ApplyProgressProps(node, (Grid)element);
+                break;
+        }
+    }
+
+    private void ApplyTextProps(NatuiNode node)
+    {
+        var label = node.Label!;
+        label.Text = node.Kind == "#text" ? node.Text : node.JoinedText();
+
+        var (fontSize, fontWeight) = node.Str("font") switch
+        {
+            "largeTitle" => (28.0, (FontWeight?)FontWeights.SemiBold),
+            "title" => (22.0, (FontWeight?)null),
+            "title2" => (18.0, (FontWeight?)null),
+            "title3" => (16.0, (FontWeight?)null),
+            "headline" => (14.0, (FontWeight?)FontWeights.SemiBold),
+            "callout" => (13.0, (FontWeight?)null),
+            "caption" => (12.0, (FontWeight?)null),
+            _ => (14.0, (FontWeight?)null), // body / default
+        };
+        label.FontSize = node.Num("size") ?? fontSize;
+
+        var weight = node.Str("weight") switch
+        {
+            "regular" => (FontWeight?)FontWeights.Normal,
+            "medium" => FontWeights.Medium,
+            "semibold" => FontWeights.SemiBold,
+            "bold" => FontWeights.Bold,
+            _ => null,
+        } ?? fontWeight;
+        label.FontWeight = weight ?? FontWeights.Normal;
+
+        label.FontStyle = node.Flag("italic")
+            ? Windows.UI.Text.FontStyle.Italic
+            : Windows.UI.Text.FontStyle.Normal;
+        label.TextDecorations = node.Flag("strikethrough")
+            ? Windows.UI.Text.TextDecorations.Strikethrough
+            : Windows.UI.Text.TextDecorations.None;
+
+        if (node.Flag("monospaced")) label.FontFamily = new FontFamily("Consolas");
+        else label.ClearValue(TextBlock.FontFamilyProperty);
+
+        label.MaxLines = node.Num("lineLimit") is { } limit ? (int)limit : 0;
+    }
+
+    private static void ApplyButtonProps(NatuiNode node, Button button)
+    {
+        if (node.Str("variant") == "prominent" && AccentButtonStyle() is { } accent)
+        {
+            button.Style = accent;
+        }
+        else
+        {
+            // Back to the implicit default style (bordered/plain/link render
+            // as standard buttons for now).
+            button.ClearValue(FrameworkElement.StyleProperty);
+        }
+    }
+
+    private static Style? AccentButtonStyle()
+    {
+        try
+        {
+            return Application.Current.Resources["AccentButtonStyle"] as Style;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static void ApplyPickerProps(NatuiNode node, ComboBox combo)
+    {
+        combo.Header = node.Str("label");
+        // Rebuilding fires SelectionChanged; the _applyingRemote guard active
+        // in ApplyProps keeps it silent.
+        combo.Items.Clear();
+        var value = node.Str("value") ?? "";
+        var selectedIndex = -1;
+        var options = Json.Arr(node.Props, "options") ?? [];
+        for (var i = 0; i < options.Count; i++)
+        {
+            var option = options[i] as JsonObject;
+            var optionValue = Json.Str(option, "value") ?? "";
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = Json.Str(option, "label") ?? "",
+                Tag = optionValue,
+            });
+            if (optionValue == value) selectedIndex = i;
+        }
+        combo.SelectedIndex = selectedIndex;
+    }
+
+    private static void ApplyProgressProps(NatuiNode node, Grid container)
+    {
+        if (node.Num("value") is { } value)
+        {
+            if (container.Children.Count != 1 || container.Children[0] is not ProgressBar bar)
+            {
+                container.Children.Clear();
+                bar = new ProgressBar();
+                container.Children.Add(bar);
+            }
+            bar.Minimum = 0;
+            bar.Maximum = 1;
+            bar.Value = Math.Clamp(value, 0, 1);
+        }
+        else
+        {
+            if (container.Children.Count != 1 || container.Children[0] is not ProgressRing ring)
+            {
+                container.Children.Clear();
+                ring = new ProgressRing();
+                container.Children.Add(ring);
+            }
+            ring.IsActive = true;
+        }
+    }
+
+    // -- common props ----------------------------------------------------------------
+
+    private void ApplyCommonProps(NatuiNode node, FrameworkElement element)
+    {
+        ApplyPadding(element, ParsePadding(node));
+        ApplyBackground(element, BrushFromHex(node.Str("background")));
+        ApplyCornerRadius(element, node.Num("cornerRadius"));
+        ApplyFrame(node, element);
+        element.Opacity = node.Num("opacity") ?? 1.0;
+        element.Visibility = node.Flag("hidden") ? Visibility.Collapsed : Visibility.Visible;
+        if (element is Control control) control.IsEnabled = !node.Flag("disabled");
+        ApplyForeground(node, element);
+        ToolTipService.SetToolTip(element, node.Str("help"));
+    }
+
+    private static Thickness? ParsePadding(NatuiNode node)
+    {
+        if (node.Num("padding") is { } all) return new Thickness(all);
+        if (Json.Obj(node.Props, "padding") is { } sides)
+        {
+            return new Thickness(
+                Json.Num(sides, "leading") ?? 0,
+                Json.Num(sides, "top") ?? 0,
+                Json.Num(sides, "trailing") ?? 0,
+                Json.Num(sides, "bottom") ?? 0);
+        }
+        return null;
+    }
+
+    private static void ApplyPadding(FrameworkElement element, Thickness? padding)
+    {
+        // ClearValue rather than writing zero when absent: controls carry
+        // themed default padding a plain assignment would destroy.
+        var property = element switch
+        {
+            Control => Control.PaddingProperty,
+            Border => Border.PaddingProperty,
+            Grid => Grid.PaddingProperty,
+            TextBlock => TextBlock.PaddingProperty,
+            _ => null,
+        };
+        if (property is null) return;
+        if (padding is { } value) element.SetValue(property, value);
+        else element.ClearValue(property);
+    }
+
+    private static void ApplyBackground(FrameworkElement element, Brush? brush)
+    {
+        var property = element switch
+        {
+            Control => Control.BackgroundProperty,
+            Panel => Panel.BackgroundProperty,
+            Border => Border.BackgroundProperty,
+            _ => null,
+        };
+        if (property is null) return;
+        // The Divider's subtle line color is its Background; never clear it.
+        if (brush is null && (element.Tag as NatuiNode)?.Kind == "Divider") return;
+        if (brush is not null) element.SetValue(property, brush);
+        else element.ClearValue(property);
+    }
+
+    private static void ApplyCornerRadius(FrameworkElement element, double? radius)
+    {
+        var property = element switch
+        {
+            Control => Control.CornerRadiusProperty,
+            Grid => Grid.CornerRadiusProperty,
+            Border => Border.CornerRadiusProperty,
+            _ => null,
+        };
+        if (property is null) return;
+        if (radius is { } r) element.SetValue(property, new CornerRadius(r));
+        else element.ClearValue(property);
+    }
+
+    private static void ApplyFrame(NatuiNode node, FrameworkElement element)
+    {
+        var frame = Json.Obj(node.Props, "frame");
+        element.Width = Json.Num(frame, "width") ?? double.NaN;
+        element.Height = Json.Num(frame, "height") ?? double.NaN;
+        element.MinWidth = Json.Num(frame, "minWidth") ?? 0;
+        element.MinHeight = Json.Num(frame, "minHeight") ?? 0;
+        // "infinity" means greedy on that axis; the parent NatuiStack turns
+        // StretchH/StretchV into stretch alignment and star tracks. For other
+        // parents (ZStack, ListView rows) the default Stretch alignment
+        // already fills.
+        node.StretchH = Json.Str(frame, "maxWidth") == "infinity";
+        element.MaxWidth = node.StretchH
+            ? double.PositiveInfinity
+            : Json.Num(frame, "maxWidth") ?? double.PositiveInfinity;
+        node.StretchV = Json.Str(frame, "maxHeight") == "infinity";
+        element.MaxHeight = node.StretchV
+            ? double.PositiveInfinity
+            : Json.Num(frame, "maxHeight") ?? double.PositiveInfinity;
+    }
+
+    private static void ApplyForeground(NatuiNode node, FrameworkElement element)
+    {
+        var brush = BrushFromHex(node.Str("color")) ?? DefaultForeground(node);
+        switch (element)
+        {
+            case Border when node.Label is { } label:
+                if (brush is not null) label.Foreground = brush;
+                else label.ClearValue(TextBlock.ForegroundProperty);
+                break;
+            case FontIcon icon:
+                if (brush is not null) icon.Foreground = brush;
+                else icon.ClearValue(IconElement.ForegroundProperty);
+                break;
+            case Control control:
+                if (brush is not null) control.Foreground = brush;
+                else control.ClearValue(Control.ForegroundProperty);
+                break;
+        }
+    }
+
+    private static Brush? DefaultForeground(NatuiNode node) => node.Kind switch
+    {
+        // Caption text is secondary-colored, like SwiftUI's .caption.
+        "Text" or "#text" when node.Str("font") == "caption" => SecondaryTextBrush(),
+        // The system critical red, close to WinUI's destructive accents.
+        "Button" when node.Str("role") == "destructive" =>
+            new SolidColorBrush(Color.FromArgb(0xFF, 0xC4, 0x2B, 0x1C)),
+        _ => null,
+    };
+
+    private static Brush SecondaryTextBrush()
+    {
+        try
+        {
+            if (Application.Current.Resources["TextFillColorSecondaryBrush"] is Brush brush)
+            {
+                return brush;
+            }
+        }
+        catch (Exception)
+        {
+            // Resource lookup throws on a missing key; fall through.
+        }
+        return new SolidColorBrush(Color.FromArgb(0xFF, 0x6E, 0x6E, 0x6E));
+    }
+
+    /// <summary>
+    /// Protocol colors are #RRGGBB or #RRGGBBAA with alpha LAST, unlike
+    /// WinUI's #AARRGGBB convention. Do not reorder.
+    /// </summary>
+    private static Brush? BrushFromHex(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return null;
+        var s = hex.Trim().TrimStart('#');
+        try
+        {
+            byte r, g, b;
+            var a = (byte)0xFF;
+            switch (s.Length)
+            {
+                case 6:
+                    r = Convert.ToByte(s[..2], 16);
+                    g = Convert.ToByte(s.Substring(2, 2), 16);
+                    b = Convert.ToByte(s.Substring(4, 2), 16);
+                    break;
+                case 8:
+                    r = Convert.ToByte(s[..2], 16);
+                    g = Convert.ToByte(s.Substring(2, 2), 16);
+                    b = Convert.ToByte(s.Substring(4, 2), 16);
+                    a = Convert.ToByte(s.Substring(6, 2), 16);
+                    break;
+                default:
+                    return null;
+            }
+            return new SolidColorBrush(Color.FromArgb(a, r, g, b));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    // -- icons -------------------------------------------------------------------------
+
+    // SF Symbols names to Segoe Fluent Icons glyphs (shared with MDL2 Assets).
+    private static readonly Dictionary<string, string> Glyphs = new()
+    {
+        ["trash"] = "\uE74D",
+        ["plus"] = "\uE710",
+        ["minus"] = "\uE738",
+        ["speaker.wave.2"] = "\uE767",
+        ["checkmark"] = "\uE73E",
+        ["xmark"] = "\uE711",
+        ["gear"] = "\uE713",
+        ["magnifyingglass"] = "\uE721",
+        ["star"] = "\uE734",
+        ["heart"] = "\uEB51",
+    };
+
+    private static string GlyphFor(string? systemName) =>
+        systemName is not null && Glyphs.TryGetValue(systemName, out var glyph)
+            ? glyph
+            : "\uE9CE"; // circled question mark
+}
