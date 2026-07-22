@@ -75,12 +75,13 @@ pnpm test && pnpm typecheck && pnpm build
 ## Windows
 
 `hosts/windows/NatuiHost` implements the same protocol as a WinUI 3 unpackaged
-self-contained app. It was written on macOS and needs a first compile pass on a
-Windows machine, see `hosts/windows/NatuiHost/README.md`.
+self-contained app, verified end to end on Windows 11 (.NET 8 SDK required),
+see `hosts/windows/NatuiHost/README.md`.
 
 ```powershell
 dotnet build hosts/windows/NatuiHost -p:Platform=x64
-pnpm demo   # locate.ts finds the exe; or set NATUI_HOST
+pnpm demo     # locate.ts finds the exe; or set NATUI_HOST
+pnpm verify   # same E2E suite as macOS, against the real WinUI 3 window
 ```
 
 ## Components (POC set)
@@ -114,16 +115,17 @@ pnpm verify:embedded
 ## Status
 
 Experimental proof of concept. What the automated checks demonstrate today, on
-macOS: 31 contract/unit tests cover the reconciler-host op semantics (keyed
+macOS: 34 contract/unit tests cover the reconciler-host op semantics (keyed
 moves, seq/ack echo suppression, controlled-value enforcement for every input
 kind including Slider, prop validation, startup handshake, screenshot
 failure/timeout handling), and two end-to-end suites drive the real SwiftUI
 window, one in Node dev mode and one in embedded-JSC single-process mode, both
 asserting against native tree dumps and validating the PNGs they capture; the
 embedded suite additionally pins the native seq/ack contract deterministically
-by injecting stale and current acks over the wire. The
-Windows host is written to the same protocol but has not yet been compiled on a
-Windows machine; treat it as unverified source. See
+by injecting stale and current acks over the wire. On Windows, the contract
+tests and the Node-mode E2E suite pass against the real WinUI 3 window
+(screenshots in `screenshots/windows/`); embedded single-process mode remains
+macOS-only for now. See
 [docs/architecture.md](docs/architecture.md) for the staged packaging path
 (bun sidecar, then in-process JavaScriptCore / Hermes).
 

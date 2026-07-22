@@ -4,9 +4,11 @@ Native Windows host for the natui wire protocol v1 (see `docs/protocol.md`).
 It is the WinUI 3 counterpart of `hosts/macos`: the JS renderer spawns this
 exe, writes NDJSON ops to its stdin, and reads events from its stdout.
 
-Important: this host was written on macOS and has never been compiled or run.
-The protocol logic mirrors the Swift host closely, but expect a short
-touch-up pass on a Windows machine (see the checklist at the bottom).
+Status: compiled and verified on Windows 11 (WASDK 1.7, .NET SDK 9 building
+net8.0-windows). The full E2E suite (`pnpm verify`) passes against the real
+WinUI 3 window: tree dumps, button presses, optimistic edits with native
+seq/ack, screenshots, and the controlled-input stress phase. See "First
+Windows compile: findings" at the bottom for what the initial pass fixed.
 
 ## Layout
 
@@ -26,6 +28,10 @@ Segoe Fluent Icons font). No Visual Studio needed:
 cd hosts\windows\NatuiHost
 dotnet build
 ```
+
+The local `NuGet.config` pins nuget.org as a package source: machines that
+only have the "Microsoft Visual Studio Offline Packages" feed configured
+cannot restore the WASDK packages without it.
 
 The project is unpackaged (`WindowsPackageType=None`) and self-contained
 (`WindowsAppSDKSelfContained` + `SelfContained`), so the output exe runs with
@@ -158,44 +164,47 @@ redirected): the protocol channel only exists when stdin/stdout are pipes.
 - Stack `spacing` defaults to 8 when the prop is absent, approximating
   SwiftUI's default stack spacing.
 
-## Checklist for the first Windows compile
+## First Windows compile: findings
 
-Things most likely to need touch-up, in rough order of suspicion:
+What the first pass on a real Windows machine actually had to fix
+(2026-07). The protocol logic itself needed no changes; every issue was
+XAML/tooling bootstrap:
 
-1. csproj shape: `Microsoft.WindowsAppSDK 1.7.*` + `WindowsPackageType=None`
-   + self-contained flags. If startup dies with REGDB_E_CLASSNOTREG, check
-   that the WASDK payload sits next to the exe.
-2. `XamlControlsResources` added in the App constructor (code-only app). If
-   controls render unstyled or throw on template application, this is it.
-3. `Application.DispatcherShutdownMode = OnExplicitShutdown` in the App
-   constructor: verify the property exists at that point (it is settable on
-   Application in WASDK 1.4+).
-4. `AppWindow.ResizeClient` + `XamlRoot.RasterizationScale` DPI math in
-   `Router.ConfigureWindow`, and `DisplayArea`-based centering.
-5. `RenderTargetBitmap`/`BitmapEncoder` screenshot path in an unpackaged app,
-   including the `DataReader` buffer copies.
-6. Theme resource lookups by string key: `AccentButtonStyle`,
-   `TextFillColorSecondaryBrush`, `SymbolThemeFontFamily`,
-   `ApplicationPageBackgroundThemeBrush`. All are wrapped in try/catch with
-   fallbacks, but confirm the keys resolve.
-7. Echo suppression under fast typing: type quickly in the demo TextField and
-   confirm no character loss or caret jumps (exercises seq/ack plus the
-   TextChanged double-guard).
-8. `NatuiStack` layout against the macOS screenshots: Spacer pushing content,
-   the Slider row filling the window width, ListView rows stretching
-   (ItemContainerStyle), Divider hairlines.
-9. The frame-shell layout pass (`EnsureElement`'s Border wrapper +
-   `SyncInnerAlignment`): backgrounds hugging padded content inside a larger
-   frame, VStack children centered by default (leading at the root), mixed
-   Button labels (icon + text) in order, list rows lead-aligned.
-10. `OverlappedPresenter.PreferredMinimumWidth/Height` in
-    `Router.ConfigureWindow`: confirm the members exist in the resolved WASDK
-    1.7 build and that the physical-pixel scaling feels right when resizing
-    below `minWidth`/`minHeight`.
-11. The `edit` debug round trip: send `{"t":"edit","id":n,"value":"x"}` to a
-    TextField node and confirm one `change` event with a `seq`, the control
-    repainting, and no echo loop.
-12. Segoe Fluent glyph codepoints in `NodeMapper.Glyphs` render as intended
-    (they are shared with Segoe MDL2 Assets for Windows 10).
-13. Stdout handshake: `{"t":"ready","platform":"windows","protocol":1}` must
-    be the first bytes on stdout, no BOM, LF line endings.
+1. Two compile errors: `Application.Start(_ => { _ = new App(); })` assigns
+   to the lambda *parameter* named `_` (CS0029), and `Colors.Red` needed the
+   `Microsoft.UI.Colors` qualifier.
+2. `Application.Resources` and `DispatcherShutdownMode` are NOT usable in the
+   App constructor of a code-only app: the underlying COM object finishes
+   initializing only after `Application.Start`'s callback returns, and
+   touching them earlier throws E_UNEXPECTED (0x8000FFFF) as a silent
+   0xC000027B stowed-exception crash. Both moved to `OnLaunched`.
+3. A code-only project generates no `resources.pri`, and the WASDK
+   self-contained targets deliberately do not copy the framework's own
+   (`Microsoft.WindowsAppSDK.SelfContained.targets` deletes it). Without one,
+   every `ms-appx:///` lookup fails and `XamlControlsResources` throws
+   "Cannot locate resource from
+   'ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml'". Fixed with
+   `<AppxGeneratePriEnabled>true</AppxGeneratePriEnabled>` in the csproj
+   (PRI generation is otherwise skipped for projects with no XAML items).
+4. The App class must implement `IXamlMetadataProvider` (delegating to
+   `XamlControlsXamlMetaDataProvider`): the XAML compiler normally generates
+   this from App.xaml, and without it `XamlControlsResources` activation
+   fails with "Cannot find a resource with the given key:
+   AcrylicBackgroundFillColorDefaultBrush".
+5. Unhandled-exception hooks (AppDomain + `Application.UnhandledException`)
+   now route startup failures to stderr; a WinExe otherwise dies invisibly
+   with exit code 0xC000027B and nothing in the event log.
+6. `atom` (the demo's logo) has no Segoe Fluent Icons counterpart; mapped to
+   E950 "Component". The other glyph codepoints render as intended.
+
+Verified working, via `pnpm verify` (full E2E against the real window) plus
+manual passes: the stdout handshake (first bytes, no BOM, LF endings), the
+`edit`/`emit`/`dump` debug round trips, native seq/ack echo suppression and
+enforcement under the stress phase, `RenderTargetBitmap` screenshots (and the
+error reply on an unwritable path), DPI-scaled `ResizeClient` + centering,
+Spacer/star-track layout, ListView row stretching, Divider hairlines, and
+theme resource lookups by string key.
+
+`smoke.mjs` in this directory is a dependency-free host-only check
+(handshake, one commit, dump, screenshot, quit) that is handy when the host
+dies before the JS renderer sees it: `node smoke.mjs` after a debug build.

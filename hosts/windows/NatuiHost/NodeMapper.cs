@@ -247,7 +247,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         _ => new TextBlock
         {
             Text = $"unknown kind: {node.Kind}",
-            Foreground = new SolidColorBrush(Colors.Red),
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red),
         },
     };
 
@@ -992,6 +992,8 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     // SF Symbols names to Segoe Fluent Icons glyphs (shared with MDL2 Assets).
     private static readonly Dictionary<string, string> Glyphs = new()
     {
+        // Segoe has no atom glyph; Component (a chip) is the stand-in.
+        ["atom"] = "\uE950",
         ["trash"] = "\uE74D",
         ["plus"] = "\uE710",
         ["minus"] = "\uE738",

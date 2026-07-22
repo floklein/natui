@@ -25,6 +25,12 @@
     <!-- We provide our own Main (Program.cs); no XAML-generated entry point. -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- A code-only project has no Page/PriResource items, so the WASDK
+         targets skip PRI generation by default. Force it: without a merged
+         resources.pri next to the exe, ms-appx resource resolution fails at
+         runtime and XamlControlsResources throws "Cannot locate resource
+         from 'ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml'". -->
+    <AppxGeneratePriEnabled>true</AppxGeneratePriEnabled>
   </PropertyGroup>
 
   <ItemGroup>

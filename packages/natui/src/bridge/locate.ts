@@ -20,6 +20,7 @@ export function defaultHostCommand(): HostCommand {
       : process.platform === 'win32'
         ? [
             'hosts/windows/NatuiHost/bin/Release/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
+            'hosts/windows/NatuiHost/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
             'hosts/windows/NatuiHost/bin/Debug/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
             'hosts/windows/NatuiHost/bin/x64/Debug/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
           ]

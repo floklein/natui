@@ -6,6 +6,7 @@
  * Run: pnpm dev:watch
  */
 import { watch } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { run } from 'natui';
 import { App } from './App.js';
@@ -20,12 +21,13 @@ const app = await run(<App />, {
 
 console.error('[dev] mounted; watching for changes…');
 
-const srcDir = new URL('.', import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: the latter yields "/C:/…" on Windows.
+const srcDir = fileURLToPath(new URL('.', import.meta.url));
 let generation = 0;
 let reloading = false;
 
 watch(srcDir, { recursive: true }, (_event, filename) => {
-  if (!filename || !/\.(tsx?|jsx?)$/.test(filename) || /(^|\/)(dev|verify)\.tsx$/.test(filename)) return;
+  if (!filename || !/\.(tsx?|jsx?)$/.test(filename) || /(^|[\\/])(dev|verify)\.tsx$/.test(filename)) return;
   if (reloading) return;
   reloading = true;
   // fs.watch fires in bursts while editors write; coalesce.

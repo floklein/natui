@@ -5,8 +5,10 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.XamlTypeInfo;
 using Windows.Graphics;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
@@ -18,38 +20,71 @@ public static class Program
     [STAThread]
     public static void Main()
     {
+        // Startup failures in a WinExe are invisible by default (no console,
+        // exit code 0xC000027B); route them to stderr like all diagnostics.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            Ipc.Log($"unhandled: {e.ExceptionObject}");
         WinRT.ComWrappersSupport.InitializeComWrappers();
-        Application.Start(_ =>
+        Application.Start(p =>
         {
-            // Awaits on the UI thread (screenshot encoding) must resume on the
-            // UI thread; this context routes continuations via the dispatcher.
-            var context = new DispatcherQueueSynchronizationContext(
-                DispatcherQueue.GetForCurrentThread());
-            SynchronizationContext.SetSynchronizationContext(context);
-            _ = new App();
+            try
+            {
+                // Awaits on the UI thread (screenshot encoding) must resume on
+                // the UI thread; this context routes continuations via the
+                // dispatcher.
+                var context = new DispatcherQueueSynchronizationContext(
+                    DispatcherQueue.GetForCurrentThread());
+                SynchronizationContext.SetSynchronizationContext(context);
+                _ = new App();
+            }
+            catch (Exception ex)
+            {
+                Ipc.Log($"start callback failed: {ex}");
+                throw;
+            }
         });
     }
 }
 
-public sealed class App : Application
+public sealed class App : Application, IXamlMetadataProvider
 {
     private Window? _window;
     private Router? _router;
     private bool _quitting;
 
+    // Code-only app: the XAML compiler normally generates this metadata
+    // provider plumbing from App.xaml. Without it, parsing WinUI's own
+    // resource dictionaries fails (XamlControlsResources throws "Cannot find
+    // a resource with the given key" during activation, because the runtime
+    // QIs the Application object for IXamlMetadataProvider to resolve types).
+    private readonly XamlControlsXamlMetaDataProvider _xamlMetadata = new();
+
+    public IXamlType GetXamlType(Type type) => _xamlMetadata.GetXamlType(type);
+
+    public IXamlType GetXamlType(string fullName) => _xamlMetadata.GetXamlType(fullName);
+
+    public XmlnsDefinition[] GetXmlnsDefinitions() => _xamlMetadata.GetXmlnsDefinitions();
+
     public App()
     {
-        // Code-only app (no App.xaml): without XamlControlsResources every
-        // control template is missing and controls render blank or throw.
-        Resources.MergedDictionaries.Add(new XamlControlsResources());
-        // Keep running after the window closes; JS orchestrates shutdown via
-        // the quit message (mirrors the macOS host's
-        // applicationShouldTerminateAfterLastWindowClosed = false).
-        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
+        UnhandledException += (_, e) =>
+        {
+            Ipc.Log($"xaml unhandled: {e.Exception}");
+        };
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        // Application members (Resources, DispatcherShutdownMode) are not
+        // usable in the constructor of a code-only app: the underlying COM
+        // object finishes initializing only after Start's callback returns,
+        // and touching them earlier throws E_UNEXPECTED. OnLaunched is the
+        // first safe point.
+        // Keep running after the window closes; JS orchestrates shutdown via
+        // the quit message (mirrors the macOS host's
+        // applicationShouldTerminateAfterLastWindowClosed = false).
+        DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
+
         // Root container (node id 0): a vertical stack in a ScrollViewer.
         // Horizontally stretched so children see the window width, the way
         // SwiftUI proposes the full width down the tree; vertically top-hung.
@@ -74,6 +109,12 @@ public sealed class App : Application
         shell.Children.Add(rootStack);
 
         _window = new Window { Title = "natui" };
+        // Code-only app (no App.xaml): without XamlControlsResources every
+        // control template is missing and controls render blank or throw.
+        // Requires the IXamlMetadataProvider implementation above, and a
+        // resources.pri next to the exe (see AppxGeneratePriEnabled in the
+        // csproj); missing either one throws right here.
+        Resources.MergedDictionaries.Add(new XamlControlsResources());
         _window.Content = shell;
         _window.Closed += (_, _) =>
         {
