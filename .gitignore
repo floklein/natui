@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# Swift
+hosts/macos/.build/
+hosts/macos/.swiftpm/
+
+# .NET
+hosts/windows/**/bin/
+hosts/windows/**/obj/
+
+# scratch
+*.log
