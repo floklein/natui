@@ -89,11 +89,14 @@ export class Bridge {
     // Concurrent callers share one waiter (the first call's timeout applies).
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise((resolve, reject) => {
+      // Deliberately ref'd: the caller is awaiting this promise, and an
+      // unref'd timer would let the event loop drain with the promise
+      // forever pending. dispose()/the reply clears it, so it holds the
+      // process open for at most timeoutMs.
       const timer = setTimeout(() => {
         this.readyWaiter = null;
         reject(new Error(`natui: host did not send ready within ${timeoutMs}ms`));
       }, timeoutMs);
-      timer.unref?.();
       this.readyWaiter = { resolve, reject, timer, settled: false };
     });
     return this.readyPromise;
@@ -183,7 +186,9 @@ export class Bridge {
           );
         }, this.requestTimeoutMs),
       };
-      waiter.timer.unref?.();
+      // Deliberately ref'd (same as waitForReady): the caller awaits this
+      // promise, so the timer must be able to fire even when nothing else
+      // holds the event loop; settle/dispose clears it.
       list.push(waiter);
     });
   }
