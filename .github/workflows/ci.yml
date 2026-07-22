@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, claude/poc]
+  pull_request:
+
+jobs:
+  js:
+    name: JS tests, typecheck, package build (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm build
+
+  macos-host:
+    name: Swift host build + JS suite (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:host:macos
+      - run: pnpm test
+      - run: pnpm build
+      # The GUI end-to-end suites (pnpm verify / pnpm verify:embedded) need a
+      # real window session and run locally per README; CI stays headless.
+
+  windows-host:
+    # First-ever compile surface for the WinUI host: the C# source has never
+    # been built on Windows, so this job is allowed to fail without blocking
+    # the PR. A green run here is the signal to drop continue-on-error and
+    # the "unverified" label in hosts/windows/NatuiHost/README.md.
+    name: WinUI host compile (experimental)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64

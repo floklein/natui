@@ -13,7 +13,12 @@
 import type { ReactNode } from 'react';
 import { Bridge } from './bridge/bridge.js';
 import type { Transport } from './bridge/transport.js';
-import type { InboundMessage, OutboundMessage, WindowProps } from './protocol.js';
+import {
+  PROTOCOL_VERSION,
+  type InboundMessage,
+  type OutboundMessage,
+  type WindowProps,
+} from './protocol.js';
 import { createNatuiRenderer } from './reconciler/renderer.js';
 
 type SendFn = (line: string) => void;
@@ -68,20 +73,30 @@ class InProcTransport implements Transport {
 
 export type RunEmbeddedOptions = WindowProps;
 
+/** How long the embedding host may take to send `ready` after evaluation. */
+const EMBEDDED_READY_TIMEOUT_MS = 10_000;
+
 /** Render a React element inside an embedding native host. */
 export async function runEmbedded(
   element: ReactNode,
   options: RunEmbeddedOptions = {},
 ): Promise<void> {
   const transport = new InProcTransport();
-
-  await new Promise<void>((resolve) => {
-    transport.onMessage((msg) => {
-      if (msg.t === 'ready') resolve();
-    });
-  });
-
+  // The Bridge subscribes immediately, so no host message can be dropped
+  // between the handshake and regular operation.
   const bridge = new Bridge(transport);
+
+  const ready = await bridge.waitForReady(EMBEDDED_READY_TIMEOUT_MS);
+  if (ready.protocol !== PROTOCOL_VERSION) {
+    throw new Error(
+      `natui/inproc: embedding host speaks protocol v${ready.protocol} but this bundle ` +
+        `requires v${PROTOCOL_VERSION}; rebuild the host to match`,
+    );
+  }
+  if (ready.platform !== 'macos' && ready.platform !== 'windows') {
+    throw new Error(`natui/inproc: embedding host reported unknown platform "${ready.platform}"`);
+  }
+
   const renderer = createNatuiRenderer(bridge);
   bridge.onWindowClose(() => {
     renderer.unmount();

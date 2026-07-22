@@ -62,6 +62,12 @@ export type OutboundMessage =
   | { t: 'dump' }
   | { t: 'screenshot'; path: string }
   | { t: 'emit'; id: number; name: string; payload?: Record<string, PropValue> }
+  /**
+   * Debug: perform a real optimistic user edit on node `id`, through the same
+   * code path as a native control edit (local value write, seq increment,
+   * change event with seq). Unlike `emit`, this exercises seq/ack end to end.
+   */
+  | { t: 'edit'; id: number; value: PropValue }
   | { t: 'quit' };
 
 // ---------------------------------------------------------------------------
@@ -88,5 +94,5 @@ export type InboundMessage =
     }
   | { t: 'window'; name: 'close' }
   | { t: 'tree'; root: TreeNode }
-  | { t: 'shot'; path: string }
-  | { t: 'log'; level: 'info' | 'warn' | 'error'; message: string };
+  /** Reply to `screenshot`. `error` set (and no file written) on failure. */
+  | { t: 'shot'; path: string; error?: string };

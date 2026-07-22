@@ -63,7 +63,7 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
     // -- render phase -------------------------------------------------------
 
     createInstance(type, props, rootContainer) {
-      const { props: serialized, handlers } = serializeProps(props);
+      const { props: serialized, handlers } = serializeProps(props, type);
       return {
         id: rootContainer.nextId++,
         kind: type,
@@ -162,17 +162,20 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
 
     // -- commit phase: updates -----------------------------------------------
 
-    commitUpdate(instance, _type, _prevProps, nextProps) {
-      const { props, handlers } = serializeProps(nextProps);
+    commitUpdate(instance, type, _prevProps, nextProps) {
+      const { props, handlers } = serializeProps(nextProps, type);
       instance.handlers = handlers;
       if (!propsEqual(props, instance.props)) {
         instance.props = props;
         if (instance.created) {
           const ack = bridge.latestSeqFor(instance.id);
+          // A Suspense-hidden instance must stay hidden through updates;
+          // instance.props stays un-hidden so unhideInstance restores it.
+          const wireProps = instance.suspenseHidden ? { ...props, hidden: true } : props;
           bridge.push(
             ack === undefined
-              ? { op: 'update', id: instance.id, props }
-              : { op: 'update', id: instance.id, props, ack },
+              ? { op: 'update', id: instance.id, props: wireProps }
+              : { op: 'update', id: instance.id, props: wireProps, ack },
           );
         }
       }
@@ -181,7 +184,9 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
     commitTextUpdate(textInstance, _oldText, newText) {
       textInstance.text = newText;
       if (textInstance.created) {
-        bridge.push({ op: 'text', id: textInstance.id, text: newText });
+        // Same Suspense guard as commitUpdate: hidden text stays blank.
+        const wireText = textInstance.suspenseHidden ? '' : newText;
+        bridge.push({ op: 'text', id: textInstance.id, text: wireText });
       }
     },
 
@@ -190,6 +195,7 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
     resetTextContent() {},
 
     hideInstance(instance) {
+      instance.suspenseHidden = true;
       if (instance.created) {
         const ack = bridge.latestSeqFor(instance.id);
         const props = { ...instance.props, hidden: true };
@@ -202,6 +208,7 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
     },
 
     unhideInstance(instance) {
+      instance.suspenseHidden = false;
       if (instance.created) {
         const ack = bridge.latestSeqFor(instance.id);
         bridge.push(
@@ -213,12 +220,14 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
     },
 
     hideTextInstance(textInstance) {
+      textInstance.suspenseHidden = true;
       if (textInstance.created) {
         bridge.push({ op: 'text', id: textInstance.id, text: '' });
       }
     },
 
     unhideTextInstance(textInstance, text) {
+      textInstance.suspenseHidden = false;
       textInstance.text = text;
       if (textInstance.created) {
         bridge.push({ op: 'text', id: textInstance.id, text });

@@ -8,7 +8,9 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter natui test",
     "build:host:macos": "swift build -c release --package-path hosts/macos",
-    "demo": "pnpm --filter natui-demo dev"
+    "demo": "pnpm --filter natui build && pnpm --filter natui-demo dev",
+    "verify": "pnpm --filter natui build && pnpm --filter natui-demo verify",
+    "verify:embedded": "pnpm --filter natui build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

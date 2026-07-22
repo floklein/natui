@@ -1,15 +1,12 @@
 /**
- * End-to-end reconciler test against an in-memory reference host.
- * The MiniHost applies ops exactly as a native host must (same semantics as
- * the SwiftUI/WinUI hosts), so this validates the protocol contract itself.
+ * End-to-end reconciler tests against the in-memory reference host.
+ * The MiniHost (test/helpers.ts) applies ops exactly as a native host must,
+ * so this validates the protocol contract itself.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { useState } from 'react';
-import { Bridge } from '../src/bridge/bridge.js';
-import type { Transport } from '../src/bridge/transport.js';
-import type { InboundMessage, Op, OutboundMessage, SerializedProps } from '../src/protocol.js';
-import { createNatuiRenderer } from '../src/reconciler/renderer.js';
+import { createContext, useContext, useEffect, useState } from 'react';
+import type { Op } from '../src/protocol.js';
 import {
   Button,
   HStack,
@@ -22,180 +19,7 @@ import {
   VStack,
   ZStack,
 } from '../src/components.js';
-
-class FakeTransport implements Transport {
-  sent: OutboundMessage[] = [];
-  private cb: (msg: InboundMessage) => void = () => {};
-  send(msg: OutboundMessage): void {
-    this.sent.push(msg);
-  }
-  onMessage(cb: (msg: InboundMessage) => void): void {
-    this.cb = cb;
-  }
-  onExit(): void {}
-  close(): void {}
-  emit(msg: InboundMessage): void {
-    this.cb(msg);
-  }
-}
-
-interface MiniNode {
-  id: number;
-  kind: string;
-  props: SerializedProps;
-  text?: string;
-  children: number[];
-  /** Host-local optimistic edit counter (see protocol seq/ack). */
-  lastSentSeq: number;
-}
-
-/** Reference implementation of the host-side op semantics. */
-class MiniHost {
-  nodes = new Map<number, MiniNode>();
-  parents = new Map<number, number>();
-
-  constructor(private transport: FakeTransport) {
-    this.nodes.set(0, { id: 0, kind: '#root', props: {}, children: [], lastSentSeq: 0 });
-  }
-
-  /** Simulate a user edit: optimistic local write + change event with seq. */
-  userEdit(id: number, value: unknown): void {
-    const node = this.nodes.get(id)!;
-    node.props = { ...node.props, value: value as SerializedProps[string] };
-    node.lastSentSeq += 1;
-    this.transport.emit({
-      t: 'event',
-      id,
-      name: 'change',
-      payload: { value: value as never },
-      seq: node.lastSentSeq,
-    });
-  }
-
-  drain(): void {
-    for (const msg of this.transport.sent.splice(0)) {
-      if (msg.t === 'commit') for (const op of msg.ops) this.apply(op);
-    }
-  }
-
-  private detach(childId: number): void {
-    const parentId = this.parents.get(childId);
-    if (parentId === undefined) return;
-    const parent = this.nodes.get(parentId)!;
-    parent.children = parent.children.filter((id) => id !== childId);
-    this.parents.delete(childId);
-  }
-
-  private destroy(id: number): void {
-    const node = this.nodes.get(id);
-    if (!node) return;
-    for (const child of node.children) this.destroy(child);
-    this.nodes.delete(id);
-    this.parents.delete(id);
-  }
-
-  private apply(op: Op): void {
-    switch (op.op) {
-      case 'create':
-        assert.ok(!this.nodes.has(op.id), `create: id ${op.id} already exists`);
-        this.nodes.set(op.id, { id: op.id, kind: op.kind, props: op.props, children: [], lastSentSeq: 0 });
-        break;
-      case 'createText':
-        assert.ok(!this.nodes.has(op.id), `createText: id ${op.id} already exists`);
-        this.nodes.set(op.id, {
-          id: op.id,
-          kind: '#text',
-          props: {},
-          text: op.text,
-          children: [],
-          lastSentSeq: 0,
-        });
-        break;
-      case 'append': {
-        const parent = this.nodes.get(op.parent);
-        assert.ok(parent, `append: unknown parent ${op.parent}`);
-        assert.ok(this.nodes.has(op.child), `append: unknown child ${op.child}`);
-        this.detach(op.child);
-        parent.children.push(op.child);
-        this.parents.set(op.child, op.parent);
-        break;
-      }
-      case 'insert': {
-        const parent = this.nodes.get(op.parent);
-        assert.ok(parent, `insert: unknown parent ${op.parent}`);
-        assert.ok(this.nodes.has(op.child), `insert: unknown child ${op.child}`);
-        this.detach(op.child);
-        const idx = parent.children.indexOf(op.before);
-        assert.notEqual(idx, -1, `insert: before ${op.before} not in parent ${op.parent}`);
-        parent.children.splice(idx, 0, op.child);
-        this.parents.set(op.child, op.parent);
-        break;
-      }
-      case 'remove': {
-        const parent = this.nodes.get(op.parent);
-        assert.ok(parent, `remove: unknown parent ${op.parent}`);
-        assert.equal(this.parents.get(op.child), op.parent, `remove: ${op.child} not child of ${op.parent}`);
-        this.detach(op.child);
-        this.destroy(op.child);
-        break;
-      }
-      case 'update': {
-        const node = this.nodes.get(op.id);
-        assert.ok(node, `update: unknown node ${op.id}`);
-        if (op.ack !== undefined && node.lastSentSeq > op.ack) {
-          // User edited since JS produced this; keep the local value.
-          node.props = { ...op.props, value: node.props.value! };
-        } else {
-          node.props = op.props;
-        }
-        break;
-      }
-      case 'text': {
-        const node = this.nodes.get(op.id);
-        assert.ok(node && node.kind === '#text', `text: node ${op.id} is not a text node`);
-        node.text = op.text;
-        break;
-      }
-      case 'clear': {
-        const root = this.nodes.get(0)!;
-        for (const child of [...root.children]) {
-          this.detach(child);
-          this.destroy(child);
-        }
-        break;
-      }
-    }
-  }
-
-  /** All nodes of a kind, in document order. */
-  byKind(kind: string): MiniNode[] {
-    const out: MiniNode[] = [];
-    const walk = (id: number) => {
-      const node = this.nodes.get(id)!;
-      if (node.kind === kind) out.push(node);
-      for (const c of node.children) walk(c);
-    };
-    walk(0);
-    return out;
-  }
-
-  /** Concatenated #text content under a node. */
-  textOf(id: number): string {
-    const node = this.nodes.get(id)!;
-    if (node.kind === '#text') return node.text ?? '';
-    return node.children.map((c) => this.textOf(c)).join('');
-  }
-}
-
-const settle = () => new Promise((r) => setTimeout(r, 30));
-
-function setup() {
-  const transport = new FakeTransport();
-  const bridge = new Bridge(transport);
-  const host = new MiniHost(transport);
-  const renderer = createNatuiRenderer(bridge);
-  return { transport, host, renderer };
-}
+import { settle, setup } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 
@@ -353,20 +177,22 @@ test('stale echo does not revert fast typing (seq/ack)', async () => {
 
   const field = host.byKind('TextField')[0]!;
 
-  // First keystroke reaches JS...
+  // Two keystrokes before any echo lands: the host is at seq=2, value 'ab',
+  // and JS has queued two echoes (value 'a' ack=1, value 'ab' ack=2).
   host.userEdit(field.id, 'a');
-  await settle();
-  // ...but before its echo is applied host-side, the user types again.
   host.userEdit(field.id, 'ab');
-  // Now the stale echo (value 'a', ack=1) arrives while lastSentSeq=2.
-  host.drain();
+
+  // Apply ONLY the first echo. Without suppression this step visibly reverts
+  // the field to 'a' (deleting the suppression logic makes this fail).
+  assert.ok(host.drainOne(), 'first echo was queued');
   assert.equal(
     host.byKind('TextField')[0]!.props.value,
     'ab',
-    'stale echo must not revert the newer local value',
+    'stale echo (ack=1 < lastSentSeq=2) must not revert the newer local value',
   );
 
   // The second echo (ack=2) is authoritative and matches.
+  host.drain();
   await settle();
   host.drain();
   assert.equal(host.byKind('TextField')[0]!.props.value, 'ab');
@@ -409,6 +235,28 @@ test('controlled-value enforcement flips a refused Toggle back', async () => {
   await settle();
   host.drain();
   assert.equal(host.byKind('Toggle')[0]!.props.value, false, 'no-op handler keeps value false');
+});
+
+test('controlled-value enforcement snaps a refused Picker back', async () => {
+  const { host, renderer } = setup();
+  renderer.render(
+    <Picker
+      value="a"
+      options={[
+        { value: 'a', label: 'Alpha' },
+        { value: 'b', label: 'Beta' },
+      ]}
+      onChange={() => {}}
+    />,
+  );
+  await settle();
+  host.drain();
+
+  const picker = host.byKind('Picker')[0]!;
+  host.userEdit(picker.id, 'b');
+  await settle();
+  host.drain();
+  assert.equal(host.byKind('Picker')[0]!.props.value, 'a', 'no-op handler keeps selection a');
 });
 
 // ---------------------------------------------------------------------------
@@ -463,6 +311,160 @@ test('ScrollView/ZStack/Picker/Slider mount, change, and clear on unmount', asyn
   await settle();
   host.drain();
   assert.equal(host.nodes.size, 1, 'only the root remains after unmount');
+});
+
+// ---------------------------------------------------------------------------
+// Controlled Slider: every path a handler can take (accept, reject, clamp,
+// missing) must leave the host at React's authoritative value, without
+// breaking responsiveness during rapid sequential changes.
+// ---------------------------------------------------------------------------
+
+function AcceptingSlider() {
+  const [v, setV] = useState(10);
+  return <Slider value={v} min={0} max={100} onChange={setV} />;
+}
+
+test('controlled Slider: accepted change round-trips', async () => {
+  const { host, renderer } = setup();
+  renderer.render(<AcceptingSlider />);
+  await settle();
+  host.drain();
+
+  host.userEdit(host.byKind('Slider')[0]!.id, 60);
+  await settle();
+  host.drain();
+  assert.equal(host.byKind('Slider')[0]!.props.value, 60);
+});
+
+test('controlled Slider: rejected change snaps back', async () => {
+  const { host, renderer } = setup();
+  renderer.render(<Slider value={25} min={0} max={100} onChange={() => {}} />);
+  await settle();
+  host.drain();
+
+  host.userEdit(host.byKind('Slider')[0]!.id, 90);
+  await settle();
+  host.drain();
+  assert.equal(host.byKind('Slider')[0]!.props.value, 25, 'no-op handler keeps 25');
+});
+
+function ClampingSlider() {
+  const [v, setV] = useState(10);
+  return <Slider value={v} min={0} max={100} onChange={(x) => setV(Math.min(x, 50))} />;
+}
+
+test('controlled Slider: clamped change settles on the clamp', async () => {
+  const { host, renderer } = setup();
+  renderer.render(<ClampingSlider />);
+  await settle();
+  host.drain();
+
+  host.userEdit(host.byKind('Slider')[0]!.id, 80);
+  await settle();
+  host.drain();
+  assert.equal(host.byKind('Slider')[0]!.props.value, 50, '80 clamped to 50');
+});
+
+test('controlled Slider: missing handler snaps back', async () => {
+  const { host, renderer } = setup();
+  renderer.render(<Slider value={25} min={0} max={100} />);
+  await settle();
+  host.drain();
+
+  host.userEdit(host.byKind('Slider')[0]!.id, 90);
+  await settle();
+  host.drain();
+  assert.equal(host.byKind('Slider')[0]!.props.value, 25, 'no handler keeps 25');
+});
+
+test('controlled Slider: rapid sequential changes stay responsive and converge', async () => {
+  const { host, renderer } = setup();
+  renderer.render(<ClampingSlider />);
+  await settle();
+  host.drain();
+  const slider = host.byKind('Slider')[0]!;
+
+  // Accepted rapid drag: a stale echo (ack=1) landing after the user reached
+  // seq=2 must not yank the thumb backwards. Apply only the first echo so
+  // the suppression itself is observable, not just the final convergence.
+  host.userEdit(slider.id, 20);
+  host.userEdit(slider.id, 40);
+  assert.ok(host.drainOne(), 'first echo was queued');
+  assert.equal(
+    host.byKind('Slider')[0]!.props.value,
+    40,
+    'stale echo suppressed mid-drag (lastSentSeq > ack)',
+  );
+  host.drain();
+  assert.equal(host.byKind('Slider')[0]!.props.value, 40, 'authoritative echo matches');
+
+  // Drag past the clamp: enforcement converges on the clamped value once the
+  // drag settles.
+  host.userEdit(slider.id, 80);
+  host.userEdit(slider.id, 95);
+  await settle();
+  host.drain();
+  assert.equal(host.byKind('Slider')[0]!.props.value, 50, 'converged to clamp after drag');
+});
+
+// ---------------------------------------------------------------------------
+// Hooks beyond useState: context propagation, effects, and effect cleanup.
+// ---------------------------------------------------------------------------
+
+const LabelContext = createContext('none');
+const effectLog: string[] = [];
+
+function EffectChild() {
+  const label = useContext(LabelContext);
+  useEffect(() => {
+    effectLog.push(`mounted:${label}`);
+    return () => {
+      effectLog.push(`cleanup:${label}`);
+    };
+  }, [label]);
+  return <Text>{label}</Text>;
+}
+
+function EffectApp() {
+  const [label, setLabel] = useState('first');
+  return (
+    <LabelContext.Provider value={label}>
+      <VStack>
+        <EffectChild />
+        <Button onPress={() => setLabel('second')}>relabel</Button>
+      </VStack>
+    </LabelContext.Provider>
+  );
+}
+
+test('useContext propagates and useEffect runs with cleanup', async () => {
+  effectLog.length = 0;
+  const { transport, host, renderer } = setup();
+  renderer.render(<EffectApp />);
+  await settle();
+  host.drain();
+
+  assert.equal(host.textOf(host.byKind('Text')[0]!.id), 'first', 'context value rendered');
+  assert.deepEqual(effectLog, ['mounted:first'], 'mount effect ran');
+
+  transport.emit({ t: 'event', id: host.byKind('Button')[0]!.id, name: 'press', payload: {} });
+  await settle();
+  host.drain();
+
+  assert.equal(host.textOf(host.byKind('Text')[0]!.id), 'second', 'context update re-rendered');
+  assert.deepEqual(
+    effectLog,
+    ['mounted:first', 'cleanup:first', 'mounted:second'],
+    'effect cleanup ran before re-run',
+  );
+
+  renderer.unmount();
+  await settle();
+  assert.deepEqual(
+    effectLog,
+    ['mounted:first', 'cleanup:first', 'mounted:second', 'cleanup:second'],
+    'unmount runs final cleanup',
+  );
 });
 
 // ---------------------------------------------------------------------------

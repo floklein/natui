@@ -15,7 +15,6 @@ export { Bridge } from './bridge/bridge.js';
 export { createNatuiRenderer } from './reconciler/renderer.js';
 export {
   spawnStdioTransport,
-  spawnTcpTransport,
   type Transport,
   type HostCommand,
 } from './bridge/transport.js';

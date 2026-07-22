@@ -1,22 +1,17 @@
 import type { ReactNode } from 'react';
 import { Bridge } from './bridge/bridge.js';
 import { defaultHostCommand } from './bridge/locate.js';
-import {
-  type HostCommand,
-  type Transport,
-  spawnStdioTransport,
-  spawnTcpTransport,
-} from './bridge/transport.js';
-import type { TreeNode, WindowProps } from './protocol.js';
+import { type HostCommand, spawnStdioTransport } from './bridge/transport.js';
+import { PROTOCOL_VERSION, type TreeNode, type WindowProps } from './protocol.js';
 import { createNatuiRenderer } from './reconciler/renderer.js';
 
 export interface RunOptions extends WindowProps {
   /** Host binary override; defaults to NATUI_HOST env or the in-repo build. */
   host?: string | HostCommand;
-  /** 'stdio' (default) or 'tcp' (Windows fallback; see docs/protocol.md). */
-  transport?: 'stdio' | 'tcp';
   /** Called when the user closes the window. Default: unmount and exit. */
   onClose?: () => void;
+  /** Startup handshake timeout override (mainly for tests). */
+  readyTimeoutMs?: number;
 }
 
 export interface NatuiApp {
@@ -26,6 +21,11 @@ export interface NatuiApp {
   screenshot(path: string): Promise<string>;
   /** Debug: make the host synthesize a user event on node `id`. */
   emit(id: number, name: string, payload?: Record<string, unknown>): void;
+  /**
+   * Debug: make the host perform a real optimistic user edit on node `id`
+   * (same code path as typing/dragging: local write, seq, change event).
+   */
+  edit(id: number, value: unknown): void;
   /** Re-render with a new element (e.g. for external hot reload). */
   update(element: ReactNode): void;
   /** Unmount, quit the host, close the transport. */
@@ -34,50 +34,69 @@ export interface NatuiApp {
 
 const READY_TIMEOUT_MS = 10_000;
 
-function waitForReady(transport: Transport): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('natui: host did not send ready within 10s')),
-      READY_TIMEOUT_MS,
-    );
-    transport.onMessage((msg) => {
-      if (msg.t === 'ready') {
-        clearTimeout(timer);
-        resolve();
-      }
-    });
-    transport.onExit((code) => {
-      clearTimeout(timer);
-      reject(new Error(`natui: host exited before ready (code ${code})`));
-    });
-  });
-}
+/** What the `ready` handshake must report for this OS (see docs/protocol.md). */
+const EXPECTED_PLATFORM: Partial<Record<NodeJS.Platform, string>> = {
+  darwin: 'macos',
+  win32: 'windows',
+};
+
+const KNOWN_PLATFORMS = new Set(['macos', 'windows']);
 
 /** Render a React element into a native window. Resolves once mounted. */
 export async function run(element: ReactNode, options: RunOptions = {}): Promise<NatuiApp> {
-  const { host, transport: transportKind, onClose, ...windowProps } = options;
+  const { host, onClose, readyTimeoutMs, ...windowProps } = options;
 
   const hostCmd: HostCommand =
     typeof host === 'string' ? { cmd: host } : (host ?? defaultHostCommand());
 
-  const transport =
-    transportKind === 'tcp' ? await spawnTcpTransport(hostCmd) : spawnStdioTransport(hostCmd);
+  const transport = spawnStdioTransport(hostCmd);
+  // The Bridge subscribes immediately: no message can fall between the
+  // handshake and regular operation.
+  const bridge = new Bridge(transport);
+
+  let phase: 'starting' | 'running' | 'quitting' = 'starting';
+  transport.onExit((code) => {
+    // Rejects the pending ready waiter (startup) and any dump/shot waiters.
+    bridge.hostExited(code);
+    if (phase !== 'running') return; // startup throws / quit() is intentional
+    if (code === null) {
+      // Killed by a signal: never a clean shutdown, say so and fail.
+      console.error('[natui] host was terminated by a signal');
+      process.exit(1);
+    }
+    if (code !== 0) console.error(`[natui] host exited with code ${code}`);
+    process.exit(code);
+  });
 
   try {
-    await waitForReady(transport);
+    const ready = await bridge.waitForReady(readyTimeoutMs ?? READY_TIMEOUT_MS);
+    if (ready.protocol !== PROTOCOL_VERSION) {
+      throw new Error(
+        `natui: host speaks protocol v${ready.protocol} but this renderer requires ` +
+          `v${PROTOCOL_VERSION}; rebuild the host to match`,
+      );
+    }
+    if (!KNOWN_PLATFORMS.has(ready.platform)) {
+      throw new Error(`natui: host reported unknown platform "${ready.platform}"`);
+    }
+    const expected = EXPECTED_PLATFORM[process.platform];
+    if (expected && ready.platform !== expected) {
+      throw new Error(
+        `natui: host reported platform "${ready.platform}" but this OS requires "${expected}"`,
+      );
+    }
   } catch (err) {
-    // Don't leak a spawned host (which would also keep Node alive).
+    // Don't leak an incompatible or half-started host process.
+    bridge.dispose('startup failed');
     transport.close();
     throw err;
   }
 
-  // The Bridge takes over the message stream from here.
-  const bridge = new Bridge(transport);
+  phase = 'running';
   const renderer = createNatuiRenderer(bridge);
 
-  let expectingExit = false;
   const quit = () => {
-    expectingExit = true;
+    phase = 'quitting';
     renderer.unmount();
     bridge.quit();
     bridge.dispose('quit() was called');
@@ -93,15 +112,6 @@ export async function run(element: ReactNode, options: RunOptions = {}): Promise
     }
   });
 
-  transport.onExit((code) => {
-    bridge.dispose(`host exited (code ${code})`);
-    if (expectingExit) return; // intentional shutdown: let the caller finish
-    if (code !== 0 && code !== null) {
-      console.error(`[natui] host exited with code ${code}`);
-    }
-    process.exit(code ?? 0);
-  });
-
   bridge.sendWindow(windowProps);
   // Resolve once the initial tree is actually committed (and thus flushed).
   await new Promise<void>((resolve) => renderer.render(element, resolve));
@@ -110,6 +120,7 @@ export async function run(element: ReactNode, options: RunOptions = {}): Promise
     dump: () => bridge.requestDump(),
     screenshot: (path) => bridge.requestScreenshot(path),
     emit: (id, name, payload) => bridge.emitDebugEvent(id, name, payload),
+    edit: (id, value) => bridge.editDebugValue(id, value),
     update: (el) => renderer.render(el),
     quit,
   };

@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import Reconciler from 'react-reconciler';
 import {
   ConcurrentRoot,
-  ContinuousEventPriority,
   DiscreteEventPriority,
 } from 'react-reconciler/constants.js';
 import type { Bridge } from '../bridge/bridge.js';
@@ -43,14 +42,15 @@ export function createNatuiRenderer(bridge: Bridge): NatuiRenderer {
     () => {}, // onDefaultTransitionIndicator
   );
 
-  // Host events run at interactive priority so React treats them like real
-  // user input: discrete for clicks/typing, continuous for slider drags.
-  // Discrete events are flushed synchronously so the Bridge can immediately
-  // check whether the app accepted a controlled value (see Bridge enforcement).
-  bridge.setPriorityRunner((kind, fn) => {
-    const priority = kind === 'Slider' ? ContinuousEventPriority : DiscreteEventPriority;
-    runWithPriority(priority, fn);
-    if (priority === DiscreteEventPriority) reconciler.flushSyncWork();
+  // Host events run at discrete priority and are flushed synchronously, so
+  // the Bridge can check right after each change event whether the app
+  // adopted the controlled value (see Bridge enforcement). This includes
+  // slider drags: responsiveness during a drag comes from the host's
+  // optimistic local value plus seq/ack echo suppression, not from React
+  // priority, and enforcement only lands once the drag settles.
+  bridge.setPriorityRunner((_kind, fn) => {
+    runWithPriority(DiscreteEventPriority, fn);
+    reconciler.flushSyncWork();
   });
 
   return {

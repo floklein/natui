@@ -1,13 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createServer, type Server, type Socket } from 'node:net';
 import { createInterface } from 'node:readline';
 import type { InboundMessage, OutboundMessage } from '../protocol.js';
 
 /**
- * A bidirectional NDJSON channel to a native host process.
- * `stdio` (default): we spawn the host and speak over its stdin/stdout.
- * `tcp`: we listen on 127.0.0.1, spawn the host with `--tcp <port>`, and it
- * connects back. Useful on Windows where GUI-subsystem stdio can be awkward.
+ * A bidirectional NDJSON channel to a native host process, over the host's
+ * stdin/stdout (we spawn the host and pipe both ends). This is the only
+ * supported transport; see docs/protocol.md.
  */
 export interface Transport {
   send(msg: OutboundMessage): void;
@@ -19,13 +17,6 @@ export interface Transport {
 export interface HostCommand {
   cmd: string;
   args?: string[];
-}
-
-interface Channels {
-  write(line: string): void;
-  child: ChildProcess;
-  server?: Server;
-  socket?: Socket;
 }
 
 function parseLine(line: string, onMessage: (msg: InboundMessage) => void): void {
@@ -48,34 +39,34 @@ class HostTransport implements Transport {
   private buffered: InboundMessage[] = [];
   private closed = false;
 
-  constructor(private channels: Channels) {
-    channels.child.on('exit', (code) => {
+  constructor(
+    private child: ChildProcess,
+    private write: (line: string) => void,
+  ) {
+    child.on('exit', (code) => {
       if (!this.closed) this.exitCb(code);
     });
-  }
-
-  handleMessage(msg: InboundMessage): void {
-    if (msg.t === 'log') {
-      const fn = msg.level === 'error' ? console.error : console.warn;
-      fn(`[natui host] ${msg.message}`);
-      return;
-    }
-    this.messageCb?.(msg);
+    // Spawn failures (e.g. host binary missing) emit 'error' with no 'exit';
+    // surface them as an exit so startup fails fast instead of timing out.
+    child.on('error', (err) => {
+      console.error(`[natui] failed to start host: ${err.message}`);
+      if (!this.closed) this.exitCb(null);
+    });
   }
 
   bufferOrHandle(msg: InboundMessage): void {
     if (this.messageCb === undefined) this.buffered.push(msg);
-    else this.handleMessage(msg);
+    else this.messageCb(msg);
   }
 
   send(msg: OutboundMessage): void {
     if (this.closed) return;
-    this.channels.write(JSON.stringify(msg) + '\n');
+    this.write(JSON.stringify(msg) + '\n');
   }
 
   onMessage(cb: (msg: InboundMessage) => void): void {
     this.messageCb = cb;
-    for (const msg of this.buffered.splice(0)) this.handleMessage(msg);
+    for (const msg of this.buffered.splice(0)) cb(msg);
   }
 
   onExit(cb: (code: number | null) => void): void {
@@ -84,9 +75,7 @@ class HostTransport implements Transport {
 
   close(): void {
     this.closed = true;
-    this.channels.socket?.destroy();
-    this.channels.server?.close();
-    if (!this.channels.child.killed) this.channels.child.kill();
+    if (!this.child.killed) this.child.kill();
   }
 }
 
@@ -97,62 +86,10 @@ export function spawnStdioTransport(host: HostCommand): Transport {
   });
   // A commit racing host shutdown must not crash Node with EPIPE.
   child.stdin!.on('error', () => {});
-  const transport = new HostTransport({
-    child,
-    write: (line) => {
-      if (child.stdin?.writable) child.stdin.write(line);
-    },
+  const transport = new HostTransport(child, (line) => {
+    if (child.stdin?.writable) child.stdin.write(line);
   });
   const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity });
   rl.on('line', (line) => parseLine(line, (m) => transport.bufferOrHandle(m)));
-  return transport;
-}
-
-/**
- * Listen on an ephemeral local port, spawn the host with `--tcp <port>`,
- * and speak NDJSON over the socket the host opens back to us.
- */
-export async function spawnTcpTransport(host: HostCommand): Promise<Transport> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (address === null || typeof address === 'string') {
-    throw new Error('natui: failed to bind TCP port for host transport');
-  }
-  const port = address.port;
-
-  const child = spawn(host.cmd, [...(host.args ?? []), '--tcp', String(port)], {
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
-
-  let socket: Socket | undefined;
-  const pending: string[] = [];
-  const channels: Channels = {
-    child,
-    server,
-    write: (line) => {
-      if (socket) socket.write(line);
-      else pending.push(line);
-    },
-  };
-  const transport = new HostTransport(channels);
-
-  server.on('connection', (sock) => {
-    // Exactly one connection, ours is the host we spawned. Anything else on
-    // this port would be able to inject protocol messages (events firing app
-    // handlers), so stop listening the moment the host connects.
-    if (socket) {
-      sock.destroy();
-      return;
-    }
-    socket = sock;
-    channels.socket = sock;
-    server.close();
-    sock.on('error', () => {});
-    for (const line of pending.splice(0)) sock.write(line);
-    const rl = createInterface({ input: sock, crlfDelay: Infinity });
-    rl.on('line', (line) => parseLine(line, (m) => transport.bufferOrHandle(m)));
-  });
-
   return transport;
 }

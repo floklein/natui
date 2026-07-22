@@ -16,6 +16,8 @@ export interface HostInstance {
   children: Child[];
   /** True once the native host has been told to create this node. */
   created: boolean;
+  /** True while React keeps this instance mounted but hidden (Suspense). */
+  suspenseHidden?: boolean;
 }
 
 export interface HostTextInstance {
@@ -23,6 +25,8 @@ export interface HostTextInstance {
   kind: '#text';
   text: string;
   created: boolean;
+  /** True while React keeps this instance mounted but hidden (Suspense). */
+  suspenseHidden?: boolean;
 }
 
 export type Child = HostInstance | HostTextInstance;
@@ -39,7 +43,7 @@ export function isTextInstance(node: Child): node is HostTextInstance {
 }
 
 // ---------------------------------------------------------------------------
-// Prop serialization
+// Prop validation and serialization
 // ---------------------------------------------------------------------------
 
 const SKIPPED_PROPS = new Set(['children', 'key', 'ref']);
@@ -57,18 +61,106 @@ export interface SerializedNode {
   handlers: Record<string, EventHandler>;
 }
 
-/** Split raw React props into wire-safe props and local event handlers. */
-export function serializeProps(raw: Record<string, unknown>): SerializedNode {
+function reportInvalid(kind: string, path: string, reason: string): void {
+  console.error(`[natui] invalid prop ${kind}.${path}: ${reason}; prop omitted`);
+}
+
+/**
+ * Validate one prop value against the documented wire format (string, finite
+ * number, boolean, null, arrays and plain objects of the same) and return a
+ * DEEP COPY, so a later mutation or exotic object can never make a commit
+ * batch unserializable. Returns undefined for values that cannot cross the
+ * wire; the offense is reported with its node kind and prop path and the
+ * prop (or array item / object entry) is omitted.
+ */
+function normalizeValue(
+  value: unknown,
+  kind: string,
+  path: string,
+  seen: Set<object>,
+): PropValue | undefined {
+  if (value === null) return null;
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return value;
+    case 'number':
+      if (Number.isFinite(value)) return value;
+      reportInvalid(kind, path, `non-finite number (${String(value)})`);
+      return undefined;
+    case 'undefined':
+      return undefined; // JSON semantics: omitted silently.
+    case 'bigint':
+      reportInvalid(kind, path, 'BigInt is not a supported prop value');
+      return undefined;
+    case 'function':
+      reportInvalid(kind, path, 'functions are only supported as top-level on* handler props');
+      return undefined;
+    case 'symbol':
+      reportInvalid(kind, path, 'symbols are not supported prop values');
+      return undefined;
+    case 'object': {
+      const obj = value as object;
+      if (seen.has(obj)) {
+        reportInvalid(kind, path, 'circular reference');
+        return undefined;
+      }
+      seen.add(obj);
+      try {
+        if (Array.isArray(obj)) {
+          const out: PropValue[] = [];
+          for (let i = 0; i < obj.length; i++) {
+            const item = normalizeValue(obj[i], kind, `${path}[${i}]`, seen);
+            if (item !== undefined) out.push(item);
+          }
+          return out;
+        }
+        const proto: unknown = Object.getPrototypeOf(obj);
+        if (proto !== Object.prototype && proto !== null) {
+          const name = (obj.constructor as { name?: string } | undefined)?.name ?? 'object';
+          reportInvalid(kind, path, `unsupported object type (${name}); only plain JSON is allowed`);
+          return undefined;
+        }
+        const out: Record<string, PropValue> = {};
+        for (const [key, child] of Object.entries(obj)) {
+          // Assigning out['__proto__'] would set the copy's prototype instead
+          // of creating an entry (silent drop + data-controlled prototype).
+          if (key === '__proto__') {
+            reportInvalid(kind, `${path}.${key}`, 'unsupported prop key');
+            continue;
+          }
+          const normalized = normalizeValue(child, kind, `${path}.${key}`, seen);
+          if (normalized !== undefined) out[key] = normalized;
+        }
+        return out;
+      } finally {
+        seen.delete(obj);
+      }
+    }
+    default:
+      reportInvalid(kind, path, `unsupported value of type ${typeof value}`);
+      return undefined;
+  }
+}
+
+/** Split raw React props into validated wire-safe props and event handlers. */
+export function serializeProps(raw: Record<string, unknown>, kind: string): SerializedNode {
   const props: SerializedProps = {};
   const handlers: Record<string, EventHandler> = {};
   for (const [name, value] of Object.entries(raw)) {
     if (value === undefined || SKIPPED_PROPS.has(name)) continue;
+    if (name === '__proto__') {
+      reportInvalid(kind, name, 'unsupported prop key');
+      continue;
+    }
     if (typeof value === 'function') {
       const eventName = eventNameFor(name);
       if (eventName) handlers[eventName] = value as EventHandler;
+      else reportInvalid(kind, name, 'function prop without an on* event name');
       continue;
     }
-    props[name] = value as PropValue;
+    const normalized = normalizeValue(value, kind, name, new Set());
+    if (normalized !== undefined) props[name] = normalized;
   }
   return { props, handlers };
 }
@@ -95,6 +187,9 @@ export function materialize(node: Child, bridge: Bridge): void {
     }
   }
   node.created = true;
+  // If the whole batch fails to send, the Bridge flips `created` back so the
+  // host and the shadow tree never disagree about which nodes exist.
+  bridge.noteCreated(node);
 }
 
 /** Mark a subtree as destroyed on the host side and drop event registrations. */
@@ -120,6 +215,8 @@ export function shadowInsertBefore(list: Child[], child: Child, before: Child): 
   const existing = list.indexOf(child);
   if (existing !== -1) list.splice(existing, 1);
   const idx = list.indexOf(before);
+  // `before` is always a current sibling (React guarantees it); the append
+  // fallback matches the hosts' defensive behavior for a malformed insert.
   if (idx === -1) list.push(child);
   else list.splice(idx, 0, child);
 }

@@ -15,28 +15,93 @@ export interface EventTarget {
   /** Last committed wire props (used for controlled-value enforcement). */
   props: Record<string, unknown>;
   created: boolean;
+  /** True while React keeps the instance mounted but hidden (Suspense). */
+  suspenseHidden?: boolean;
+}
+
+/** Anything with a `created` flag the Bridge may roll back on a failed flush. */
+export interface CreatedRef {
+  id: number;
+  created: boolean;
+}
+
+export interface ReadyInfo {
+  platform: string;
+  protocol: number;
 }
 
 /** Wraps host-event handler invocation, e.g. to set React update priority. */
 export type PriorityRunner = (kind: string, fn: () => void) => void;
 
+interface Waiter<T> {
+  resolve: (value: T) => void;
+  reject: (e: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+  /** Already rejected by timeout; stays in the FIFO as a tombstone. */
+  settled: boolean;
+}
+
+/** Debug requests (dump/screenshot) fail loudly instead of hanging forever. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+
+export interface BridgeOptions {
+  /** Dump/screenshot reply timeout override (mainly for tests). */
+  requestTimeoutMs?: number;
+}
+
 /**
  * The Bridge owns the op buffer (flushed once per React commit), the registry
- * of live instances for event dispatch, and request/response plumbing for
- * debug tree dumps.
+ * of live instances for event dispatch, the startup handshake, and
+ * request/response plumbing for debug tree dumps and screenshots.
  */
 export class Bridge {
   private ops: Op[] = [];
+  private createdThisFlush: CreatedRef[] = [];
   private targets = new Map<number, EventTarget>();
   private lastSeq = new Map<number, number>();
-  private dumpWaiters: Array<{ resolve: (root: TreeNode) => void; reject: (e: Error) => void }> = [];
-  private shotWaiters: Array<{ resolve: (path: string) => void; reject: (e: Error) => void }> = [];
+  private dumpWaiters: Array<Waiter<TreeNode>> = [];
+  private shotWaiters: Array<Waiter<string>> = [];
+  private readyInfo: ReadyInfo | null = null;
+  private readyWaiter: Waiter<ReadyInfo> | null = null;
+  private readyPromise: Promise<ReadyInfo> | null = null;
   private windowCloseCb: () => void = () => {};
   private priorityRunner: PriorityRunner = (_kind, fn) => fn();
   private dead = false;
+  private requestTimeoutMs: number;
 
-  constructor(private transport: Transport) {
+  constructor(
+    private transport: Transport,
+    options: BridgeOptions = {},
+  ) {
+    this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     transport.onMessage((msg) => this.handleMessage(msg));
+  }
+
+  // -- startup ---------------------------------------------------------------
+
+  /**
+   * Resolves with the host's `ready` handshake (which may already have
+   * arrived; the Bridge buffers it). The caller validates its contents.
+   */
+  waitForReady(timeoutMs: number): Promise<ReadyInfo> {
+    if (this.readyInfo) return Promise.resolve(this.readyInfo);
+    if (this.dead) return Promise.reject(new Error('natui: host is gone'));
+    // Concurrent callers share one waiter (the first call's timeout applies).
+    if (this.readyPromise) return this.readyPromise;
+    this.readyPromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.readyWaiter = null;
+        reject(new Error(`natui: host did not send ready within ${timeoutMs}ms`));
+      }, timeoutMs);
+      timer.unref?.();
+      this.readyWaiter = { resolve, reject, timer, settled: false };
+    });
+    return this.readyPromise;
+  }
+
+  /** Called by run() when the host process exits. */
+  hostExited(code: number | null): void {
+    this.dispose(`host exited (code ${code})`);
   }
 
   // -- ops ------------------------------------------------------------------
@@ -45,25 +110,35 @@ export class Bridge {
     this.ops.push(op);
   }
 
+  /** Record an instance whose create op is part of the current batch. */
+  noteCreated(ref: CreatedRef): void {
+    this.createdThisFlush.push(ref);
+  }
+
   flush(): void {
     if (this.ops.length === 0) return;
     const ops = this.ops;
     this.ops = [];
+    const createdRefs = this.createdThisFlush;
+    this.createdThisFlush = [];
+    const msg = { t: 'commit', ops } as const;
+    // Prop validation (instances.ts) deep-copies every prop into documented
+    // JSON, so serialization cannot throw for app data; this guards natui
+    // bugs. Transports serialize the whole message before writing a single
+    // byte, so a throw here means nothing reached the host: a commit is
+    // all-or-nothing, and the created flags are rolled back to match.
     try {
-      this.transport.send({ t: 'commit', ops });
+      this.transport.send(msg);
     } catch (err) {
-      // A single unserializable prop (circular object, BigInt) must not
-      // desync the whole tree: salvage the serializable ops.
-      const good = ops.filter((op) => {
-        try {
-          JSON.stringify(op);
-          return true;
-        } catch {
-          return false;
-        }
-      });
-      console.error(`[natui] dropped ${ops.length - good.length} unserializable op(s):`, err);
-      if (good.length > 0) this.transport.send({ t: 'commit', ops: good });
+      for (const ref of createdRefs) {
+        ref.created = false;
+        this.unregister(ref.id);
+      }
+      console.error(
+        '[natui] internal error: commit batch is not serializable; dropped the whole batch ' +
+          '(the native tree keeps its previous state):',
+        err,
+      );
     }
   }
 
@@ -89,31 +164,72 @@ export class Bridge {
     this.transport.send({ t: 'window', props });
   }
 
-  requestDump(): Promise<TreeNode> {
+  private addWaiter<T>(list: Array<Waiter<T>>, what: string): Promise<T> {
     if (this.dead) return Promise.reject(new Error('natui: host is gone'));
-    return new Promise((resolve, reject) => {
-      this.dumpWaiters.push({ resolve, reject });
-      this.transport.send({ t: 'dump' });
+    return new Promise<T>((resolve, reject) => {
+      const waiter: Waiter<T> = {
+        resolve,
+        reject,
+        settled: false,
+        timer: setTimeout(() => {
+          // Reject, but keep the waiter in the FIFO as a tombstone: replies
+          // pair with requests by order, so the host's (late) reply to THIS
+          // request must consume this slot. Removing it would hand the late
+          // reply to the next pending request, silently returning a stale
+          // tree or the wrong screenshot path.
+          waiter.settled = true;
+          reject(
+            new Error(`natui: host did not reply to ${what} within ${this.requestTimeoutMs}ms`),
+          );
+        }, this.requestTimeoutMs),
+      };
+      waiter.timer.unref?.();
+      list.push(waiter);
     });
   }
 
+  /** Consume the oldest waiter; discard the reply if it already timed out. */
+  private settleWaiter<T>(list: Array<Waiter<T>>, deliver: (w: Waiter<T>) => void): void {
+    const waiter = list.shift();
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    if (waiter.settled) return; // late reply for a timed-out request
+    waiter.settled = true;
+    deliver(waiter);
+  }
+
+  requestDump(): Promise<TreeNode> {
+    const promise = this.addWaiter(this.dumpWaiters, 'dump');
+    if (!this.dead) this.transport.send({ t: 'dump' });
+    return promise;
+  }
+
   requestScreenshot(path: string): Promise<string> {
-    if (this.dead) return Promise.reject(new Error('natui: host is gone'));
-    return new Promise((resolve, reject) => {
-      this.shotWaiters.push({ resolve, reject });
-      this.transport.send({ t: 'screenshot', path });
-    });
+    const promise = this.addWaiter(this.shotWaiters, 'screenshot');
+    if (!this.dead) this.transport.send({ t: 'screenshot', path });
+    return promise;
   }
 
   /** Reject all pending request/response waiters; called when the host dies. */
   dispose(reason: string): void {
     this.dead = true;
     const err = new Error(`natui: ${reason}`);
-    for (const w of this.dumpWaiters.splice(0)) w.reject(err);
-    for (const w of this.shotWaiters.splice(0)) w.reject(err);
+    if (this.readyWaiter) {
+      clearTimeout(this.readyWaiter.timer);
+      this.readyWaiter.reject(err);
+      this.readyWaiter = null;
+    }
+    for (const w of this.dumpWaiters.splice(0)) {
+      clearTimeout(w.timer);
+      if (!w.settled) w.reject(err);
+    }
+    for (const w of this.shotWaiters.splice(0)) {
+      clearTimeout(w.timer);
+      if (!w.settled) w.reject(err);
+    }
   }
 
-  /** Debug: ask the host to synthesize a user event. */
+  /** Debug: ask the host to synthesize a user event (no optimistic state). */
   emitDebugEvent(id: number, name: string, payload?: Record<string, unknown>): void {
     this.transport.send({
       t: 'emit',
@@ -121,6 +237,11 @@ export class Bridge {
       name,
       payload: payload as Record<string, never> | undefined,
     });
+  }
+
+  /** Debug: ask the host to perform a real optimistic user edit (seq/ack path). */
+  editDebugValue(id: number, value: unknown): void {
+    this.transport.send({ t: 'edit', id, value: value as never });
   }
 
   quit(): void {
@@ -154,24 +275,30 @@ export class Bridge {
         // optimistically. If React did not adopt it (handler bailed out,
         // clamped to the previous value, or no handler at all), no update op
         // was produced, synthesize one so the host settles back to the
-        // authoritative value. Discrete events were flushed synchronously by
-        // the priority runner, so target.props is post-commit here. Sliders
-        // (continuous, deferred flush) are exempt: last-write-wins is fine
-        // mid-drag and React's eventual commit reconciles them.
+        // authoritative value. Change events are flushed synchronously by the
+        // priority runner, so target.props is post-commit here. The carried
+        // ack makes this safe during rapid edits: the host ignores it while
+        // the user is still ahead (lastSentSeq > ack) and applies it once the
+        // interaction settles.
         if (
           target &&
           target.created &&
           typeof msg.seq === 'number' &&
           'value' in payload &&
-          target.kind !== 'Slider' &&
           this.lastSeq.get(msg.id) === msg.seq &&
           'value' in target.props &&
           JSON.stringify(target.props.value) !== JSON.stringify(payload.value)
         ) {
+          // Same Suspense guard as hostConfig.commitUpdate: updates replace
+          // props wholesale, so a corrective update to a hidden instance must
+          // re-assert hidden:true or it would unhide the control.
+          const props = target.suspenseHidden
+            ? { ...target.props, hidden: true }
+            : target.props;
           this.push({
             op: 'update',
             id: msg.id,
-            props: target.props as never,
+            props: props as never,
             ack: msg.seq,
           });
           this.flush();
@@ -179,19 +306,31 @@ export class Bridge {
         break;
       }
       case 'tree': {
-        this.dumpWaiters.shift()?.resolve(msg.root);
+        this.settleWaiter(this.dumpWaiters, (w) => w.resolve(msg.root));
         break;
       }
       case 'shot': {
-        this.shotWaiters.shift()?.resolve(msg.path);
+        this.settleWaiter(this.shotWaiters, (w) => {
+          if (msg.error) w.reject(new Error(`natui: screenshot failed: ${msg.error}`));
+          else w.resolve(msg.path);
+        });
         break;
       }
       case 'window': {
         if (msg.name === 'close') this.windowCloseCb();
         break;
       }
-      case 'ready':
-        // Handled during startup by run(); ignore here.
+      case 'ready': {
+        this.readyInfo = { platform: msg.platform, protocol: msg.protocol };
+        if (this.readyWaiter) {
+          clearTimeout(this.readyWaiter.timer);
+          this.readyWaiter.resolve(this.readyInfo);
+          this.readyWaiter = null;
+        }
+        break;
+      }
+      default:
+        // Unknown message types are ignored (forward compatibility).
         break;
     }
   }

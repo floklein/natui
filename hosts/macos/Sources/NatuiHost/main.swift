@@ -103,6 +103,16 @@ enum Router {
                 let payload = (msg.payload ?? [:]).mapValues { $0.anyValue }
                 Emitter.event(id, name, payload: payload)
             }
+        case "edit":
+            // Debug: a real optimistic user edit, through the same path as
+            // the control bindings (local write + seq + change event).
+            if let id = msg.id, let value = msg.value {
+                if let node = Store.shared.byId[id] {
+                    node.userEdit(value)
+                } else {
+                    Emitter.log("edit: unknown node \(id)")
+                }
+            }
         case "quit":
             NSApp.terminate(nil)
         default:
@@ -115,7 +125,12 @@ enum Router {
 
 /// Blocking NDJSON reader on a dedicated thread. One protocol message becomes
 /// exactly one MainActor hop, so SwiftUI renders once per React commit.
-func startStdinReader() {
+///
+/// `terminateOnEOF` differs by mode: in sidecar mode stdin is the lifeline to
+/// the JS process, so EOF means the app must not outlive it as an orphan. In
+/// embedded (--bundle) mode the app is self-contained and stdin is only the
+/// optional debug channel; a closed stdin must not terminate the application.
+func startStdinReader(terminateOnEOF: Bool) {
     let thread = Thread {
         let decoder = JSONDecoder()
         while let line = readLine(strippingNewline: true) {
@@ -132,9 +147,13 @@ func startStdinReader() {
                 }
             }
         }
-        // EOF: the JS process died or closed the pipe. Exit cleanly.
-        DispatchQueue.main.async {
-            NSApp.terminate(nil)
+        if terminateOnEOF {
+            // EOF: the JS process died or closed the pipe. Exit cleanly.
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
+            }
+        } else {
+            Emitter.log("stdin closed; embedded app keeps running without the debug channel")
         }
     }
     thread.name = "natui.stdin"
@@ -147,10 +166,13 @@ func startStdinReader() {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            // Mode is decided BEFORE the stdin reader starts, because it
+            // changes what stdin EOF means (see startStdinReader).
+            let bundlePath = embeddedBundlePath()
             // Stdin stays active in both modes: in embedded mode it is the
-            // debug channel (dump/emit/screenshot) for external probes.
-            startStdinReader()
-            if let bundlePath = embeddedBundlePath() {
+            // debug channel (dump/emit/screenshot/edit) for external probes.
+            startStdinReader(terminateOnEOF: bundlePath == nil)
+            if let bundlePath {
                 // Stage 2: evaluate the React bundle in-process (JSC). The
                 // ready message is sent after the bundle registered its
                 // receive hook, and reaches both the JS sink and stdout.

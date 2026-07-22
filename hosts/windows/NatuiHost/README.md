@@ -13,8 +13,8 @@ touch-up pass on a Windows machine (see the checklist at the bottom).
 | file | contents |
 |---|---|
 | `Program.cs` | custom `Main`, code-only `App`, window shell, stdin reader thread, `Router` |
-| `Ipc.cs` | locked NDJSON stdout writer (`ready`, `event`, `window`, `tree`, `shot`), stderr logging |
-| `NodeStore.cs` | node registry and op interpreter (same semantics as the Swift `Store.apply`) |
+| `Ipc.cs` | locked NDJSON stdout writer (`ready`, `event`, `window`, `tree`, `shot` with optional `error`), stderr logging |
+| `NodeStore.cs` | node registry and op interpreter (same semantics as the Swift `Store.apply`), `UserEdit` |
 | `NodeMapper.cs` | node to `FrameworkElement` mapping, prop application, label refresh, events, `NatuiStack` |
 
 ## Build
@@ -64,12 +64,35 @@ Run the demo from the repo root (the host is found automatically once built):
 
 ```
 pnpm install
-pnpm --filter demo start
+pnpm demo
 ```
+
+(`pnpm demo` is the root script; it builds the natui package and runs the
+`natui-demo` example via `pnpm --filter natui-demo dev`.)
 
 Launching the exe by double-click shows a hint window and does nothing else
 (or exits immediately if the OS reports the invalid stdin handle as
 redirected): the protocol channel only exists when stdin/stdout are pipes.
+
+## Protocol notes
+
+- The debug channel implements `dump`, `screenshot`, `emit`, and `edit`.
+  `edit` (`{"t":"edit","id":n,"value":...}`) performs a real optimistic user
+  edit through the same code path as typing/toggling/dragging
+  (`NatuiNode.UserEdit`: local value write, per-node seq bump, `change` event
+  carrying `seq`), so automated tests exercise the seq/ack machinery end to
+  end. Unknown node ids are logged to stderr and ignored.
+- `screenshot` always replies: `{"t":"shot","path":...}` on success,
+  `{"t":"shot","path":...,"error":"reason"}` on any failure (no window,
+  render or write failure), with no file written on failure.
+- Accessibility props map to UIA: `accessibilityLabel` →
+  `AutomationProperties.Name`, `accessibilityHint` →
+  `AutomationProperties.HelpText`, `accessibilityIdentifier` →
+  `AutomationProperties.AutomationId` (set on the element that produces the
+  automation peer, e.g. the inner control or TextBlock).
+- Stdio is the only transport; stdout carries protocol messages exclusively
+  and all diagnostics go to stderr (there is no `log` message type). Unknown
+  inbound message types are noted on stderr and ignored.
 
 ## Design notes
 
@@ -79,6 +102,21 @@ redirected): the protocol channel only exists when stdin/stdout are pipes.
   and `frame: { maxWidth: "infinity" }` need star-sized tracks, which
   StackPanel cannot express. Greediness bubbles up through nested stacks to
   emulate SwiftUI proposing the full parent size down the tree.
+- Every node element is a Border "frame shell" with the kind-specific element
+  inside. The frame props size the shell; padding, background, and
+  cornerRadius shape the inner box. This reproduces the macOS modifier order
+  (padding → background → cornerRadius clip → frame): a background fills the
+  padded bounds and never bleeds into frame-added space. Inside the shell,
+  greedy kinds stretch and everything else centers (SwiftUI's default frame
+  alignment); List rows lead-align.
+- Stack cross-alignment defaults to center on both axes, like SwiftUI stacks;
+  `alignment: leading/center/trailing` (VStack) and `top/center/bottom`
+  (HStack) map to the children's cross-axis alignment. The root container
+  mirrors the macOS RootView (`VStack(alignment: .leading, spacing: 0)`).
+- Button/Toggle labels: pure `#text` children collapse to a plain string;
+  mixed labels like `<Button><Image/> Delete</Button>` render every child in
+  document order in a horizontal stack (spacing 4), `#text` children as
+  inline text, exactly like the macOS host's `labelContent`.
 - WinUI events fire for programmatic changes too (unlike SwiftUI bindings),
   so every change handler is double-guarded: an `applyingRemote` depth counter
   plus a compare against the stored prop value (TextChanged can arrive on a
@@ -88,17 +126,28 @@ redirected): the protocol channel only exists when stdin/stdout are pipes.
   Swift host.
 - Toggle maps to CheckBox rather than ToggleSwitch: it is the closest
   analogue of SwiftUI's macOS checkbox toggle (compact, trailing label).
-- Text/#text render as a TextBlock inside a Border shell, because TextBlock
-  has no Background/CornerRadius.
+- Text/#text render as a TextBlock inside a Border box (the node's inner
+  element), because TextBlock has no Background/CornerRadius.
 - The window stays alive after close (`DispatcherShutdownMode =
   OnExplicitShutdown`); JS orchestrates shutdown via `quit`, and stdin EOF is
   treated as "parent died, exit now".
 
 ## Known gaps and deliberate divergences
 
-- `window.minWidth`/`minHeight` are ignored (needs
-  `OverlappedPresenter.PreferredMinimumWidth/Height` or a WM_GETMINMAXINFO
-  hook).
+- `window.minWidth`/`minHeight` use
+  `OverlappedPresenter.PreferredMinimumWidth/Height` (WASDK 1.7), which
+  constrains the whole window frame rather than the client area; the macOS
+  host constrains the content size, so the effective minimum differs by the
+  title-bar height.
+- Mixed element children inside `Text` (e.g. `<Text>Total: <Image/></Text>`)
+  are dropped; only the `#text` parts render. The macOS host renders them
+  inline. Button/Toggle mixed labels are supported, and bare `#text` children
+  of containers (stacks, ScrollView, List) render as plain text like on macOS.
+- A `Spacer` inside a `ZStack` has no track to fill (ZStack is a plain Grid
+  overlay), so it collapses to zero size instead of expanding the stack the
+  way SwiftUI's ZStack proposal does.
+- `padding`/`background` on `Image` are not painted (FontIcon carries no box
+  properties of its own).
 - Button variants `bordered`, `plain`, and `link` all render as the default
   button style; only `prominent` (AccentButtonStyle) is mapped.
 - A TextField's `secure` flag is fixed at creation; toggling it later is not
@@ -135,7 +184,18 @@ Things most likely to need touch-up, in rough order of suspicion:
 8. `NatuiStack` layout against the macOS screenshots: Spacer pushing content,
    the Slider row filling the window width, ListView rows stretching
    (ItemContainerStyle), Divider hairlines.
-9. Segoe Fluent glyph codepoints in `NodeMapper.Glyphs` render as intended
-   (they are shared with Segoe MDL2 Assets for Windows 10).
-10. Stdout handshake: `{"t":"ready","platform":"windows","protocol":1}` must
+9. The frame-shell layout pass (`EnsureElement`'s Border wrapper +
+   `SyncInnerAlignment`): backgrounds hugging padded content inside a larger
+   frame, VStack children centered by default (leading at the root), mixed
+   Button labels (icon + text) in order, list rows lead-aligned.
+10. `OverlappedPresenter.PreferredMinimumWidth/Height` in
+    `Router.ConfigureWindow`: confirm the members exist in the resolved WASDK
+    1.7 build and that the physical-pixel scaling feels right when resizing
+    below `minWidth`/`minHeight`.
+11. The `edit` debug round trip: send `{"t":"edit","id":n,"value":"x"}` to a
+    TextField node and confirm one `change` event with a `seq`, the control
+    repainting, and no echo loop.
+12. Segoe Fluent glyph codepoints in `NodeMapper.Glyphs` render as intended
+    (they are shared with Segoe MDL2 Assets for Windows 10).
+13. Stdout handshake: `{"t":"ready","platform":"windows","protocol":1}` must
     be the first bytes on stdout, no BOM, LF line endings.

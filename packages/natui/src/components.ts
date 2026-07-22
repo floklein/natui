@@ -40,6 +40,12 @@ export interface CommonProps {
   color?: Color;
   /** Tooltip. */
   help?: string;
+  /** Assistive-tech label (VoiceOver / Narrator). */
+  accessibilityLabel?: string;
+  /** Assistive-tech hint describing the result of activating the element. */
+  accessibilityHint?: string;
+  /** Stable identifier for UI automation (AX identifier / AutomationId). */
+  accessibilityIdentifier?: string;
   key?: string | number;
 }
 

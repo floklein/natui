@@ -53,22 +53,25 @@ public sealed class App : Application
         // Root container (node id 0): a vertical stack in a ScrollViewer.
         // Horizontally stretched so children see the window width, the way
         // SwiftUI proposes the full width down the tree; vertically top-hung.
+        // Leading cross-alignment mirrors the macOS host's RootView
+        // (VStack(alignment: .leading, spacing: 0)).
         var rootStack = new NatuiStack
         {
             Orientation = Orientation.Vertical,
             VerticalAlignment = VerticalAlignment.Top,
+            CrossAlignment = "leading",
         };
         var mapper = new NodeMapper(rootStack);
         var store = new NodeStore(mapper);
 
         // The shell Grid paints the theme background so screenshots are not
-        // transparent (same concern as the macOS host).
+        // transparent (same concern as the macOS host). No ScrollViewer here:
+        // the macOS RootView does not scroll (tall content clips, and
+        // maxHeight:"infinity" fills must resolve against the window, which a
+        // scroll viewport would report as unbounded). Apps opt into scrolling
+        // with the ScrollView component.
         var shell = new Grid { Background = PageBackground() };
-        shell.Children.Add(new ScrollViewer
-        {
-            Content = rootStack,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-        });
+        shell.Children.Add(rootStack);
 
         _window = new Window { Title = "natui" };
         _window.Content = shell;
@@ -198,6 +201,15 @@ internal sealed class Router(App app, Window window, NodeStore store)
                     Ipc.Event(id, name, payload);
                 }
                 break;
+            case "edit":
+                // Debug: a real optimistic user edit, through the same code
+                // path as the control handlers (local value write + seq bump
+                // + change event); exercises seq/ack end to end.
+                if (Json.Int(message, "id") is { } editId && message.ContainsKey("value"))
+                {
+                    store.UserEdit(editId, message["value"]);
+                }
+                break;
             case "quit":
                 app.Quit();
                 break;
@@ -220,9 +232,18 @@ internal sealed class Router(App app, Window window, NodeStore store)
         window.AppWindow.ResizeClient(new SizeInt32(
             (int)Math.Round(width * scale),
             (int)Math.Round(height * scale)));
+        if (Json.Num(props, "minWidth") is { } minWidth
+            && Json.Num(props, "minHeight") is { } minHeight
+            && window.AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            // WASDK 1.7 presenter-enforced minimum (WM_GETMINMAXINFO under
+            // the hood), same physical-pixel convention as ResizeClient.
+            // Constrains the whole window frame rather than the client area;
+            // close enough to the macOS host's contentMinSize for this POC.
+            presenter.PreferredMinimumWidth = (int)Math.Round(minWidth * scale);
+            presenter.PreferredMinimumHeight = (int)Math.Round(minHeight * scale);
+        }
         CenterWindow();
-        // minWidth/minHeight would need OverlappedPresenter.PreferredMinimum*
-        // (WASDK 1.7) or a WM_GETMINMAXINFO hook; not implemented yet.
     }
 
     private void CenterWindow()
@@ -237,7 +258,11 @@ internal sealed class Router(App app, Window window, NodeStore store)
 
     /// <summary>
     /// Debug: render our own window content to a PNG. Never reads the actual
-    /// screen, so it needs no capture permission.
+    /// screen, so it needs no capture permission. Always replies with a shot
+    /// message: the try/catch spans the whole flow, including the async
+    /// continuations, so no failure path can leave the JS-side screenshot
+    /// promise pending (on failure the reply carries an error and no file is
+    /// written).
     /// </summary>
     private async Task ScreenshotAsync(string path)
     {
@@ -279,6 +304,7 @@ internal sealed class Router(App app, Window window, NodeStore store)
         catch (Exception ex)
         {
             Ipc.Log($"screenshot failed: {ex.Message}");
+            Ipc.Shot(path, string.IsNullOrEmpty(ex.Message) ? ex.GetType().Name : ex.Message);
         }
     }
 }

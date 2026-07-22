@@ -21,6 +21,18 @@ final class Node: Identifiable {
         self.props = props
         self.text = text
     }
+
+    /// A user edit of this node's value: optimistic local write, seq bump,
+    /// change event carrying the seq (protocol seq/ack). The single code path
+    /// for control bindings AND the `edit` debug message, so automated tests
+    /// exercise exactly what real interaction does. No-ops when the value is
+    /// unchanged (mirrors the bindings' equality guards).
+    func userEdit(_ value: JSONValue) {
+        guard props["value"] != value else { return }
+        props["value"] = value
+        lastSentSeq += 1
+        Emitter.event(id, "change", payload: ["value": value.anyValue], seq: lastSentSeq)
+    }
 }
 
 @Observable @MainActor

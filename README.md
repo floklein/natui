@@ -49,23 +49,27 @@ wire protocol: [docs/protocol.md](docs/protocol.md)
 
 ## Try it (macOS)
 
+Prerequisites: macOS 14+, Xcode command line tools with a Swift 6 toolchain,
+Node.js 22+, pnpm 11 (`corepack enable`).
+
 ```bash
 pnpm install
 pnpm build:host:macos        # swift build -c release --package-path hosts/macos
-pnpm demo                    # opens the native demo window
+pnpm demo                    # builds the package, opens the native demo window
 ```
 
 Automated end-to-end verification (drives the real SwiftUI window via the debug
-protocol: tree dumps, synthesized events, host-rendered screenshots):
+protocol: tree dumps, real optimistic edits, host-rendered screenshots, plus a
+controlled-input stress phase exercising native seq/ack):
 
 ```bash
-cd examples/demo && pnpm exec tsx src/verify.tsx
+pnpm verify
 ```
 
-Reconciler contract tests (no GUI needed):
+Contract and unit tests, typecheck, package build (no GUI needed):
 
 ```bash
-pnpm test
+pnpm test && pnpm typecheck && pnpm build
 ```
 
 ## Windows
@@ -84,32 +88,45 @@ pnpm demo   # locate.ts finds the exe; or set NATUI_HOST
 `VStack` `HStack` `ZStack` `Spacer` `Divider` `ScrollView` `List` `Text` `Image`
 `ProgressView` `Button` `TextField` `Toggle` `Slider` `Picker`, typed props,
 shared across platforms (see [docs/protocol.md](docs/protocol.md) for the mapping
-table).
+table). Common props include accessibility basics (`accessibilityLabel`,
+`accessibilityHint`, `accessibilityIdentifier`), mapped to the platform's AX
+attributes.
 
 ## Single-process mode (no Node at runtime)
 
-The production story is proven, not just planned: the host can evaluate the
-React bundle **in-process with JavaScriptCore**, so the shipped app is one
-native process.
+The host can evaluate the React bundle **in-process with JavaScriptCore**, so
+the shipped app is one native process with zero Node at runtime.
 
 ```bash
+pnpm build                                                 # emit packages/natui/dist first
 cd examples/demo
 pnpm build:embedded                                        # esbuild -> dist/embedded.js
 ../../hosts/macos/.build/release/natui-host --bundle dist/embedded.js
 ```
 
-Automated proof (mount + interactions + screenshot, driven over the debug port):
+Automated proof (mount + interactions + screenshot + a closed-stdin lifecycle
+regression, driven over the debug port):
 
 ```bash
-node src/verify-embedded.mjs
+pnpm verify:embedded
 ```
 
 ## Status
 
-Experimental proof of concept, built in one night. The macOS pipeline is verified
-end-to-end twice: Node-driven dev mode (five interactive scenarios,
-screenshot-verified) and embedded-JSC single-process mode. The code survived a
-20-finding adversarial review (every finding fixed and re-verified). The Windows
-host is written to the same protocol but not yet compiled. See
+Experimental proof of concept. What the automated checks demonstrate today, on
+macOS: 31 contract/unit tests cover the reconciler-host op semantics (keyed
+moves, seq/ack echo suppression, controlled-value enforcement for every input
+kind including Slider, prop validation, startup handshake, screenshot
+failure/timeout handling), and two end-to-end suites drive the real SwiftUI
+window, one in Node dev mode and one in embedded-JSC single-process mode, both
+asserting against native tree dumps and validating the PNGs they capture; the
+embedded suite additionally pins the native seq/ack contract deterministically
+by injecting stale and current acks over the wire. The
+Windows host is written to the same protocol but has not yet been compiled on a
+Windows machine; treat it as unverified source. See
 [docs/architecture.md](docs/architecture.md) for the staged packaging path
 (bun sidecar, then in-process JavaScriptCore / Hermes).
+
+## License
+
+MIT, see [LICENSE](LICENSE).

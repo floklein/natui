@@ -43,13 +43,25 @@ internal sealed class NatuiNode(int id, string kind)
     public int LastSentSeq;
 
     /// <summary>
-    /// The WinUI element for this node. Null for #text nodes that only feed a
-    /// parent label; they get an element lazily if attached to the root.
+    /// The WinUI element for this node as seen by its parent: a Border "frame
+    /// shell" that carries the frame props, with the kind-specific element
+    /// (Inner) inside. Null for #text nodes that only feed a parent label;
+    /// they get an element lazily if attached to a container.
     /// </summary>
     public FrameworkElement? Element;
 
-    /// <summary>Inner TextBlock for Text/#text nodes (Element is a Border shell).</summary>
+    /// <summary>
+    /// The kind-specific element inside the frame shell: the box that carries
+    /// padding, background, and cornerRadius (see NodeMapper.EnsureElement).
+    /// </summary>
+    public FrameworkElement? Inner;
+
+    /// <summary>Inner TextBlock for Text/#text nodes (Inner is a Border box).</summary>
     public TextBlock? Label;
+
+    /// <summary>True while attached to a List parent: rows lead-align their
+    /// content, like SwiftUI list rows.</summary>
+    public bool InList;
 
     /// <summary>
     /// frame.maxWidth / frame.maxHeight was the string "infinity". The parent
@@ -65,6 +77,22 @@ internal sealed class NatuiNode(int id, string kind)
     /// <summary>Concatenated #text children: the label of Text/Button/Toggle nodes.</summary>
     public string JoinedText() =>
         string.Concat(Children.Where(c => c.Kind == "#text").Select(c => c.Text));
+
+    /// <summary>
+    /// A user edit of this node's value: optimistic local write, seq bump,
+    /// change event carrying the seq (protocol seq/ack). The single code path
+    /// for control handlers AND the "edit" debug message, mirroring the macOS
+    /// host's Node.userEdit, so automated tests exercise exactly what real
+    /// interaction does. No-ops when the value is unchanged.
+    /// </summary>
+    public void UserEdit(JsonNode? value)
+    {
+        if (JsonNode.DeepEquals(value, Props["value"])) return;
+        // Clone: the value may still be parented to an inbound message.
+        Props["value"] = value?.DeepClone();
+        LastSentSeq++;
+        Ipc.Event(Id, "change", new JsonObject { ["value"] = value?.DeepClone() }, LastSentSeq);
+    }
 }
 
 /// <summary>
@@ -187,6 +215,25 @@ internal sealed class NodeStore(NodeMapper mapper)
         }
     }
 
+    /// <summary>
+    /// Debug "edit" message: a real optimistic user edit on node id, through
+    /// the same code path as typing/toggling/dragging (NatuiNode.UserEdit).
+    /// Unknown ids are logged to stderr and ignored.
+    /// </summary>
+    public void UserEdit(int id, JsonNode? value)
+    {
+        if (!_byId.TryGetValue(id, out var node))
+        {
+            Ipc.Log($"edit: unknown node {id}");
+            return;
+        }
+        node.UserEdit(value);
+        // WinUI is retained: unlike SwiftUI, the control does not re-read
+        // props, so push the edited value into it (guarded like a remote
+        // update; the value-compare in the change handlers keeps it silent).
+        mapper.ApplyProps(node);
+    }
+
     // -- tree bookkeeping -----------------------------------------------------
 
     private List<NatuiNode>? ChildrenOf(int parentId) =>
@@ -232,11 +279,12 @@ internal sealed class NodeStore(NodeMapper mapper)
     /// </summary>
     private int VisualIndexOf(int parentId, NatuiNode child)
     {
+        var parent = parentId == RootId ? null : _byId.GetValueOrDefault(parentId);
         var index = 0;
         foreach (var sibling in ChildrenOf(parentId) ?? [])
         {
             if (ReferenceEquals(sibling, child)) break;
-            if (NodeMapper.IsAttachable(parentId, sibling)) index++;
+            if (NodeMapper.IsAttachable(parentId, parent, sibling)) index++;
         }
         return index;
     }

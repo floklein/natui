@@ -6,11 +6,12 @@ struct InMessage: Decodable, Sendable {
     let t: String
     let props: [String: JSONValue]?
     let ops: [OpMsg]?
-    // Debug messages (screenshot / emit).
+    // Debug messages (screenshot / emit / edit).
     let path: String?
     let id: Int?
     let name: String?
     let payload: [String: JSONValue]?
+    let value: JSONValue?
 }
 
 struct OpMsg: Decodable, Sendable {

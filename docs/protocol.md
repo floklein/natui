@@ -1,16 +1,19 @@
 # natui wire protocol v1
 
 The natui renderer (Node/React process) and a native host (SwiftUI on macOS, WinUI 3 on
-Windows) communicate over **NDJSON**: one JSON object per line, UTF-8. Default transport is
-the host process's stdin/stdout (JS spawns the host, writes to its stdin, reads its stdout).
-A TCP transport (`--tcp <port>`) exists as a fallback for platforms where GUI-subsystem
-stdio is unreliable. The host must never write anything to the protocol channel except
-protocol messages; diagnostics go to stderr.
+Windows) communicate over **NDJSON**: one JSON object per line, UTF-8, over the host
+process's stdin/stdout (JS spawns the host, writes to its stdin, reads its stdout). This is
+the only transport. The host must never write anything to the protocol channel except
+protocol messages; diagnostics go to stderr. Receivers must ignore message types they do
+not recognize (forward compatibility).
 
 ## Handshake
 
 1. Host starts, prints `{"t":"ready","platform":"macos","protocol":1}`.
-2. JS sends `{"t":"window","props":{...}}` to configure the main window, then commits.
+2. JS validates the handshake before rendering anything: `protocol` must equal the
+   renderer's protocol version and `platform` must be a known value matching the current
+   OS. On a mismatch the renderer reports a startup error and terminates the host.
+3. JS sends `{"t":"window","props":{...}}` to configure the main window, then commits.
 
 ## JS → Host messages
 
@@ -21,9 +24,10 @@ protocol messages; diagnostics go to stderr.
 | dump | `{"t":"dump"}` | Debug: host replies with a `tree` message describing its current node tree. |
 | screenshot | `{"t":"screenshot","path":string}` | Debug: host renders its own window to a PNG at `path` and replies with a `shot` message (with an `error` field on failure, it must always reply). |
 | emit | `{"t":"emit","id":n,"name":string,"payload"?:object}` | Debug: host synthesizes a user event on node `id` (sent back as a normal `event`, without optimistic local state or `seq`). |
+| edit | `{"t":"edit","id":n,"value":any}` | Debug: host performs a **real optimistic user edit** on node `id`, through the same code path as typing/dragging: local `value` write, per-node seq increment, then a `change` event carrying `seq`. Unlike `emit`, this exercises the seq/ack machinery end to end. Only meaningful on controlled kinds (TextField, Toggle, Slider, Picker) and with a non-null value matching the control's type; other targets are a probe error. |
 | quit | `{"t":"quit"}` | Host exits cleanly. |
 
-Debug messages (`dump`, `screenshot`, `emit`) exist for automated verification;
+Debug messages (`dump`, `screenshot`, `emit`, `edit`) exist for automated verification;
 hosts may compile them out of production builds.
 
 ### Ops
@@ -52,8 +56,7 @@ transaction per commit) to avoid intermediate flicker.
 | event | `{"t":"event","id":n,"name":string,"payload":object,"seq"?:n}` | User interaction on node `id`. |
 | window | `{"t":"window","name":"close"}` | The main window was closed by the user. |
 | tree | `{"t":"tree","root":TreeNode}` | Reply to `dump`. `TreeNode = {"id":n,"kind":string,"props":{...},"text"?:string,"children":[TreeNode]}` |
-| shot | `{"t":"shot","path":string,"error"?:string}` | Reply to `screenshot`. |
-| log | `{"t":"log","level":"info"\|"warn"\|"error","message":string}` | Host diagnostic (JS forwards to console). |
+| shot | `{"t":"shot","path":string,"error"?:string}` | Reply to `screenshot`. Hosts must **always** reply; on failure `error` describes why and no usable file is produced. JS rejects the pending screenshot promise when `error` is set, and times out if no reply arrives. |
 
 ### Events
 
@@ -94,10 +97,16 @@ Updates with no `ack` are always fully authoritative.
 bails out, clamps to the previous state, or there is no handler), no commit
 happens and no update op would be produced, and the host would keep its optimistic
 value forever. The renderer therefore checks, after synchronously flushing each
-discrete change event, whether the node's committed `value` still differs from
+change event, whether the node's committed `value` still differs from
 the event's value, and if so synthesizes a corrective
-`{"op":"update","id":n,"props":<committed>,"ack":<event seq>}`. Sliders
-(continuous) are exempt.
+`{"op":"update","id":n,"props":<committed>,"ack":<event seq>}`. This applies to
+every controlled kind, including Slider: during a rapid drag the corrective
+update's `ack` lags the host's counter, so the host ignores it and stays
+responsive; the final event's correction (or adoption) is authoritative once the
+drag settles. One consequence of enforcement: a handler that adopts a value
+*asynchronously* (after the synchronous flush) is first corrected, then updated
+when its state change eventually commits, exactly like React DOM's controlled
+inputs.
 
 ## Node kinds and props
 
@@ -107,7 +116,16 @@ Common props on every kind (all optional):
 `padding` (number | `{top,bottom,leading,trailing}`), `background` (color),
 `cornerRadius` (number), `frame` (`{width,height,minWidth,maxWidth,minHeight,maxHeight}`
 where `maxWidth`/`maxHeight` may be the string `"infinity"`), `opacity` (0..1),
-`disabled` (bool), `hidden` (bool), `color` (foreground color), `help` (tooltip string).
+`disabled` (bool), `hidden` (bool), `color` (foreground color), `help` (tooltip string),
+`accessibilityLabel` (assistive-tech label), `accessibilityHint` (assistive-tech hint),
+`accessibilityIdentifier` (stable id for UI automation; AX identifier on macOS,
+AutomationId on Windows).
+
+Prop values are restricted to JSON: strings, finite numbers, booleans, null, and
+arrays/plain objects of the same. The renderer validates every prop before
+serialization; anything else (BigInt, non-finite numbers, circular structures,
+class instances, nested functions) is reported with its node kind and prop path
+and omitted, never sent.
 
 | kind | props | SwiftUI | WinUI |
 |---|---|---|---|

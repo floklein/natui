@@ -112,15 +112,11 @@ struct NodeView: View {
         }
     }
 
+    /// Container children: element children as NodeViews, bare `#text`
+    /// children as plain Text (they are part of the typed API and must not
+    /// be dropped by stacks).
     @ViewBuilder
     private var childViews: some View {
-        ForEach(node.nonTextChildren, id: \.id) { NodeView(node: $0) }
-    }
-
-    /// All children in order, #text nodes rendered as inline Text, labels
-    /// like <Button><Image/> Delete</Button> must not drop the text parts.
-    @ViewBuilder
-    private var mixedChildViews: some View {
         ForEach(node.children, id: \.id) { child in
             if child.kind == "#text" {
                 Text(child.text)
@@ -130,13 +126,14 @@ struct NodeView: View {
         }
     }
 
-    /// Label for Button/Toggle: pure-text fast path, mixed content otherwise.
+    /// Label for Button/Toggle: pure-text fast path; mixed labels like
+    /// <Button><Image/> Delete</Button> keep every child in order.
     @ViewBuilder
     private var labelContent: some View {
         if node.nonTextChildren.isEmpty {
             Text(node.joinedText)
         } else {
-            HStack(spacing: 4) { mixedChildViews }
+            HStack(spacing: 4) { childViews }
         }
     }
 
@@ -153,7 +150,7 @@ struct NodeView: View {
             if node.kind == "Text" && !node.nonTextChildren.isEmpty {
                 // Mixed content (<Text>Total: <Image/></Text>): keep every
                 // child, in order, text rendered inline.
-                HStack(spacing: 0) { mixedChildViews }
+                HStack(spacing: 0) { childViews }
             } else {
                 textView
             }
@@ -175,7 +172,13 @@ struct NodeView: View {
             }
         case "List":
             List {
-                ForEach(node.nonTextChildren, id: \.id) { NodeView(node: $0) }
+                ForEach(node.children, id: \.id) { child in
+                    if child.kind == "#text" {
+                        Text(child.text)
+                    } else {
+                        NodeView(node: child)
+                    }
+                }
             }
         case "Image":
             Image(systemName: node.str("systemName") ?? "questionmark.circle")
@@ -238,14 +241,9 @@ struct NodeView: View {
     private var textBinding: Binding<String> {
         Binding(
             get: { node.str("value") ?? "" },
-            set: { newValue in
-                guard newValue != (node.str("value") ?? "") else { return }
-                // Optimistic local write + seq so JS echoes can be
-                // staleness-checked (protocol seq/ack).
-                node.props["value"] = .string(newValue)
-                node.lastSentSeq += 1
-                Emitter.event(node.id, "change", payload: ["value": newValue], seq: node.lastSentSeq)
-            }
+            // Optimistic local write + seq so JS echoes can be
+            // staleness-checked (protocol seq/ack); see Node.userEdit.
+            set: { node.userEdit(.string($0)) }
         )
     }
 
@@ -270,23 +268,14 @@ struct NodeView: View {
     private var toggleBinding: Binding<Bool> {
         Binding(
             get: { node.props["value"]?.boolValue ?? false },
-            set: { newValue in
-                node.props["value"] = .bool(newValue)
-                node.lastSentSeq += 1
-                Emitter.event(node.id, "change", payload: ["value": newValue], seq: node.lastSentSeq)
-            }
+            set: { node.userEdit(.bool($0)) }
         )
     }
 
     private var sliderBinding: Binding<Double> {
         Binding(
             get: { node.dbl("value") ?? 0 },
-            set: { newValue in
-                guard newValue != (node.dbl("value") ?? 0) else { return }
-                node.props["value"] = .number(newValue)
-                node.lastSentSeq += 1
-                Emitter.event(node.id, "change", payload: ["value": newValue], seq: node.lastSentSeq)
-            }
+            set: { node.userEdit(.number($0)) }
         )
     }
 
@@ -303,12 +292,7 @@ struct NodeView: View {
     private var pickerBinding: Binding<String> {
         Binding(
             get: { node.str("value") ?? "" },
-            set: { newValue in
-                guard newValue != (node.str("value") ?? "") else { return }
-                node.props["value"] = .string(newValue)
-                node.lastSentSeq += 1
-                Emitter.event(node.id, "change", payload: ["value": newValue], seq: node.lastSentSeq)
-            }
+            set: { node.userEdit(.string($0)) }
         )
     }
 
@@ -353,6 +337,7 @@ struct CommonMods: ViewModifier {
         .opacity(node.dbl("opacity") ?? 1)
         .disabled(node.flag("disabled"))
         .help(node.str("help") ?? "")
+        .modifier(A11yMods(node: node))
     }
 
     private var clipShape: AnyShape {
@@ -376,6 +361,34 @@ struct CommonMods: ViewModifier {
             )
         }
         return EdgeInsets()
+    }
+}
+
+/// Accessibility props (ported from the PR #1 design): label and hint are
+/// only attached when present so controls keep their intrinsic AX labels;
+/// the identifier is always applied (empty string = none, a no-op).
+/// Toggling label/hint presence changes view structure (state reset), which
+/// is acceptable: accessibility metadata is static in practice.
+struct A11yMods: ViewModifier {
+    let node: Node
+
+    func body(content: Content) -> some View {
+        labeled(content)
+            .accessibilityIdentifier(node.str("accessibilityIdentifier") ?? "")
+    }
+
+    @ViewBuilder
+    private func labeled(_ content: Content) -> some View {
+        switch (node.str("accessibilityLabel"), node.str("accessibilityHint")) {
+        case let (label?, hint?):
+            content.accessibilityLabel(Text(label)).accessibilityHint(Text(hint))
+        case let (label?, nil):
+            content.accessibilityLabel(Text(label))
+        case let (nil, hint?):
+            content.accessibilityHint(Text(hint))
+        case (nil, nil):
+            content
+        }
     }
 }
 

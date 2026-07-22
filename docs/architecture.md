@@ -12,7 +12,7 @@
 │    mutations buffered per commit, flushed in resetAfterCommit       │
 │           │                              ▲                          │
 │           ▼ ops (NDJSON)                 │ events (NDJSON)          │
-│  Transport (stdio | tcp)                 │                          │
+│  Transport (stdio)                       │                          │
 └───────────┼──────────────────────────────┼──────────────────────────┘
             ▼                              │
 ┌─────────────────────────── native host ──┴──────────────────────────┐
@@ -56,9 +56,17 @@ proton-native post-mortem says keeping this surface tiny is existential).
 - Event handler props (functions) never cross the wire: they're stripped into a
   local registry; hosts always emit interaction events, JS dispatches to the
   handler if registered.
-- Host events run at React's interactive priorities (`DiscreteEventPriority`,
-  `ContinuousEventPriority` for slider drags) via the update-priority API that
-  replaced `getCurrentEventPriority` in React 19 reconcilers.
+- Every other prop is **validated and deep-copied** before serialization
+  (documented JSON only: strings, finite numbers, booleans, null, arrays and
+  plain objects). Invalid values are reported with node kind and prop path and
+  omitted; a commit batch is all-or-nothing, so the native tree can never see
+  a partially applied commit.
+- Host events run at `DiscreteEventPriority` and are flushed synchronously
+  (via the update-priority API that replaced `getCurrentEventPriority` in
+  React 19 reconcilers). Slider drags are discrete too: drag responsiveness
+  comes from the host's optimistic local value plus seq/ack, and the
+  synchronous flush is what lets the bridge enforce controlled values right
+  after each event.
 
 ## Controlled inputs over an async bridge (seq/ack)
 
@@ -73,9 +81,15 @@ echo reverts fast typing. natui solves it protocol-level:
   local `value` (user kept typing) while still applying everything else.
   When `ack` catches up, JS is authoritative, so controlled transforms
   (uppercasing, rejecting input) still win.
+- when React does not adopt a change at all (handler bails out, clamps, or is
+  missing), the bridge synthesizes a corrective update after the synchronous
+  flush, so the host always settles back on React's value. This covers every
+  controlled kind including Slider.
 
-The integration test (`packages/natui/test/reconciler.test.tsx`) pins both
-behaviors against a reference host implementation.
+The contract tests (`packages/natui/test/`) pin these behaviors against a
+reference host implementation, and `examples/demo/src/verify.tsx` re-proves
+them against the real SwiftUI host via the `edit` debug message (a real
+optimistic edit: local write, seq, change event).
 
 ## The hosts
 
@@ -104,11 +118,14 @@ without touching the GUI:
 
 - `dump` → host returns its actual native tree (assert against it),
 - `emit` → host synthesizes a user event (drive the app),
+- `edit` → host performs a real optimistic user edit (the seq/ack path),
 - `screenshot` → host renders its own window to PNG (no screen-recording
-  permission needed).
+  permission needed); hosts always reply, with an `error` field on failure,
+  and the JS side times out rather than hanging if a host misbehaves.
 
-`examples/demo/src/verify.tsx` uses all three to prove counter/todo/toggle/
-slider round trips against the real SwiftUI host.
+`examples/demo/src/verify.tsx` uses all four to prove counter/todo/toggle/
+slider round trips plus the controlled-input stress cases (fast typing,
+rejected and clamped edits, slider clamping) against the real SwiftUI host.
 
 ## Production path (researched, staged)
 
@@ -138,10 +155,15 @@ slider round trips against the real SwiftUI host.
 
 ## What's deliberately out of scope for the POC
 
-- Hot reload / react-refresh (the `NatuiApp.update()` hook exists for a
-  watch-and-remount loop).
+- react-refresh (state-preserving hot reload). `examples/demo/src/dev.tsx` is a
+  watch-and-remount loop on `NatuiApp.update()`: the window survives, state
+  resets, and only the re-imported app module is fresh (transitive imports may
+  stay cached by the loader).
 - Animations API, gestures, menus, multi-window (`window` message is already
   separate from the tree for this reason).
-- Accessibility props (the native controls carry their defaults).
 - A `natui doctor`/CLI packaging story (Stage 1: the .app bundle wrapper around
   the proven `--bundle` mode).
+
+Accessibility basics are in scope: `accessibilityLabel`, `accessibilityHint`,
+and `accessibilityIdentifier` are common props mapped to the platform AX
+attributes; everything else rides on the native controls' defaults.

@@ -33,7 +33,9 @@ watch(srcDir, { recursive: true }, (_event, filename) => {
     reloading = false;
     generation += 1;
     try {
-      // Cache-busted re-import gives us the fresh module graph under tsx.
+      // Cache-busted re-import re-evaluates App.tsx itself; its transitive
+      // imports may still come from the loader cache (good enough for a
+      // remount loop; react-refresh-style reload is out of scope).
       const fresh = (await import(`./App.js?gen=${generation}`)) as { App: React.FC };
       app.update(createElement(fresh.App));
       console.error(`[dev] reloaded (#${generation}: ${filename})`);

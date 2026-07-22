@@ -7,16 +7,39 @@
  *   node src/verify-embedded.mjs
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-const hostBin = `${repoRoot}hosts/macos/.build/debug/natui-host`;
+// Same lookup order as the natui renderer: env override, then the release
+// build the README documents, then a local debug build.
+const hostBin =
+  process.env.NATUI_HOST ??
+  [
+    `${repoRoot}hosts/macos/.build/release/natui-host`,
+    `${repoRoot}hosts/macos/.build/debug/natui-host`,
+  ].find(existsSync);
+assert.ok(
+  hostBin,
+  'natui-host not built. Run: pnpm build:host:macos (or set NATUI_HOST)',
+);
 const bundle = fileURLToPath(new URL('../dist/embedded.js', import.meta.url));
+assert.ok(existsSync(bundle), 'embedded bundle missing. Run: pnpm build:embedded');
 const outDir = `${repoRoot}screenshots`;
 mkdirSync(outDir, { recursive: true });
+
+// Refuse to run next to an already-running host (e.g. a forgotten pnpm demo).
+try {
+  const existing = execFileSync('pgrep', ['-lf', 'natui-host'], { encoding: 'utf8' }).trim();
+  if (existing) {
+    console.error(`[probe] another natui host is already running; close it first:\n${existing}`);
+    process.exit(1);
+  }
+} catch {
+  // pgrep exits 1 when nothing matches; that is the good case.
+}
 
 const host = spawn(hostBin, ['--bundle', bundle], { stdio: ['pipe', 'pipe', 'inherit'] });
 const send = (msg) => host.stdin.write(JSON.stringify(msg) + '\n');
@@ -77,9 +100,68 @@ assert.ok(
 );
 console.error('[probe] in-process interactive round trip OK');
 
-send({ t: 'screenshot', path: `${outDir}/04-embedded-jsc.png` });
-await waitFor((m) => m.t === 'shot', 'shot');
+// --- Native seq/ack host contract, deterministically. -------------------------
+// `edit` performs a real optimistic edit (host seq += 1). Because this probe
+// owns the stdio channel, it can then impersonate the renderer with updates
+// carrying chosen acks: a stale ack must be suppressed, a current ack must win.
+messages.length = 0;
+send({ t: 'dump' });
+tree = (await waitFor((m) => m.t === 'tree', 'tree before seq/ack contract')).root;
+const field = collect(tree, 'TextField')[0];
+assert.ok(field, 'demo TextField found');
+send({ t: 'edit', id: field.id, value: 'racing' });
+await sleep(400); // in-proc React adopts the value (echo carries ack == seq 1)
+send({ t: 'commit', ops: [{ op: 'update', id: field.id, props: { value: 'STALE' }, ack: 0 }] });
+await sleep(100);
+messages.length = 0;
+send({ t: 'dump' });
+tree = (await waitFor((m) => m.t === 'tree', 'tree after stale update')).root;
+assert.equal(
+  collect(tree, 'TextField')[0].props?.value,
+  'racing',
+  'update with stale ack (0 < lastSentSeq 1) must be suppressed by the host',
+);
+send({ t: 'commit', ops: [{ op: 'update', id: field.id, props: { value: 'CURRENT' }, ack: 1 }] });
+await sleep(100);
+messages.length = 0;
+send({ t: 'dump' });
+tree = (await waitFor((m) => m.t === 'tree', 'tree after authoritative update')).root;
+assert.equal(
+  collect(tree, 'TextField')[0].props?.value,
+  'CURRENT',
+  'update with current ack (== lastSentSeq) is authoritative',
+);
+console.error('[probe] native seq/ack contract OK (stale suppressed, current wins)');
+
+const shotPath = `${outDir}/04-embedded-jsc.png`;
+send({ t: 'screenshot', path: shotPath });
+const shot = await waitFor((m) => m.t === 'shot', 'shot');
+assert.ok(!shot.error, `screenshot failed: ${shot.error}`);
+// The PNG must exist, be non-empty, and decode.
+assert.ok(statSync(shotPath).size > 1000, 'screenshot is suspiciously small');
+assert.deepEqual(
+  [...readFileSync(shotPath).subarray(0, 8)],
+  [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  'screenshot lacks a PNG signature',
+);
+assert.match(
+  execFileSync('sips', ['-g', 'pixelWidth', shotPath], { encoding: 'utf8' }),
+  /pixelWidth: \d+/,
+  'screenshot did not decode',
+);
 console.error('[probe] EMBEDDED MODE VERIFIED');
 
 send({ t: 'quit' });
-setTimeout(() => process.exit(0), 300);
+await new Promise((r) => host.on('exit', r));
+
+// --- Lifecycle regression: an embedded app must survive a closed stdin. -------
+// Stdin is only the optional debug channel in --bundle mode; EOF on it must
+// not terminate the application (it used to).
+const orphan = spawn(hostBin, ['--bundle', bundle], { stdio: ['ignore', 'ignore', 'inherit'] });
+await sleep(2500);
+assert.equal(orphan.exitCode, null, 'embedded host must stay alive with stdin closed');
+orphan.kill('SIGTERM');
+const code = await new Promise((r) => orphan.on('exit', r));
+console.error(`[probe] closed-stdin lifecycle OK (survived, then terminated with ${code})`);
+
+process.exit(0);

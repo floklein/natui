@@ -2,18 +2,31 @@
   "name": "natui",
   "version": "0.1.0",
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
+  "license": "MIT",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./components": "./src/components.ts",
-    "./inproc": "./src/inproc.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components.d.ts",
+      "import": "./dist/components.js"
+    },
+    "./inproc": {
+      "types": "./dist/inproc.d.ts",
+      "import": "./dist/inproc.js"
+    }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit",
-    "test": "node --import tsx --test test/reconciler.test.tsx"
+    "build": "node --eval \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "test": "node --import tsx --test test/reconciler.test.tsx test/validation.test.tsx test/bridge.test.ts test/run.test.ts"
   },
   "dependencies": {
     "react-reconciler": "0.33.0"

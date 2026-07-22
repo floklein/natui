@@ -67,7 +67,7 @@ final class JSHost {
         Emitter.jsSink = { line in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    JSHost.shared.recv?.call(withArguments: [line])
+                    _ = JSHost.shared.recv?.call(withArguments: [line])
                 }
             }
         }

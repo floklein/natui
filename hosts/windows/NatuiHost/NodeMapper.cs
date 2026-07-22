@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -21,8 +22,9 @@ internal sealed class NatuiStack : Grid
 
     /// <summary>
     /// Protocol alignment string: leading/center/trailing for vertical stacks,
-    /// top/center/bottom for horizontal ones. Null means the default (stretch
-    /// for vertical stacks, center for horizontal ones).
+    /// top/center/bottom for horizontal ones. Null means the default: center
+    /// on both axes, like SwiftUI stacks. (Greedy children still stretch via
+    /// IsCrossStretch, independent of this alignment.)
     /// </summary>
     public string? CrossAlignment { get; set; }
 
@@ -38,9 +40,10 @@ internal sealed class NatuiStack : Grid
     public bool VGreedy { get; private set; }
 
     // Kinds that expand to fill an axis in SwiftUI without an explicit frame.
-    private static readonly HashSet<string> GreedyHorizontalKinds =
+    // Internal: NodeMapper.SyncInnerAlignment shares them.
+    internal static readonly HashSet<string> GreedyHorizontalKinds =
         ["TextField", "Slider", "ProgressView", "List", "ScrollView"];
-    private static readonly HashSet<string> GreedyVerticalKinds = ["List", "ScrollView"];
+    internal static readonly HashSet<string> GreedyVerticalKinds = ["List", "ScrollView"];
 
     public void RebuildLayout()
     {
@@ -59,8 +62,8 @@ internal sealed class NatuiStack : Grid
             if (Children[i] is not FrameworkElement child) continue;
 
             var node = child.Tag as NatuiNode;
-            var mainStar = IsMainStar(child, node, vertical);
-            var crossStretch = IsCrossStretch(child, node, vertical);
+            var mainStar = IsMainStar(node, vertical);
+            var crossStretch = IsCrossStretch(node, vertical);
             anyMainStar |= mainStar;
             anyCrossStretch |= crossStretch;
 
@@ -111,40 +114,48 @@ internal sealed class NatuiStack : Grid
         {
             HGreedy = hGreedy;
             VGreedy = vGreedy;
+            // A stack that turned greedy must also fill its own frame shell.
+            if (Tag is NatuiNode self) NodeMapper.SyncInnerAlignment(self);
             // Greediness bubbles up: a stack containing a greedy child is
-            // itself greedy. Terminates because it only recurses on change.
-            (Parent as NatuiStack)?.RebuildLayout();
+            // itself greedy. Node stacks sit inside their frame shell (a
+            // Border), so look through it; internal stacks (root, labels,
+            // scroll content) may be direct children. Terminates because it
+            // only recurses on change.
+            var ancestor = Parent as NatuiStack ?? (Parent as Border)?.Parent as NatuiStack;
+            ancestor?.RebuildLayout();
         }
     }
 
-    private static bool IsMainStar(FrameworkElement child, NatuiNode? node, bool vertical)
+    // Stack children are the nodes' frame shells, so nested-stack greediness
+    // is read through node.Inner rather than the child element itself.
+    private static bool IsMainStar(NatuiNode? node, bool vertical)
     {
         if (node is null) return false;
         if (node.Kind == "Spacer") return true;
         return vertical
             ? node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
-                || child is NatuiStack { VGreedy: true }
+                || node.Inner is NatuiStack { VGreedy: true }
             : node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
-                || child is NatuiStack { HGreedy: true };
+                || node.Inner is NatuiStack { HGreedy: true };
     }
 
-    private static bool IsCrossStretch(FrameworkElement child, NatuiNode? node, bool vertical)
+    private static bool IsCrossStretch(NatuiNode? node, bool vertical)
     {
         if (node is null) return false;
         if (node.Kind == "Divider") return true;
         return vertical
             ? node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
-                || child is NatuiStack { HGreedy: true }
+                || node.Inner is NatuiStack { HGreedy: true }
             : node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
-                || child is NatuiStack { VGreedy: true };
+                || node.Inner is NatuiStack { VGreedy: true };
     }
 
     private HorizontalAlignment CrossToHorizontal() => CrossAlignment switch
     {
         "leading" => HorizontalAlignment.Left,
-        "center" => HorizontalAlignment.Center,
         "trailing" => HorizontalAlignment.Right,
-        _ => HorizontalAlignment.Stretch,
+        // SwiftUI VStacks center children horizontally by default.
+        _ => HorizontalAlignment.Center,
     };
 
     private VerticalAlignment CrossToVertical() => CrossAlignment switch
@@ -174,12 +185,18 @@ internal sealed class NodeMapper(NatuiStack rootStack)
 
     private static readonly HashSet<string> LabelKinds = ["Text", "Button", "Toggle"];
 
+    private static readonly HashSet<string> ContainerKinds =
+        ["VStack", "HStack", "ZStack", "ScrollView", "List"];
+
     /// <summary>
-    /// #text nodes are consumed by their parent's label everywhere except at
-    /// the root, where the Swift host renders them as plain text views.
+    /// #text nodes are consumed by their parent's label in label kinds; in
+    /// containers and at the root they render as plain text views, matching
+    /// the macOS host's childViews.
     /// </summary>
-    public static bool IsAttachable(int parentId, NatuiNode child) =>
-        child.Kind != "#text" || parentId == NodeStore.RootId;
+    public static bool IsAttachable(int parentId, NatuiNode? parent, NatuiNode child) =>
+        child.Kind != "#text"
+        || parentId == NodeStore.RootId
+        || (parent is not null && ContainerKinds.Contains(parent.Kind));
 
     // -- element construction ---------------------------------------------------
 
@@ -189,8 +206,17 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     {
         if (node.Element is null)
         {
-            node.Element = Build(node);
-            node.Element.Tag = node; // NatuiStack layout reads the node back
+            node.Inner = Build(node);
+            // Frame shell: the frame props size this outer Border while
+            // padding, background, and cornerRadius stay on the inner
+            // element. This reproduces the macOS modifier order (padding →
+            // background → cornerRadius clip → frame): a frame never widens
+            // the painted background.
+            node.Element = new Border { Child = node.Inner };
+            // Both carry the node: NatuiStack layout reads it off its
+            // children (the shells), prop helpers off the inner element.
+            node.Element.Tag = node;
+            node.Inner.Tag = node;
             ApplyProps(node);
         }
         return node.Element;
@@ -228,7 +254,8 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     private static FrameworkElement BuildText(NatuiNode node)
     {
         // TextBlock has no Background/CornerRadius, so every Text gets a
-        // Border shell that carries the common box props.
+        // Border box (the node's Inner) that carries padding/background/
+        // cornerRadius; the frame shell around it is added by EnsureElement.
         var label = new TextBlock { TextWrapping = TextWrapping.Wrap };
         node.Label = label;
         return new Border { Child = label };
@@ -269,10 +296,8 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         if (_applyingRemote > 0) return;
         if (value == (node.Str("value") ?? "")) return;
         // Optimistic local write plus seq so JS echoes can be staleness-checked
-        // (protocol seq/ack).
-        node.Props["value"] = value;
-        node.LastSentSeq++;
-        Ipc.Event(node.Id, "change", new JsonObject { ["value"] = value }, node.LastSentSeq);
+        // (protocol seq/ack); shared with the "edit" debug message.
+        node.UserEdit(JsonValue.Create(value));
     }
 
     private static void EmitSubmit(NatuiNode node) =>
@@ -292,9 +317,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     {
         if (_applyingRemote > 0) return;
         if (value == (Json.Bool(node.Props, "value") ?? false)) return;
-        node.Props["value"] = value;
-        node.LastSentSeq++;
-        Ipc.Event(node.Id, "change", new JsonObject { ["value"] = value }, node.LastSentSeq);
+        node.UserEdit(JsonValue.Create(value));
     }
 
     private Slider BuildSlider(NatuiNode node)
@@ -304,9 +327,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         {
             if (_applyingRemote > 0) return;
             if (e.NewValue == (node.Num("value") ?? 0)) return;
-            node.Props["value"] = e.NewValue;
-            node.LastSentSeq++;
-            Ipc.Event(node.Id, "change", new JsonObject { ["value"] = e.NewValue }, node.LastSentSeq);
+            node.UserEdit(JsonValue.Create(e.NewValue));
         };
         return slider;
     }
@@ -319,9 +340,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
             if (_applyingRemote > 0) return;
             var value = (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
             if (value == (node.Str("value") ?? "")) return;
-            node.Props["value"] = value;
-            node.LastSentSeq++;
-            Ipc.Event(node.Id, "change", new JsonObject { ["value"] = value }, node.LastSentSeq);
+            node.UserEdit(JsonValue.Create(value));
         };
         return combo;
     }
@@ -401,7 +420,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
             RefreshLabel(parent);
             return;
         }
-        if (!IsAttachable(parentId, child)) return;
+        if (!IsAttachable(parentId, parent, child)) return;
         var element = EnsureElement(child);
         switch (ParentSurface(parentId, parent))
         {
@@ -413,6 +432,9 @@ internal sealed class NodeMapper(NatuiStack rootStack)
                 panel.Children.Insert(index, element);
                 break;
             case ListView list:
+                // SwiftUI list rows lead-align their content.
+                child.InList = true;
+                SyncInnerAlignment(child);
                 list.Items.Insert(index, element);
                 break;
             case null:
@@ -440,6 +462,8 @@ internal sealed class NodeMapper(NatuiStack rootStack)
                 panel.Children.Remove(element);
                 break;
             case ListView list:
+                child.InList = false;
+                SyncInnerAlignment(child); // drop the list-row lead alignment
                 list.Items.Remove(element);
                 break;
         }
@@ -449,12 +473,12 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     private object? ParentSurface(int parentId, NatuiNode? parent)
     {
         if (parentId == NodeStore.RootId) return RootStack;
-        return parent?.Element switch
+        return parent?.Inner switch
         {
             NatuiStack stack => stack,
             ListView list => list,
             ScrollViewer viewer => viewer.Content as NatuiStack,
-            // parent is provably non-null here (its Element just matched),
+            // parent is provably non-null here (its Inner just matched),
             // but the flow analysis cannot see through the switch target.
             Grid grid when parent!.Kind == "ZStack" => grid,
             _ => null,
@@ -484,7 +508,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         _applyingRemote++;
         try
         {
-            switch (node.Element)
+            switch (node.Inner)
             {
                 case Border when node.Label is { } label:
                     label.Text = node.JoinedText();
@@ -506,41 +530,38 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         if (control.Content is Panel wrapper) wrapper.Children.Clear();
         control.Content = null;
 
-        var elements = node.Children.Where(c => c.Kind != "#text").ToList();
-        if (elements.Count == 0)
+        // Pure-text fast path: a plain string label (macOS: Text(joinedText)).
+        if (node.Children.All(c => c.Kind == "#text"))
         {
             control.Content = node.JoinedText();
+            return;
         }
-        else if (elements.Count == 1)
-        {
-            control.Content = EnsureElement(elements[0]);
-        }
-        else
-        {
-            var stack = new NatuiStack { Orientation = Orientation.Horizontal, Spacing = 4 };
-            foreach (var child in elements) stack.Children.Add(EnsureElement(child));
-            stack.RebuildLayout();
-            control.Content = stack;
-        }
+        // Mixed labels like <Button><Image/> Delete</Button>: every child in
+        // document order, #text children as inline text blocks, matching the
+        // macOS host's labelContent (HStack(spacing: 4)).
+        var stack = new NatuiStack { Orientation = Orientation.Horizontal, Spacing = 4 };
+        foreach (var child in node.Children) stack.Children.Add(EnsureElement(child));
+        stack.RebuildLayout();
+        control.Content = stack;
     }
 
     // -- prop application ------------------------------------------------------------
 
     public void ApplyProps(NatuiNode node)
     {
-        if (node.Element is not { } element) return;
+        if (node.Element is not { } shell || node.Inner is not { } inner) return;
         _applyingRemote++;
         try
         {
-            ApplyKindProps(node, element);
-            ApplyCommonProps(node, element);
+            ApplyKindProps(node, inner);
+            ApplyCommonProps(node, shell, inner);
         }
         finally
         {
             _applyingRemote--;
         }
         // Frame stretch, spacing, or spacer changes affect the parent's tracks.
-        if (element.Parent is NatuiStack parent) parent.RebuildLayout();
+        if (shell.Parent is NatuiStack parent) parent.RebuildLayout();
     }
 
     private void ApplyKindProps(NatuiNode node, FrameworkElement element)
@@ -736,17 +757,70 @@ internal sealed class NodeMapper(NatuiStack rootStack)
 
     // -- common props ----------------------------------------------------------------
 
-    private void ApplyCommonProps(NatuiNode node, FrameworkElement element)
+    private void ApplyCommonProps(NatuiNode node, FrameworkElement shell, FrameworkElement inner)
     {
-        ApplyPadding(element, ParsePadding(node));
-        ApplyBackground(element, BrushFromHex(node.Str("background")));
-        ApplyCornerRadius(element, node.Num("cornerRadius"));
-        ApplyFrame(node, element);
-        element.Opacity = node.Num("opacity") ?? 1.0;
-        element.Visibility = node.Flag("hidden") ? Visibility.Collapsed : Visibility.Visible;
-        if (element is Control control) control.IsEnabled = !node.Flag("disabled");
-        ApplyForeground(node, element);
-        ToolTipService.SetToolTip(element, node.Str("help"));
+        // macOS modifier order: padding → background → cornerRadius clip →
+        // frame. The first three shape the inner box; the frame sizes the
+        // outer shell, so a background fills the padded bounds and never
+        // bleeds into frame-added space.
+        ApplyPadding(inner, ParsePadding(node));
+        ApplyBackground(inner, BrushFromHex(node.Str("background")));
+        ApplyCornerRadius(inner, node.Num("cornerRadius"));
+        ApplyFrame(node, shell);
+        SyncInnerAlignment(node);
+        shell.Opacity = node.Num("opacity") ?? 1.0;
+        shell.Visibility = node.Flag("hidden") ? Visibility.Collapsed : Visibility.Visible;
+        if (inner is Control control) control.IsEnabled = !node.Flag("disabled");
+        ApplyForeground(node, inner);
+        ToolTipService.SetToolTip(shell, node.Str("help"));
+        ApplyAutomationProps(node);
+    }
+
+    /// <summary>
+    /// Alignment of the inner element inside its frame shell. Greedy kinds
+    /// fill the frame (a TextField expands to the proposed width in SwiftUI
+    /// too); everything else floats at SwiftUI's default frame alignment
+    /// (center), except List rows, which lead-align like SwiftUI list rows.
+    /// Also called by NatuiStack when a stack's greediness changes.
+    /// </summary>
+    public static void SyncInnerAlignment(NatuiNode node)
+    {
+        if (node.Inner is not { } inner) return;
+        var fillsH = node.Kind is "Spacer" or "Divider"
+            || NatuiStack.GreedyHorizontalKinds.Contains(node.Kind)
+            || inner is NatuiStack { HGreedy: true };
+        var fillsV = node.Kind is "Spacer" or "Divider"
+            || NatuiStack.GreedyVerticalKinds.Contains(node.Kind)
+            || inner is NatuiStack { VGreedy: true };
+        inner.HorizontalAlignment = fillsH ? HorizontalAlignment.Stretch
+            : node.InList ? HorizontalAlignment.Left
+            : HorizontalAlignment.Center;
+        inner.VerticalAlignment =
+            fillsV ? VerticalAlignment.Stretch : VerticalAlignment.Center;
+    }
+
+    private static void ApplyAutomationProps(NatuiNode node)
+    {
+        // Target the element that produces the UIA peer: the TextBlock for
+        // Text/#text nodes, the inner control otherwise (the frame shell
+        // Border has no automation peer of its own).
+        FrameworkElement? target = node.Label ?? node.Inner;
+        if (target is null) return;
+        SetOrClearString(target, AutomationProperties.NameProperty,
+            node.Str("accessibilityLabel"));
+        SetOrClearString(target, AutomationProperties.HelpTextProperty,
+            node.Str("accessibilityHint"));
+        SetOrClearString(target, AutomationProperties.AutomationIdProperty,
+            node.Str("accessibilityIdentifier"));
+    }
+
+    private static void SetOrClearString(
+        FrameworkElement element, DependencyProperty property, string? value)
+    {
+        // ClearValue rather than writing "" when absent, so controls fall
+        // back to their default UIA name (e.g. a Button's content text).
+        if (value is not null) element.SetValue(property, value);
+        else element.ClearValue(property);
     }
 
     private static Thickness? ParsePadding(NatuiNode node)

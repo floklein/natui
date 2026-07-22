@@ -2,9 +2,11 @@ packages:
   - packages/*
   - examples/*
 
-# Repo-local overrides: the global minimumReleaseAge guard chokes on registry
-# metadata missing "time" for react-reconciler. Versions are pinned exactly.
+# Repo-local overrides. A global minimumReleaseAge guard chokes on registry
+# metadata missing "time" for react-reconciler, so exclude exactly that one
+# package (pinned to 0.33.0) instead of disabling the guard repo-wide.
 resolutionMode: highest
-minimumReleaseAge: 0
+minimumReleaseAgeExclude:
+  - react-reconciler
 allowBuilds:
   esbuild: true

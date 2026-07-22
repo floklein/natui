@@ -73,11 +73,21 @@ internal static class Ipc
         ["root"] = root,
     });
 
-    public static void Shot(string path) => Send(new JsonObject
+    /// <summary>
+    /// Reply to a screenshot request. Hosts must always reply (a silent
+    /// failure would leave the JS-side promise pending forever); on failure
+    /// <paramref name="error"/> says why and no file was written.
+    /// </summary>
+    public static void Shot(string path, string? error = null)
     {
-        ["t"] = "shot",
-        ["path"] = path,
-    });
+        var message = new JsonObject
+        {
+            ["t"] = "shot",
+            ["path"] = path,
+        };
+        if (error is not null) message["error"] = error;
+        Send(message);
+    }
 
     public static void Log(string message)
     {
