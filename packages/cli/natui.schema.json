@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://natui.dev/schemas/config.json",
+  "title": "NatUI configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "identifier", "entry"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "identifier": { "type": "string", "minLength": 3 },
+    "entry": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "default": "0.1.0" },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number", "exclusiveMinimum": 0, "default": 900 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "default": 640 },
+        "resizable": { "type": "boolean", "default": true }
+      }
+    },
+    "macos": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minimumVersion": { "type": "string", "default": "14.0" }
+      }
+    },
+    "windows": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "architecture": { "enum": ["x64", "arm64"], "default": "x64" },
+        "minimumVersion": { "type": "string", "default": "10.0.19041.0" }
+      }
+    }
+  }
+}

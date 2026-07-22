@@ -1,0 +1,15 @@
+{
+  "name": "@natui/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "natui": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@natui/runtime": "0.1.0",
+    "esbuild": "0.28.1"
+  }
+}

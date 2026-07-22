@@ -1,0 +1,19 @@
+{
+  "$schema": "./packages/cli/natui.schema.json",
+  "name": "NatUI Counter",
+  "identifier": "dev.natui.counter",
+  "entry": "examples/counter/src/App.tsx",
+  "version": "0.1.0",
+  "window": {
+    "width": 520,
+    "height": 620,
+    "resizable": true
+  },
+  "macos": {
+    "minimumVersion": "14.0"
+  },
+  "windows": {
+    "architecture": "x64",
+    "minimumVersion": "10.0.19041.0"
+  }
+}
