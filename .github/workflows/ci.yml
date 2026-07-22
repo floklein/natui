@@ -18,8 +18,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      - run: pnpm typecheck
+      # Build before typecheck: examples/demo resolves natui's types from
+      # packages/natui/dist, which only exists after a build.
       - run: pnpm build
+      - run: pnpm typecheck
 
   macos-host:
     name: Swift host build + JS suite (macOS)
