@@ -5,15 +5,25 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactElement } from 'react';
 import type { Op } from '../src/protocol.js';
 import {
   Button,
+  DatePicker,
+  Detail,
   HStack,
+  Label,
+  Link,
   Picker,
   ScrollView,
+  SearchField,
+  Section,
+  Sidebar,
   Slider,
+  SplitView,
+  Stepper,
   Text,
+  TextEditor,
   TextField,
   Toggle,
   VStack,
@@ -465,6 +475,201 @@ test('useContext propagates and useEffect runs with cleanup', async () => {
     ['mounted:first', 'cleanup:first', 'mounted:second', 'cleanup:second'],
     'unmount runs final cleanup',
   );
+});
+
+// ---------------------------------------------------------------------------
+// New controlled input kinds: the same accept/reject/clamp/no-handler matrix
+// as Slider above, parametrized. Each kind is one `value` prop + `change`.
+// ---------------------------------------------------------------------------
+
+interface ControlledCase {
+  kind: string;
+  initial: string | number;
+  edited: string | number;
+  clamp: (v: never) => string | number;
+  clamped: string | number;
+  make: (value: unknown, onChange?: (v: unknown) => void) => ReactElement;
+}
+
+const CONTROLLED_MATRIX: ControlledCase[] = [
+  {
+    kind: 'SearchField',
+    initial: '',
+    edited: 'query',
+    clamp: (v: string) => v.slice(0, 3),
+    clamped: 'que',
+    make: (value, onChange) => <SearchField value={value as string} onChange={onChange} />,
+  },
+  {
+    kind: 'DatePicker',
+    initial: '2026-07-01',
+    edited: '2026-07-15',
+    clamp: (v: string) => (v > '2026-07-10' ? '2026-07-10' : v),
+    clamped: '2026-07-10',
+    make: (value, onChange) => (
+      <DatePicker value={value as string} displayedComponents="date" onChange={onChange} />
+    ),
+  },
+  {
+    kind: 'Stepper',
+    initial: 2,
+    edited: 4,
+    clamp: (v: number) => Math.min(v, 3),
+    clamped: 3,
+    make: (value, onChange) => (
+      <Stepper value={value as number} min={1} max={5} onChange={onChange} />
+    ),
+  },
+  {
+    kind: 'TextEditor',
+    initial: 'draft',
+    edited: 'draft, edited',
+    clamp: (v: string) => v.slice(0, 8),
+    clamped: 'draft, e',
+    make: (value, onChange) => <TextEditor value={value as string} onChange={onChange} />,
+  },
+];
+
+for (const c of CONTROLLED_MATRIX) {
+  test(`controlled ${c.kind}: accepted edit round-trips`, async () => {
+    const { host, renderer } = setup();
+    function App() {
+      const [v, setV] = useState(c.initial);
+      return c.make(v as never, setV as never);
+    }
+    renderer.render(<App />);
+    await settle();
+    host.drain();
+
+    host.userEdit(host.byKind(c.kind)[0]!.id, c.edited);
+    await settle();
+    host.drain();
+    assert.equal(host.byKind(c.kind)[0]!.props.value, c.edited);
+  });
+
+  test(`controlled ${c.kind}: rejected edit snaps back`, async () => {
+    const { host, renderer } = setup();
+    renderer.render(c.make(c.initial as never, (() => {}) as never));
+    await settle();
+    host.drain();
+
+    host.userEdit(host.byKind(c.kind)[0]!.id, c.edited);
+    await settle();
+    host.drain();
+    assert.equal(host.byKind(c.kind)[0]!.props.value, c.initial, 'no-op handler keeps value');
+  });
+
+  test(`controlled ${c.kind}: clamped edit settles on the clamp`, async () => {
+    const { host, renderer } = setup();
+    function App() {
+      const [v, setV] = useState(c.initial);
+      return c.make(v as never, ((x: never) => setV(c.clamp(x))) as never);
+    }
+    renderer.render(<App />);
+    await settle();
+    host.drain();
+
+    host.userEdit(host.byKind(c.kind)[0]!.id, c.edited);
+    await settle();
+    host.drain();
+    assert.equal(host.byKind(c.kind)[0]!.props.value, c.clamped);
+  });
+
+  test(`controlled ${c.kind}: missing handler snaps back`, async () => {
+    const { host, renderer } = setup();
+    renderer.render(c.make(c.initial as never));
+    await settle();
+    host.drain();
+
+    host.userEdit(host.byKind(c.kind)[0]!.id, c.edited);
+    await settle();
+    host.drain();
+    assert.equal(host.byKind(c.kind)[0]!.props.value, c.initial, 'no handler keeps value');
+  });
+}
+
+// ---------------------------------------------------------------------------
+// SplitView slots and content-kind smoke tests
+// ---------------------------------------------------------------------------
+
+test('SplitView slots are stable: sidebar churn never recreates the Detail node', async () => {
+  const { host, renderer, transport } = setup();
+  function App() {
+    const [extra, setExtra] = useState(false);
+    return (
+      <SplitView value="all" sidebarWidth={220}>
+        <Sidebar>
+          <Text>nav</Text>
+          {extra && <Text>extra row</Text>}
+        </Sidebar>
+        <Detail>
+          <Text>detail pane</Text>
+          <Button onPress={() => setExtra((v) => !v)}>toggle</Button>
+        </Detail>
+      </SplitView>
+    );
+  }
+  renderer.render(<App />);
+  await settle();
+  host.drain();
+
+  const split = host.byKind('SplitView')[0]!;
+  assert.equal(split.props.value, 'all');
+  assert.equal(split.props.sidebarWidth, 220);
+  const detailId = host.byKind('Detail')[0]!.id;
+  const sidebarId = host.byKind('Sidebar')[0]!.id;
+
+  transport.emit({ t: 'event', id: host.byKind('Button')[0]!.id, name: 'press', payload: {} });
+  await settle();
+  host.drain();
+
+  assert.equal(host.byKind('Sidebar')[0]!.id, sidebarId, 'Sidebar node id stable');
+  assert.equal(host.byKind('Detail')[0]!.id, detailId, 'Detail node id stable');
+  assert.equal(host.byKind('Sidebar')[0]!.children.length, 2, 'sidebar gained the extra row');
+
+  // Controlled sidebar visibility rides the standard machinery: with no
+  // onChange handler, the optimistic hide is snapped back by enforcement.
+  host.userEdit(split.id, 'detailOnly');
+  await settle();
+  host.drain();
+  assert.equal(
+    host.byKind('SplitView')[0]!.props.value,
+    'all',
+    'unhandled visibility edit snapped back',
+  );
+});
+
+test('content kinds carry their props: Label, Link, Section, tag/badge commons', async () => {
+  const { host, renderer } = setup();
+  renderer.render(
+    <VStack>
+      <Label systemImage="folder">Projects</Label>
+      <Link url="https://example.com/docs">Documentation</Link>
+      <Section header="Archive" footer="Old stuff">
+        <Text tag="row-1" badge={4}>
+          alpha
+        </Text>
+      </Section>
+    </VStack>,
+  );
+  await settle();
+  host.drain();
+
+  const label = host.byKind('Label')[0]!;
+  assert.equal(label.props.systemImage, 'folder');
+  assert.equal(host.textOf(label.id), 'Projects');
+
+  const link = host.byKind('Link')[0]!;
+  assert.equal(link.props.url, 'https://example.com/docs');
+  assert.equal(host.textOf(link.id), 'Documentation');
+
+  const section = host.byKind('Section')[0]!;
+  assert.equal(section.props.header, 'Archive');
+  assert.equal(section.props.footer, 'Old stuff');
+
+  const row = host.byKind('Text')[0]!;
+  assert.equal(row.props.tag, 'row-1');
+  assert.equal(row.props.badge, 4);
 });
 
 // ---------------------------------------------------------------------------

@@ -56,8 +56,18 @@ internal sealed class NatuiNode(int id, string kind)
     /// </summary>
     public FrameworkElement? Inner;
 
-    /// <summary>Inner TextBlock for Text/#text nodes (Inner is a Border box).</summary>
+    /// <summary>Inner TextBlock for Text/#text nodes (Inner is a Border box),
+    /// and for Label nodes (Inner is a NatuiStack with icon + text).</summary>
     public TextBlock? Label;
+
+    /// <summary>
+    /// WinUI object hosted OUTSIDE normal visual flow: ContentDialog (Alert),
+    /// Flyout (Popover), overlay Grid (Sheet), MenuBar/CommandBar controls,
+    /// TabViewItem (Tab). The node's Element stays a collapsed placeholder in
+    /// flow so VisualIndexOf and attach/detach index math are untouched.
+    /// NodeMapper.WillDestroy tears these down.
+    /// </summary>
+    public object? Hosted;
 
     /// <summary>True while attached to a List parent: rows lead-align their
     /// content, like SwiftUI list rows.</summary>
@@ -263,6 +273,11 @@ internal sealed class NodeStore(NodeMapper mapper)
             _parentOf.Remove(child.Id);
             Destroy(child.Id);
         }
+        // Hosted objects (dialogs, flyouts, overlays, chrome) live outside
+        // the visual tree; without this an open dialog inside a removed
+        // subtree would stay visible forever. Covers the clear op too, which
+        // funnels every root child through here.
+        mapper.WillDestroy(node);
         _byId.Remove(id);
     }
 

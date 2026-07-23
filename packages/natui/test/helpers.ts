@@ -7,6 +7,14 @@
 import assert from 'node:assert/strict';
 import { Bridge } from '../src/bridge/bridge.js';
 import type { Transport } from '../src/bridge/transport.js';
+import type {
+  AlertButtonSpec,
+  MenuItemSpec,
+  MenuSpec,
+  SortDescriptor,
+  TableColumnSpec,
+  ToolbarItemSpec,
+} from '../src/components.js';
 import type { InboundMessage, Op, OutboundMessage, SerializedProps } from '../src/protocol.js';
 import { createNatuiRenderer, type NatuiRenderer } from '../src/reconciler/renderer.js';
 
@@ -183,6 +191,118 @@ export class MiniHost {
     const node = this.nodes.get(id)!;
     if (node.kind === '#text') return node.text ?? '';
     return node.children.map((c) => this.textOf(c)).join('');
+  }
+
+  // -- kitchen-sink reference semantics ---------------------------------------
+  // These mirror what native hosts must do for the data-driven kinds: resolve
+  // the JSON spec tree from props and emit the documented events. select /
+  // action / search / sortChange never carry seq; only change does.
+
+  /** Depth-first search of a MenuItemSpec tree for an action item by id. */
+  findMenuItem(items: MenuItemSpec[], id: string): MenuItemSpec | undefined {
+    for (const item of items) {
+      if ('divider' in item) continue;
+      if (item.id === id) return item;
+      if (item.children) {
+        const found = this.findMenuItem(item.children, id);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Simulate choosing a menu item on a MenuBar / Menu / ContextMenu node.
+   * Returns false (no event) for unknown ids, dividers, disabled items,
+   * submenu parents, and command-role items, exactly like real hosts.
+   */
+  menuSelect(id: number, itemId: string): boolean {
+    const node = this.nodes.get(id)!;
+    const items: MenuItemSpec[] =
+      node.kind === 'MenuBar'
+        ? (node.props.menus as unknown as MenuSpec[]).flatMap((m) => m.items)
+        : (node.props.items as unknown as MenuItemSpec[]);
+    const item = this.findMenuItem(items, itemId);
+    if (!item || 'divider' in item) return false;
+    if (item.disabled || item.children) return false;
+    if (item.role && item.role !== 'destructive') return false; // native command
+    this.transport.emit({ t: 'event', id, name: 'select', payload: { value: itemId } });
+    return true;
+  }
+
+  /**
+   * Simulate a toolbar interaction: a button/toggle click or a choice inside
+   * a menu toolbar item. Returns false when nothing may fire.
+   */
+  toolbarAction(id: number, itemId: string): boolean {
+    const node = this.nodes.get(id)!;
+    const items = node.props.items as unknown as ToolbarItemSpec[];
+    for (const item of items) {
+      if (item.type === 'button' || item.type === 'toggle') {
+        if (item.id !== itemId) continue;
+        if (item.disabled) return false;
+        this.transport.emit({ t: 'event', id, name: 'action', payload: { value: itemId } });
+        return true;
+      }
+      if (item.type === 'menu') {
+        if (item.disabled) continue;
+        const found = this.findMenuItem(item.items, itemId);
+        if (!found || 'divider' in found) continue;
+        if (found.disabled || found.children) return false;
+        this.transport.emit({ t: 'event', id, name: 'action', payload: { value: itemId } });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Toolbar search field input: fire-and-forget, never echoed into props. */
+  toolbarSearch(id: number, value: string): void {
+    this.transport.emit({ t: 'event', id, name: 'search', payload: { value } });
+  }
+
+  /**
+   * Press an Alert button: asserts the alert is presented, then emits the
+   * NORMATIVE event order: `select` (no seq) followed by the dismissal
+   * change(false) as a real optimistic edit.
+   */
+  alertButtonPress(id: number, buttonId: string): void {
+    const node = this.nodes.get(id)!;
+    assert.equal(node.props.value, true, `alertButtonPress: alert ${id} is not presented`);
+    const buttons = node.props.buttons as unknown as AlertButtonSpec[];
+    assert.ok(
+      buttons.some((b) => b.id === buttonId),
+      `alertButtonPress: no button "${buttonId}"`,
+    );
+    this.transport.emit({ t: 'event', id, name: 'select', payload: { value: buttonId } });
+    this.userEdit(id, false);
+  }
+
+  /** Host-side dismissal of a Sheet/Popover/Alert: optimistic change(false). */
+  dismiss(id: number): void {
+    this.userEdit(id, false);
+  }
+
+  /**
+   * Click a Table column header. Emits sortChange (request semantics, no
+   * seq, no optimistic state); returns false for unknown or non-sortable
+   * columns. The host never sorts: JS reorders rows and echoes `sort`.
+   */
+  sortClick(id: number, key: string): boolean {
+    const node = this.nodes.get(id)!;
+    const columns = node.props.columns as unknown as TableColumnSpec[];
+    const column = columns.find((c) => c.key === key);
+    if (!column || column.sortable === false) return false;
+    const sort = node.props.sort as unknown as SortDescriptor | undefined;
+    const order: SortDescriptor['order'] =
+      sort && sort.key === key && sort.order === 'asc' ? 'desc' : 'asc';
+    this.transport.emit({
+      t: 'event',
+      id,
+      name: 'sortChange',
+      payload: { value: { key, order } },
+    });
+    return true;
   }
 }
 

@@ -4,11 +4,13 @@ Native Windows host for the natui wire protocol v1 (see `docs/protocol.md`).
 It is the WinUI 3 counterpart of `hosts/macos`: the JS renderer spawns this
 exe, writes NDJSON ops to its stdin, and reads events from its stdout.
 
-Status: compiled and verified on Windows 11 (WASDK 1.7, .NET SDK 9 building
-net8.0-windows). The full E2E suite (`pnpm verify`) passes against the real
-WinUI 3 window: tree dumps, button presses, optimistic edits with native
-seq/ack, screenshots, and the controlled-input stress phase. See "First
-Windows compile: findings" at the bottom for what the initial pass fixed.
+Status: the base host is compiled and verified on Windows 11 (WASDK 1.7,
+.NET SDK 9 building net8.0-windows). The full E2E suite (`pnpm verify`)
+passes against the real WinUI 3 window: tree dumps, button presses,
+optimistic edits with native seq/ack, screenshots, and the controlled-input
+stress phase. See "First Windows compile: findings" at the bottom for what
+the initial pass fixed. The newer app-shell kinds (see "App-shell kinds"
+below) are compile-checked by CI only so far.
 
 ## Layout
 
@@ -18,6 +20,10 @@ Windows compile: findings" at the bottom for what the initial pass fixed.
 | `Ipc.cs` | locked NDJSON stdout writer (`ready`, `event`, `window`, `tree`, `shot` with optional `error`), stderr logging |
 | `NodeStore.cs` | node registry and op interpreter (same semantics as the Swift `Store.apply`), `UserEdit` |
 | `NodeMapper.cs` | node to `FrameworkElement` mapping, prop application, label refresh, events, `NatuiStack` |
+| `NodeMapper.Menus.cs` | MenuBar, Toolbar (CommandBar), Menu, ContextMenu, shared `MenuItemSpec` builder, shortcut parsing, command roles |
+| `NodeMapper.Overlays.cs` | Sheet (in-tree scrim + card), Alert (ContentDialog), Popover (Flyout) |
+| `NodeMapper.Structure.cs` | SplitView + Sidebar/Detail slots, TabView/Tab, Section, Table, DisclosureGroup, List/Table selection |
+| `NodeMapper.Inputs.cs` | SearchField, DatePicker, Stepper, TextEditor, Link, Label, segmented/radio Picker styles |
 
 ## Build
 
@@ -137,6 +143,65 @@ redirected): the protocol channel only exists when stdin/stdout are pipes.
 - The window stays alive after close (`DispatcherShutdownMode =
   OnExplicitShutdown`); JS orchestrates shutdown via `quit`, and stdin EOF is
   treated as "parent died, exit now".
+
+## App-shell kinds (kitchen-sink expansion)
+
+The `NodeMapper.*.cs` partials add the ~22 app-shell kinds of protocol v1:
+MenuBar, Toolbar, Menu, ContextMenu, SplitView (+ Sidebar/Detail), TabView/
+Tab, Sheet, Alert, Popover (+ PopoverContent), Section, Table, DisclosureGroup,
+SearchField, DatePicker, Stepper, TextEditor, Link, Label, and the segmented/
+radioGroup Picker styles, plus List/Table selection and Table sort requests.
+
+Status: this expansion is compile-checked by the `windows-host` CI job only.
+Unlike the base host above, it has not been E2E-verified against a real
+window yet; the macOS host plus `pnpm verify:kitchen` is the behavioral
+reference.
+
+### Windows divergences (deliberate, v1)
+
+- Toolbar search items always render in the LEFT region (CommandBar.Content,
+  a horizontal StackPanel), regardless of their position in `items`; items
+  after the first `flexibleSpace` become right-aligned PrimaryCommands.
+  A toolbar props change rebuilds the CommandBar wholesale, which drops
+  in-progress search text and focus (the macOS host patches in place).
+- DatePicker is date-only: `displayedComponents` `time`/`dateTime` degrade to
+  the date part (CalendarDatePicker has no time UI), and change events always
+  carry `YYYY-MM-DD`.
+- List rows inside `Section` children are not individually selectable (they
+  are not items of the outer ListView); `badge` is not rendered on List rows.
+- Toggle/Picker `style` and TextField `secure` are fixed at creation
+  (changing them later would need an element swap).
+- Sheet is an in-tree overlay (scrim + centered card in the overlay layer),
+  not a separate window, so unlike macOS it IS captured by
+  RenderTargetBitmap screenshots. Alerts, popovers, and open menus still are
+  not (ContentDialog and flyouts render in popup layers).
+- MenuBar/Toolbar hoist into the chrome row at creation, wherever they sit in
+  the tree (macOS hoists only the first root-level one and warns otherwise).
+- SplitView ignores `minSidebarWidth`/`maxSidebarWidth` (no interactive pane
+  resize in WinUI SplitView); sidebar visibility is JS-driven only.
+- Alert supports at most cancel + two non-cancel buttons (ContentDialog's
+  close/primary/secondary); extra buttons are dropped with a stderr warning,
+  and `destructive` button styling is not rendered.
+- A Menu label supports `#text` children (joined) or a `systemImage` icon;
+  element children inside a Menu label are ignored.
+- Table header sort indicators are text arrows (` ^`/` v`) on transparent
+  header buttons, not native column headers.
+
+### Compile-risk register (blind CI compiles)
+
+Ranked by likelihood of a member-name miss against WinAppSDK 1.7, with the
+planned fallback if the CI compile fails on it:
+
+| API used | risk | fallback |
+|---|---|---|
+| `SelectorBar`/`SelectorBarItem` (`Items`, `Text`, `SelectedItem`, `SelectionChanged`) | needs WASDK 1.5+; isolated in `BuildSegmentedPicker` + `ApplySegmentedPickerProps` | horizontal StackPanel of ToggleButtons |
+| `AppBarButton.Flyout` (inherited from `Button`) | verified: AppBarButton derives from Button | plain `Button` styled flat inside the left region |
+| `CommandBar.Content` left region layout | Content renders left of PrimaryCommands by template | put every item in `PrimaryCommands` and drop the split |
+| `FlyoutPlacementMode` Top/Bottom/Left/Right mapping | enum lives in `Controls.Primitives` | drop `Placement` assignment (default placement) |
+| `TabView.CanReorderTabs`/`CanDragTabs`/`IsAddTabButtonVisible` | straightforward properties | remove the assignments (defaults allow reorder, cosmetic only) |
+| `Expander.Expanding`/`Collapsed` event pair | asymmetric names are correct per docs | poll `IsExpanded` in a `SizeChanged` handler |
+| `TextBox` clipboard methods (`CutSelectionToClipboard` etc., 1809+) | min platform is 17763 | drop the edit roles to no-ops |
+| `FocusManager.GetFocusedElement(XamlRoot)` overload | WinUI 3 requires the XamlRoot overload | skip edit roles when unavailable |
 
 ## Known gaps and deliberate divergences
 

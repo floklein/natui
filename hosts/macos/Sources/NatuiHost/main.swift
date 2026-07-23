@@ -13,7 +13,7 @@ signal(SIGPIPE, SIG_IGN)
 final class WindowManager: NSObject, NSWindowDelegate {
     static let shared = WindowManager()
 
-    private var window: NSWindow?
+    private(set) var window: NSWindow?
 
     func configure(props: [String: JSONValue]) {
         let width = props["width"]?.cgFloatValue ?? 640
@@ -28,6 +28,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
         }
         window.center()
         window.makeKeyAndOrderFront(nil)
+        // Toolbar specs that arrived before the window apply now.
+        ChromeSync.shared.windowReady(window)
         // Required for unbundled executables, otherwise keystrokes keep going
         // to the terminal that spawned us.
         NSApp.activate(ignoringOtherApps: true)

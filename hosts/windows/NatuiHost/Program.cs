@@ -96,7 +96,12 @@ public sealed class App : Application, IXamlMetadataProvider
             VerticalAlignment = VerticalAlignment.Top,
             CrossAlignment = "leading",
         };
-        var mapper = new NodeMapper(rootStack);
+        // Window chrome row (MenuBar above CommandBar) and the Sheet overlay
+        // layer. The overlay spans both rows; a null background means it
+        // never intercepts input while empty.
+        var chromePanel = new StackPanel { Orientation = Orientation.Vertical };
+        var overlayLayer = new Grid();
+        var mapper = new NodeMapper(rootStack, chromePanel, overlayLayer);
         var store = new NodeStore(mapper);
 
         // The shell Grid paints the theme background so screenshots are not
@@ -106,7 +111,15 @@ public sealed class App : Application, IXamlMetadataProvider
         // scroll viewport would report as unbounded). Apps opt into scrolling
         // with the ScrollView component.
         var shell = new Grid { Background = PageBackground() };
+        shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(chromePanel, 0);
+        shell.Children.Add(chromePanel);
+        Grid.SetRow(rootStack, 1);
         shell.Children.Add(rootStack);
+        Grid.SetRow(overlayLayer, 0);
+        Grid.SetRowSpan(overlayLayer, 2);
+        shell.Children.Add(overlayLayer);
 
         _window = new Window { Title = "natui" };
         // Code-only app (no App.xaml): without XamlControlsResources every

@@ -285,9 +285,14 @@ export class Bridge {
         // ack makes this safe during rapid edits: the host ignores it while
         // the user is still ahead (lastSentSeq > ack) and applies it once the
         // interaction settles.
+        // Enforcement is defined over `change` events only: `seq` never rides
+        // any other event (docs/protocol.md), and a request-semantics event
+        // (e.g. sortChange) carrying a value must never be "corrected" into
+        // the node's value prop.
         if (
           target &&
           target.created &&
+          msg.name === 'change' &&
           typeof msg.seq === 'number' &&
           'value' in payload &&
           this.lastSeq.get(msg.id) === msg.seq &&
