@@ -187,7 +187,7 @@ try {
 
   const start = await request(baseUrl, '/docs/start');
   assertTextResponse(start, '/docs/start', 'text/html');
-  assert(/Set up natui from source/.test(start.text), '/docs/start is missing its page content');
+  assert(/Set up NatUI from source/.test(start.text), '/docs/start is missing its page content');
   assert(/Copy Markdown/.test(start.text), '/docs/start is missing Copy Markdown');
   assert(/View Markdown/.test(start.text), '/docs/start is missing View Markdown');
   assert(/View source/.test(start.text), '/docs/start is missing View source');
@@ -329,7 +329,7 @@ try {
       `${route} is missing summary_large_image metadata`,
     );
     assert(
-      /natui documentation:/.test(htmlPage.text),
+      /NatUI documentation:/.test(htmlPage.text),
       `${route} is missing descriptive social image alt text`,
     );
 

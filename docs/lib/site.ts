@@ -1,4 +1,4 @@
-export const siteName = 'natui';
+export const siteName = 'NatUI';
 export const siteTitle = 'Real native UI. Written in React.';
 export const siteDescription =
   'Build real SwiftUI and WinUI 3 desktop interfaces with React and TypeScript.';

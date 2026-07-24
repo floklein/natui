@@ -121,7 +121,7 @@ public sealed class App : Application, IXamlMetadataProvider
         Grid.SetRowSpan(overlayLayer, 2);
         shell.Children.Add(overlayLayer);
 
-        _window = new Window { Title = "natui" };
+        _window = new Window { Title = "NatUI" };
         // Code-only app (no App.xaml): without XamlControlsResources every
         // control template is missing and controls render blank or throw.
         // Requires the IXamlMetadataProvider implementation above, and a
@@ -144,7 +144,7 @@ public sealed class App : Application, IXamlMetadataProvider
             // sitting invisible or exiting silently.
             rootStack.Children.Add(new TextBlock
             {
-                Text = "natui host: launch via the natui JS renderer.",
+                Text = "NatUI host: launch via the NatUI JS renderer.",
                 Margin = new Thickness(20),
             });
             rootStack.RebuildLayout();
@@ -275,7 +275,7 @@ internal sealed class Router(App app, Window window, NodeStore store)
 
     private void ConfigureWindow(JsonObject props)
     {
-        window.Title = Json.Str(props, "title") ?? "natui";
+        window.Title = Json.Str(props, "title") ?? "NatUI";
         // Activate first so the XamlRoot (and its DPI scale) exists.
         window.Activate();
 
@@ -293,7 +293,7 @@ internal sealed class Router(App app, Window window, NodeStore store)
             // WASDK 1.7 presenter-enforced minimum (WM_GETMINMAXINFO under
             // the hood), same physical-pixel convention as ResizeClient.
             // Constrains the whole window frame rather than the client area;
-            // close enough to the macOS host's contentMinSize for this POC.
+            // close enough to the macOS host's contentMinSize for this alpha.
             presenter.PreferredMinimumWidth = (int)Math.Round(minWidth * scale);
             presenter.PreferredMinimumHeight = (int)Math.Round(minHeight * scale);
         }

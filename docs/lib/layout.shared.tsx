@@ -8,7 +8,7 @@ export function baseOptions(): BaseLayoutProps {
           <span aria-hidden="true" className="docs-wordmark-mark">
             N
           </span>
-          natui
+          NatUI
         </span>
       ),
     },

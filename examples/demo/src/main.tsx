@@ -2,7 +2,7 @@ import { run } from 'natui';
 import { App } from './App.js';
 
 await run(<App />, {
-  title: 'natui demo',
+  title: 'NatUI demo',
   width: 480,
   height: 620,
   minWidth: 380,

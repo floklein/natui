@@ -42,7 +42,7 @@ Tables receive serializable columns and rows. Cells are strings keyed by column.
 
 The host never sorts rows. A header interaction requests a new `SortDescriptor`; the application sorts its data, provides the reordered rows, and echoes the descriptor.
 
-On macOS 14.0 through 14.3, natui uses a list-based table fallback because the dynamic table API requires macOS 14.4.
+On macOS 14.0 through 14.3, NatUI uses a list-based table fallback because the dynamic table API requires macOS 14.4.
 
 ## DisclosureGroup
 
@@ -56,4 +56,4 @@ Shows or hides child content using a controlled Boolean value.
 </DisclosureGroup>
 ```
 
-Disclosure state is always controlled. If React does not accept a native expansion change, natui corrects the host back to the current prop.
+Disclosure state is always controlled. If React does not accept a native expansion change, NatUI corrects the host back to the current prop.

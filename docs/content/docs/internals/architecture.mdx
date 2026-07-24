@@ -1,6 +1,6 @@
 ---
 title: Architecture
-description: Understand the natui reconciler, bridge, native hosts, controlled state, and runtime paths.
+description: Understand the NatUI reconciler, bridge, native hosts, controlled state, and runtime paths.
 ---
 
 ```text
@@ -21,7 +21,7 @@ description: Understand the natui reconciler, bridge, native hosts, controlled s
 
 ## Native layout owns geometry
 
-natui maps the React tree to platform declarative primitives. `VStack` becomes a SwiftUI `VStack` on macOS and a vertical native grid stack on Windows. The native toolkit owns layout proposals, focus, accessibility, theming, and control behavior.
+NatUI maps the React tree to platform declarative primitives. `VStack` becomes a SwiftUI `VStack` on macOS and a vertical native grid stack on Windows. The native toolkit owns layout proposals, focus, accessibility, theming, and control behavior.
 
 There is no Yoga or browser layout layer. The tradeoff is intentional: applications get platform-native behavior rather than pixel-identical cross-platform rendering or CSS-style layout.
 
@@ -86,13 +86,13 @@ The implementation is staged:
 - **Stage 1, researched sidecar packaging:** A future native application could invert control and spawn a compiled JavaScript sidecar made with Bun or Node Single Executable Applications. The native application would own the sidecar lifetime. This is not implemented.
 - **Stage 2, in-process execution:** The macOS host can evaluate an esbuild browser bundle inside system JavaScriptCore. React's scheduler uses host-provided timer and microtask support. The bundle and host exchange protocol messages through `__natui_send` and `__natui_recv`, while standard input remains available as a verification debug channel.
 
-The Windows in-process direction is Microsoft.JavaScript.Hermes, matching the engine family used by React Native Windows. It is researched but not implemented. natui does not yet ship the Stage 1 application wrapper, a packaging CLI, signing, or installer generation.
+The Windows in-process direction is Microsoft.JavaScript.Hermes, matching the engine family used by React Native Windows. It is researched but not implemented. NatUI does not yet ship the Stage 1 application wrapper, a packaging CLI, signing, or installer generation.
 
-## Current proof-of-concept boundaries
+## Current alpha boundaries
 
 The repository includes 37 host components, including menus, toolbars, navigation, data views, and presentation. Menus are not out of scope.
 
-Features still outside the current proof of concept include:
+Features still outside the current alpha scope include:
 
 - State-preserving React refresh
 - A public animation or gesture API

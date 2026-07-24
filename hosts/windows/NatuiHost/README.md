@@ -1,6 +1,6 @@
-# natui Windows host (WinUI 3)
+# NatUI Windows host (WinUI 3)
 
-Native Windows host for the natui wire protocol v1 (see `docs/protocol.md`).
+Native Windows host for the NatUI wire protocol v1 (see `docs/protocol.md`).
 It is the WinUI 3 counterpart of `hosts/macos`: the JS renderer spawns this
 exe, writes NDJSON ops to its stdin, and reads events from its stdout.
 
@@ -79,7 +79,7 @@ pnpm install
 pnpm demo
 ```
 
-(`pnpm demo` is the root script; it builds the natui package and runs the
+(`pnpm demo` is the root script; it builds the `natui` package and runs the
 `natui-demo` example via `pnpm --filter natui-demo dev`.)
 
 Launching the exe by double-click shows a hint window and does nothing else

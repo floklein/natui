@@ -47,7 +47,7 @@ function runningHosts(): string {
 const existingHosts = runningHosts();
 if (existingHosts) {
   console.error(
-    `[verify] another natui host is already running; close it first:\n${existingHosts}`,
+    `[verify] another NatUI host is already running; close it first:\n${existingHosts}`,
   );
   process.exit(1);
 }
@@ -99,7 +99,7 @@ function assertValidPng(path: string): void {
 // === Phase 1: demo app =======================================================
 
 let app = await run(<App />, {
-  title: 'natui demo',
+  title: 'NatUI demo',
   width: 480,
   height: 620,
   // This script owns the lifecycle: the window closing as a side effect of
@@ -213,7 +213,7 @@ function StressApp() {
 }
 
 app = await run(<StressApp />, {
-  title: 'natui stress',
+  title: 'NatUI stress',
   width: 360,
   height: 240,
   onClose: () => {},

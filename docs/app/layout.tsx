@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   metadataBase: siteUrl,
   title: {
     default: siteTitle,
-    template: '%s | natui',
+    template: '%s | NatUI',
   },
   description: siteDescription,
   alternates: {
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     url: '/',
-    siteName: 'natui',
+    siteName: 'NatUI',
     title: siteTitle,
     description: siteDescription,
     images: [
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
         url: '/og/image.png',
         width: 1200,
         height: 630,
-        alt: 'natui, real native desktop UI written in React',
+        alt: 'NatUI, real native desktop UI written in React',
       },
     ],
   },
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
     images: [
       {
         url: '/og/image.png',
-        alt: 'natui, real native desktop UI written in React',
+        alt: 'NatUI, real native desktop UI written in React',
       },
     ],
   },

@@ -1,5 +1,25 @@
+import { highlight } from 'fumadocs-core/highlight';
 import Image from 'next/image';
 import Link from 'next/link';
+
+const heroCode = `<VStack spacing={14} padding={20} alignment="leading">
+  <HStack spacing={8} alignment="center">
+    <Image systemName="atom" color="#e94f37" />
+    <Text font="largeTitle" weight="bold">NatUI</Text>
+  </HStack>
+  <HStack spacing={10} alignment="center">
+    <Button onPress={() => setCount((c) => c - 1)}>−</Button>
+    <Text font="title2" monospaced>{String(count)}</Text>
+    <Button onPress={() => setCount((c) => c + 1)}>+</Button>
+  </HStack>
+  <List>
+    {todos.map((todo) => (
+      <Toggle key={todo.id} value={todo.done}>{todo.label}</Toggle>
+    ))}
+  </List>
+  <Slider value={volume} onChange={setVolume} />
+  <ProgressView value={volume / 100} />
+</VStack>`;
 
 const capabilities = [
   {
@@ -34,15 +54,20 @@ const componentGroups = [
   'Data',
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  const highlightedHeroCode = await highlight(heroCode, {
+    lang: 'tsx',
+    theme: 'github-dark',
+  });
+
   return (
     <div className="home-page">
       <header className="home-nav">
-        <Link className="home-brand" href="/" aria-label="natui home">
+        <Link className="home-brand" href="/" aria-label="NatUI home">
           <span className="home-brand-mark" aria-hidden="true">
             N
           </span>
-          <span>natui</span>
+          <span>NatUI</span>
         </Link>
         <nav className="home-nav-links" aria-label="Primary navigation">
           <Link href="/docs">Documentation</Link>
@@ -75,44 +100,29 @@ export default function HomePage() {
             </div>
             <div className="runtime-note">
               <span className="status-dot" aria-hidden="true" />
-              Experimental proof of concept, verified in real native windows
+              NatUI is still in Alpha
             </div>
           </div>
 
-          <div className="hero-showcase" aria-label="natui code and native output">
+          <div className="hero-showcase" aria-label="NatUI code and native output">
             <div className="code-card">
               <div className="code-card-top">
                 <span>App.tsx</span>
-                <span>React</span>
+                <span>TSX</span>
               </div>
-              <pre>
-                <code>{`function Counter() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <VStack spacing={12} padding={20}>
-      <Text font="largeTitle">Hello, native</Text>
-      <Button onPress={() => setCount(count + 1)}>
-        Count: {count}
-      </Button>
-    </VStack>
-  )
-}`}</code>
-              </pre>
+              {highlightedHeroCode}
             </div>
 
             <div className="native-card">
-              <div className="native-titlebar" aria-hidden="true">
-                <span className="window-dot window-dot-red" />
-                <span className="window-dot window-dot-yellow" />
-                <span className="window-dot window-dot-green" />
-                <span className="native-title">natui kitchen sink</span>
+              <div className="native-card-label" aria-hidden="true">
+                <span>Native output</span>
+                <span>WinUI 3</span>
               </div>
               <Image
-                src="/images/kitchen-sink-initial.png"
-                width={1800}
-                height={1440}
-                alt="The natui kitchen sink running as a native macOS application"
+                src="/images/windows-demo-final.png"
+                width={480}
+                height={620}
+                alt="The matching NatUI demo rendered with WinUI 3 on Windows"
                 priority
               />
             </div>
@@ -133,7 +143,7 @@ export default function HomePage() {
             <p className="eyebrow">A deliberately small bridge</p>
             <h2>React owns state. The platform owns the interface.</h2>
             <p>
-              natui sends a compact tree of typed operations to a native host. It does not
+              NatUI sends a compact tree of typed operations to a native host. It does not
               recreate a browser or impose web layout rules.
             </p>
           </div>
@@ -165,14 +175,13 @@ export default function HomePage() {
                   <span className="platform-kicker">macOS</span>
                   <h3>SwiftUI</h3>
                 </div>
-                <span className="platform-proof">Real-window verified</span>
               </div>
               <div className="platform-image platform-image-macos">
                 <Image
                   src="/images/macos-demo-final.png"
                   width={960}
                   height={1296}
-                  alt="The natui demo rendered with SwiftUI on macOS"
+                  alt="The NatUI demo rendered with SwiftUI on macOS"
                 />
               </div>
             </article>
@@ -183,14 +192,13 @@ export default function HomePage() {
                   <span className="platform-kicker">Windows</span>
                   <h3>WinUI 3</h3>
                 </div>
-                <span className="platform-proof">Node-mode verified</span>
               </div>
               <div className="platform-image platform-image-windows">
                 <Image
                   src="/images/windows-demo-final.png"
                   width={480}
                   height={620}
-                  alt="The natui demo rendered with WinUI 3 on Windows"
+                  alt="The NatUI demo rendered with WinUI 3 on Windows"
                 />
               </div>
             </article>
@@ -238,7 +246,7 @@ export default function HomePage() {
       </main>
 
       <footer className="home-footer">
-        <span>natui</span>
+        <span>NatUI</span>
         <span>React to SwiftUI and WinUI 3</span>
         <a href="https://github.com/floklein/natui/blob/main/LICENSE">MIT License</a>
       </footer>

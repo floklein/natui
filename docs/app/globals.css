@@ -237,7 +237,7 @@ body {
 
 .hero-showcase {
   position: relative;
-  min-height: 580px;
+  min-height: 610px;
 }
 
 .code-card {
@@ -271,21 +271,27 @@ body {
   margin: 0;
   padding: 20px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.65;
+}
+
+.code-card .shiki {
+  --padding-left: 0px;
+  --padding-right: 0px;
+  background: transparent !important;
 }
 
 .native-card {
   position: absolute;
-  right: -60px;
+  right: -10px;
   bottom: 0;
-  width: 520px;
+  width: min(320px, 64%);
   overflow: hidden;
   border: 1px solid #454548;
-  border-radius: 16px;
-  background: #292929;
+  border-radius: 12px;
+  background: #050505;
   box-shadow: 0 30px 80px rgb(0 0 0 / 28%);
-  transform: rotate(1.5deg);
+  transform: rotate(1deg);
 }
 
 .native-card img {
@@ -294,39 +300,17 @@ body {
   height: auto;
 }
 
-.native-titlebar {
+.native-card-label {
   display: flex;
-  height: 36px;
+  height: 34px;
   align-items: center;
-  gap: 7px;
+  justify-content: space-between;
   padding: 0 13px;
   border-bottom: 1px solid #191919;
-  background: #353535;
-}
-
-.window-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-}
-
-.window-dot-red {
-  background: #ff5f57;
-}
-
-.window-dot-yellow {
-  background: #febc2e;
-}
-
-.window-dot-green {
-  background: #28c840;
-}
-
-.native-title {
-  margin-left: 7px;
-  color: #d7d7d7;
+  background: #151515;
+  color: #a7a7aa;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .component-rail {
@@ -471,16 +455,6 @@ body {
   letter-spacing: -0.035em;
 }
 
-.platform-proof {
-  border: 1px solid var(--natui-line);
-  border-radius: 999px;
-  padding: 7px 10px;
-  color: var(--natui-muted);
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
 .platform-image {
   position: relative;
   display: grid;
@@ -503,17 +477,17 @@ body {
 }
 
 .platform-image-macos img {
-  width: 370px;
+  width: 390px;
 }
 
 .platform-image-windows {
-  background: #e8e8e8;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 4%), transparent),
+    #292929;
 }
 
 .platform-image-windows img {
   width: 390px;
-  border-color: rgb(0 0 0 / 10%);
-  box-shadow: 0 20px 55px rgb(0 0 0 / 18%);
 }
 
 .pipeline-section {
@@ -692,11 +666,11 @@ body {
   }
 
   .hero-showcase {
-    min-height: 510px;
+    min-height: 590px;
   }
 
   .code-card {
-    width: 94%;
+    width: 100%;
   }
 
   .code-card pre {
@@ -704,7 +678,7 @@ body {
   }
 
   .native-card {
-    width: 90%;
+    width: min(300px, 72%);
   }
 
   .component-rail {

@@ -18,7 +18,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      # Build before typecheck: examples/demo resolves natui's types from
+      # Build before typecheck: examples/demo resolves the `natui` package types from
       # packages/natui/dist, which only exists after a build.
       - run: pnpm build
       - run: pnpm typecheck

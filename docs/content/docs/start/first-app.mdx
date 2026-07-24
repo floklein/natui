@@ -1,9 +1,9 @@
 ---
 title: First app
-description: Render React state into a real native natui window.
+description: Render React state into a real native NatUI window.
 ---
 
-Create a React component using natui host components:
+Create a React component using NatUI host components:
 
 ```tsx typecheck
 import { useState } from 'react';
@@ -29,7 +29,7 @@ function App() {
 }
 
 await run(<App />, {
-  title: 'First natui app',
+  title: 'First NatUI app',
   width: 420,
   height: 260,
 });
@@ -41,6 +41,6 @@ All sizing uses logical points. Native layout decides the final geometry, so exp
 
 ## Keep inputs controlled
 
-Interactive values are ordinary React state. Provide both `value` and `onChange` when the user should be able to edit a control. natui uses sequence acknowledgements to prevent a slower JavaScript round trip from overwriting newer native input.
+Interactive values are ordinary React state. Provide both `value` and `onChange` when the user should be able to edit a control. NatUI uses sequence acknowledgements to prevent a slower JavaScript round trip from overwriting newer native input.
 
 Continue with [controlled state](/docs/guides/controlled-state) for the complete model.

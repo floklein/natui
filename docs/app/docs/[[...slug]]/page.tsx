@@ -64,7 +64,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!page) notFound();
 
   const image = getPageImage(page);
-  const imageAlt = `natui documentation: ${page.data.title}`;
+  const imageAlt = `NatUI documentation: ${page.data.title}`;
   const description = normalizeDescription(page.data.description);
 
   return {

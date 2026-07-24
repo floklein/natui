@@ -55,7 +55,7 @@ export function OgCard({ title, description }: OgCardProps) {
     <DefaultImage
       title={title}
       description={description}
-      site="natui"
+      site="NatUI"
       primaryColor="rgba(233, 79, 55, 0.38)"
       primaryTextColor="#e94f37"
       icon={<NativeWindowMark />}

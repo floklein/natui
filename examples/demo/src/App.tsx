@@ -54,7 +54,7 @@ export function App() {
       <HStack spacing={8} alignment="center">
         <Image systemName="atom" size={28} color="#e94f37" />
         <Text font="largeTitle" weight="bold">
-          natui
+          NatUI
         </Text>
         <Spacer />
         <Text font="caption" color="#888888">

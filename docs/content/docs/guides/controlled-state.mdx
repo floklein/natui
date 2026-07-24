@@ -3,7 +3,7 @@ title: Controlled state
 description: Keep native inputs responsive and authoritative with React state and sequence acknowledgements.
 ---
 
-natui inputs are React-controlled even though interaction begins in another process. The host applies an optimistic local value immediately, then reports the edit to JavaScript.
+NatUI inputs are React-controlled even though interaction begins in another process. The host applies an optimistic local value immediately, then reports the edit to JavaScript.
 
 ```tsx
 const [query, setQuery] = useState('');
@@ -25,7 +25,7 @@ If another native edit occurs first, an older acknowledgement cannot overwrite t
 
 ## React remains authoritative
 
-If a handler rejects or transforms an edit, natui sends a corrective update after the synchronous event flush:
+If a handler rejects or transforms an edit, NatUI sends a corrective update after the synchronous event flush:
 
 ```tsx
 const [code, setCode] = useState('');

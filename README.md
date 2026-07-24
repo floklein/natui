@@ -1,4 +1,4 @@
-# natui
+# NatUI
 
 [![CI](https://github.com/floklein/natui/actions/workflows/ci.yml/badge.svg)](https://github.com/floklein/natui/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -9,7 +9,7 @@ browser layout engine. The platform owns layout, controls, dark mode, focus,
 and accessibility.
 
 > [!IMPORTANT]
-> natui is an experimental proof of concept, not a published registry package.
+> NatUI is still in Alpha and is not a published registry package.
 > Use it from a source checkout while packaging and compatibility policies are
 > still being designed.
 
@@ -44,7 +44,7 @@ WinUI grid stack on Windows. React 19 still owns state, keys, effects,
 conditional rendering, and reconciliation.
 
 <p align="center">
-  <img src="screenshots/03-final.png" width="480" alt="The natui demo running as native SwiftUI in dark mode">
+  <img src="screenshots/03-final.png" width="480" alt="The NatUI demo running as native SwiftUI in dark mode">
 </p>
 
 ## Quick start from source
