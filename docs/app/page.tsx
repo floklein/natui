@@ -40,7 +40,7 @@ const capabilities = [
   {
     number: '04',
     title: 'Two runtime shapes',
-    text: 'Develop through the Node host bridge, or run an embedded JavaScriptCore bundle with no Node process at runtime on macOS.',
+    text: 'Develop through the Node host bridge, or run an embedded JavaScript bundle in-process with JavaScriptCore on macOS and V8 on Windows.',
   },
 ];
 

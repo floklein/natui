@@ -51,7 +51,9 @@ Invalid values such as `BigInt`, circular objects, class instances, nested funct
 
 ## Platform details
 
-- Container foreground color does not cascade on Windows. Set `color` on leaf content.
-- Windows rounds panel backgrounds but does not clip children to `cornerRadius`.
-- Windows `Image` does not paint its own padding or background.
+- Container foreground color cascades to descendants until a child supplies
+  its own `color`.
+- Rounded panel backgrounds clip their children to `cornerRadius`.
+- `Image` paints padding, background, and corner radius around its native
+  symbol on both hosts.
 - Accessibility identifiers map to AX identifiers on macOS and Automation IDs on Windows.

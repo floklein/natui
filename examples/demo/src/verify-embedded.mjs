@@ -1,6 +1,6 @@
 /**
  * Stage 2 verification: launches the NatUI host with the React app bundle
- * evaluated IN-PROCESS by JavaScriptCore (no Node running the app), then
+ * evaluated in-process by JavaScriptCore on macOS or V8 on Windows, then
  * drives it over the stdio debug channel: tree dumps, synthesized events,
  * and a host-rendered screenshot. Exits non-zero on failure.
  *
@@ -9,31 +9,53 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-// Same lookup order as the NatUI renderer: env override, then the release
-// build the README documents, then a local debug build.
+const hostCandidates =
+  process.platform === 'darwin'
+    ? [
+        'hosts/macos/.build/release/natui-host',
+        'hosts/macos/.build/debug/natui-host',
+      ]
+    : process.platform === 'win32'
+      ? [
+          'hosts/windows/NatuiHost/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
+          'hosts/windows/NatuiHost/bin/Release/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
+          'hosts/windows/NatuiHost/bin/x64/Debug/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
+          'hosts/windows/NatuiHost/bin/Debug/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
+        ]
+      : [];
+// Same lookup order as the NatUI renderer: env override, then release and
+// debug host builds for the current platform.
 const hostBin =
   process.env.NATUI_HOST ??
-  [
-    `${repoRoot}hosts/macos/.build/release/natui-host`,
-    `${repoRoot}hosts/macos/.build/debug/natui-host`,
-  ].find(existsSync);
+  hostCandidates.map((candidate) => path.join(repoRoot, candidate)).find(existsSync);
 assert.ok(
   hostBin,
-  'natui-host not built. Run: pnpm build:host:macos (or set NATUI_HOST)',
+  'natui-host not built for this platform (or set NATUI_HOST)',
 );
 const bundle = fileURLToPath(new URL('../dist/embedded.js', import.meta.url));
 assert.ok(existsSync(bundle), 'embedded bundle missing. Run: pnpm build:embedded');
-const outDir = `${repoRoot}screenshots`;
+const outDir =
+  process.platform === 'win32'
+    ? path.join(repoRoot, 'screenshots', 'windows')
+    : path.join(repoRoot, 'screenshots');
 mkdirSync(outDir, { recursive: true });
 
 // Refuse to run next to an already-running host (e.g. a forgotten pnpm demo).
 try {
-  const existing = execFileSync('pgrep', ['-lf', 'natui-host'], { encoding: 'utf8' }).trim();
-  if (existing) {
+  const existing =
+    process.platform === 'win32'
+      ? execFileSync('tasklist', ['/FI', 'IMAGENAME eq NatuiHost.exe', '/NH'], {
+          encoding: 'utf8',
+        }).trim()
+      : execFileSync('pgrep', ['-lf', 'natui-host'], { encoding: 'utf8' }).trim();
+  const found =
+    process.platform === 'win32' ? /\bNatuiHost\.exe\b/i.test(existing) : existing.length > 0;
+  if (found) {
     console.error(`[probe] another NatUI host is already running; close it first:\n${existing}`);
     process.exit(1);
   }
@@ -81,11 +103,11 @@ for (let i = 0; i < 40; i++) {
   if (collect(tree, 'Toggle').length > 0) break;
   await sleep(100);
 }
-assert.equal(collect(tree, 'Toggle').length, 3, 'demo mounted from inside JSC');
+assert.equal(collect(tree, 'Toggle').length, 3, 'demo mounted inside the host JavaScript engine');
 console.error('[probe] tree mounted by in-process React OK');
 
 // Full interactive round trip without any external JS runtime for the app:
-// emit -> JSC bridge -> React setState -> commit ops -> SwiftUI.
+// emit -> embedded bridge -> React setState -> commit ops -> native UI.
 const plus = collect(tree, 'Button').find((b) => textOf(b) === '+');
 assert.ok(plus, 'plus button found');
 send({ t: 'emit', id: plus.id, name: 'press' });
@@ -96,7 +118,7 @@ send({ t: 'dump' });
 tree = (await waitFor((m) => m.t === 'tree', 'tree after presses')).root;
 assert.ok(
   collect(tree, 'Text').some((t) => textOf(t) === '2'),
-  'counter incremented to 2 by React running inside JavaScriptCore',
+  'counter incremented to 2 by React running inside the native host',
 );
 console.error('[probe] in-process interactive round trip OK');
 
@@ -133,22 +155,22 @@ assert.equal(
 );
 console.error('[probe] native seq/ack contract OK (stale suppressed, current wins)');
 
-const shotPath = `${outDir}/04-embedded-jsc.png`;
+const shotPath = path.join(
+  outDir,
+  process.platform === 'win32' ? '04-embedded-v8.png' : '04-embedded-jsc.png',
+);
 send({ t: 'screenshot', path: shotPath });
 const shot = await waitFor((m) => m.t === 'shot', 'shot');
 assert.ok(!shot.error, `screenshot failed: ${shot.error}`);
 // The PNG must exist, be non-empty, and decode.
 assert.ok(statSync(shotPath).size > 1000, 'screenshot is suspiciously small');
+const png = readFileSync(shotPath);
 assert.deepEqual(
-  [...readFileSync(shotPath).subarray(0, 8)],
+  [...png.subarray(0, 8)],
   [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
   'screenshot lacks a PNG signature',
 );
-assert.match(
-  execFileSync('sips', ['-g', 'pixelWidth', shotPath], { encoding: 'utf8' }),
-  /pixelWidth: \d+/,
-  'screenshot did not decode',
-);
+assert.ok(png.readUInt32BE(16) > 0 && png.readUInt32BE(20) > 0, 'PNG has invalid dimensions');
 console.error('[probe] EMBEDDED MODE VERIFIED');
 
 send({ t: 'quit' });

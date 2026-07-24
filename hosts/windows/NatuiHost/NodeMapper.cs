@@ -1,8 +1,10 @@
+using System.Numerics;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 using FontWeight = Windows.UI.Text.FontWeight;
@@ -67,7 +69,10 @@ internal sealed class NatuiStack : Grid
 
             var node = child.Tag as NatuiNode;
             var mainStar = IsMainStar(node, vertical);
-            var crossStretch = IsCrossStretch(node, vertical);
+            // List row presenters must span the available cross axis so a
+            // trailing badge and section-selection background reach the row
+            // edge even when the row's own content is intrinsically narrow.
+            var crossStretch = child is NatuiListRow || IsCrossStretch(node, vertical);
             anyMainStar |= mainStar;
             anyCrossStretch |= crossStretch;
 
@@ -125,8 +130,9 @@ internal sealed class NatuiStack : Grid
             // Border), so look through it; internal stacks (root, labels,
             // scroll content) may be direct children. Terminates because it
             // only recurses on change.
-            var ancestor = Parent as NatuiStack ?? (Parent as Border)?.Parent as NatuiStack;
-            ancestor?.RebuildLayout();
+            var ancestor = Parent is Border shell ? shell.Parent : Parent;
+            if (ancestor is NatuiStack stack) stack.RebuildLayout();
+            else if (ancestor is NatuiZStack zStack) zStack.RebuildLayout();
         }
     }
 
@@ -137,10 +143,8 @@ internal sealed class NatuiStack : Grid
         if (node is null) return false;
         if (node.Kind == "Spacer") return true;
         return vertical
-            ? node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
-                || node.Inner is NatuiStack { VGreedy: true }
-            : node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
-                || node.Inner is NatuiStack { HGreedy: true };
+            ? WantsVerticalSpace(node)
+            : WantsHorizontalSpace(node);
     }
 
     private static bool IsCrossStretch(NatuiNode? node, bool vertical)
@@ -148,11 +152,19 @@ internal sealed class NatuiStack : Grid
         if (node is null) return false;
         if (node.Kind == "Divider") return true;
         return vertical
-            ? node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
-                || node.Inner is NatuiStack { HGreedy: true }
-            : node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
-                || node.Inner is NatuiStack { VGreedy: true };
+            ? WantsHorizontalSpace(node)
+            : WantsVerticalSpace(node);
     }
+
+    internal static bool WantsHorizontalSpace(NatuiNode node) =>
+        node.StretchH || GreedyHorizontalKinds.Contains(node.Kind)
+            || node.Inner is NatuiStack { HGreedy: true }
+            || node.Inner is NatuiZStack { HGreedy: true };
+
+    internal static bool WantsVerticalSpace(NatuiNode node) =>
+        node.StretchV || GreedyVerticalKinds.Contains(node.Kind)
+            || node.Inner is NatuiStack { VGreedy: true }
+            || node.Inner is NatuiZStack { VGreedy: true };
 
     private HorizontalAlignment CrossToHorizontal() => CrossAlignment switch
     {
@@ -168,6 +180,47 @@ internal sealed class NatuiStack : Grid
         "bottom" => VerticalAlignment.Bottom,
         _ => VerticalAlignment.Center,
     };
+}
+
+/// <summary>
+/// Overlay stack whose proposal greediness follows its children. Unlike a
+/// row or column stack, a Spacer in a ZStack expands on both axes, so the
+/// containing stack must request the full proposal from its own parent.
+/// </summary>
+internal sealed class NatuiZStack : Grid
+{
+    public bool HGreedy { get; private set; }
+    public bool VGreedy { get; private set; }
+
+    public void RebuildLayout()
+    {
+        var hGreedy = false;
+        var vGreedy = false;
+        foreach (var item in Children)
+        {
+            if (item is not FrameworkElement child || child.Tag is not NatuiNode node) continue;
+            if (node.Kind == "Spacer")
+            {
+                var min = node.Num("minLength") ?? 0;
+                child.MinWidth = min;
+                child.MinHeight = min;
+                hGreedy = true;
+                vGreedy = true;
+                continue;
+            }
+            hGreedy |= NatuiStack.WantsHorizontalSpace(node);
+            vGreedy |= NatuiStack.WantsVerticalSpace(node);
+        }
+
+        if (hGreedy == HGreedy && vGreedy == VGreedy) return;
+        HGreedy = hGreedy;
+        VGreedy = vGreedy;
+        if (Tag is NatuiNode self) NodeMapper.SyncInnerAlignment(self);
+
+        var ancestor = Parent is Border shell ? shell.Parent : Parent;
+        if (ancestor is NatuiStack stack) stack.RebuildLayout();
+        else if (ancestor is NatuiZStack zStack) zStack.RebuildLayout();
+    }
 }
 
 /// <summary>
@@ -251,7 +304,7 @@ internal sealed partial class NodeMapper(
     {
         "VStack" => new NatuiStack { Orientation = Orientation.Vertical },
         "HStack" => new NatuiStack { Orientation = Orientation.Horizontal },
-        "ZStack" => new Grid(),
+        "ZStack" => new NatuiZStack(),
         "Text" or "#text" => BuildText(node),
         "Button" => BuildButton(node),
         "TextField" => BuildTextField(node),
@@ -260,7 +313,7 @@ internal sealed partial class NodeMapper(
         "Picker" => BuildPicker(node),
         "ScrollView" => BuildScrollView(node),
         "List" => BuildList(node),
-        "Image" => new FontIcon { FontFamily = IconFontFamily() },
+        "Image" => BuildImage(),
         "Spacer" => new Border(),
         "Divider" => new Border
         {
@@ -306,6 +359,11 @@ internal sealed partial class NodeMapper(
         return new Border { Child = label };
     }
 
+    private static Border BuildImage() => new()
+    {
+        Child = new FontIcon { FontFamily = IconFontFamily() },
+    };
+
     private static Button BuildButton(NatuiNode node)
     {
         var button = new Button();
@@ -315,8 +373,6 @@ internal sealed partial class NodeMapper(
 
     private FrameworkElement BuildTextField(NatuiNode node)
     {
-        // The secure flag is fixed at creation; flipping it later would need
-        // an element swap and is not supported.
         if (node.Flag("secure"))
         {
             var box = new PasswordBox();
@@ -350,8 +406,6 @@ internal sealed partial class NodeMapper(
 
     private FrameworkElement BuildToggle(NatuiNode node)
     {
-        // The style is fixed at creation (like TextField's secure flag):
-        // flipping it later would need an element swap.
         if (node.Str("style") == "switch")
         {
             // Empty On/Off content: the label rides Header (see RefreshLabel).
@@ -388,7 +442,6 @@ internal sealed partial class NodeMapper(
 
     private FrameworkElement BuildPicker(NatuiNode node) => node.Str("style") switch
     {
-        // Style is fixed at creation, like Toggle's.
         "segmented" => BuildSegmentedPicker(node),
         "radioGroup" => BuildRadioPicker(node),
         _ => BuildComboPicker(node),
@@ -481,33 +534,60 @@ internal sealed partial class NodeMapper(
         if (parent is not null && LabelKinds.Contains(parent.Kind))
         {
             RefreshLabel(parent);
+            ApplyForegroundTree(child);
             return;
         }
         if (!IsAttachable(parentId, parent, child)) return;
         // Slot-routed parents (SplitView/TabView/Popover) place children by
         // KIND, not index; see NodeMapper.Structure.cs / Overlays.cs.
-        if (parent is not null && AttachToSlottedParent(parent, child)) return;
+        if (parent is not null && AttachToSlottedParent(parent, child))
+        {
+            ApplyForegroundTree(child);
+            return;
+        }
         var element = EnsureElement(child);
+        if (parent?.Kind == "Section"
+            && ParentSurface(parentId, parent) is NatuiStack sectionContent)
+        {
+            child.InList = parent.Parent?.Kind == "List";
+            SyncInnerAlignment(child);
+            var row = CreateListRow(child, element);
+            sectionContent.Children.Insert(index, row);
+            sectionContent.RebuildLayout();
+            if (parent.Parent is { Kind: "List", Inner: ListView ownerList })
+            {
+                ReapplyListSelection(parent.Parent, ownerList);
+            }
+            ApplyForegroundTree(child);
+            return;
+        }
         switch (ParentSurface(parentId, parent))
         {
             case NatuiStack stack:
                 stack.Children.Insert(index, element);
                 stack.RebuildLayout();
                 break;
-            case Panel panel: // ZStack: overlapping children, no tracks
+            case NatuiZStack zStack:
+                zStack.Children.Insert(index, element);
+                zStack.RebuildLayout();
+                break;
+            case Panel panel:
                 panel.Children.Insert(index, element);
                 break;
             case ListView list:
                 // SwiftUI list rows lead-align their content.
                 child.InList = true;
                 SyncInnerAlignment(child);
-                list.Items.Insert(index, element);
+                if (child.Kind == "Section") SetSectionRowsInList(child, true);
+                list.Items.Insert(index, CreateListRow(child, element));
+                if (parent is not null) ReapplyListSelection(parent, list);
                 break;
             case null:
                 // Parent kind cannot hold visual children; the Swift host
                 // silently ignores them too.
                 break;
         }
+        ApplyForegroundTree(child);
     }
 
     public void DetachVisual(int parentId, NatuiNode? parent, NatuiNode child)
@@ -519,19 +599,42 @@ internal sealed partial class NodeMapper(
         }
         if (parent is not null && DetachFromSlottedParent(parent, child)) return;
         if (child.Element is not { } element) return;
+        if (parent?.Kind == "Section"
+            && ParentSurface(parentId, parent) is NatuiStack sectionContent
+            && _listRows.TryGetValue(child.Id, out var sectionRow))
+        {
+            sectionContent.Children.Remove(sectionRow);
+            sectionContent.RebuildLayout();
+            ReleaseListRow(child);
+            child.InList = false;
+            SyncInnerAlignment(child);
+            if (parent.Parent is { Kind: "List", Inner: ListView ownerList })
+            {
+                ReapplyListSelection(parent.Parent, ownerList);
+            }
+            return;
+        }
         switch (ParentSurface(parentId, parent))
         {
             case NatuiStack stack:
                 stack.Children.Remove(element);
                 stack.RebuildLayout();
                 break;
+            case NatuiZStack zStack:
+                zStack.Children.Remove(element);
+                zStack.RebuildLayout();
+                break;
             case Panel panel:
                 panel.Children.Remove(element);
                 break;
             case ListView list:
+                if (child.Kind == "Section") SetSectionRowsInList(child, false);
+                if (_listRows.TryGetValue(child.Id, out var row)) list.Items.Remove(row);
+                else list.Items.Remove(element);
+                ReleaseListRow(child);
                 child.InList = false;
                 SyncInnerAlignment(child); // drop the list-row lead alignment
-                list.Items.Remove(element);
+                if (parent is not null) ReapplyListSelection(parent, list);
                 break;
         }
     }
@@ -566,8 +669,8 @@ internal sealed partial class NodeMapper(
     // -- labels -------------------------------------------------------------------
 
     /// <summary>
-    /// WinUI is retained, not reactive: when #text children change, the parent
-    /// Text/Button/Toggle must recompute its label by hand.
+    /// WinUI is retained, not reactive: when label children change, the parent
+    /// Text/Button/Toggle must recompute its content by hand.
     /// </summary>
     public void TextChanged(NatuiNode textNode, NatuiNode? parent)
     {
@@ -580,8 +683,13 @@ internal sealed partial class NodeMapper(
         _applyingRemote++;
         try
         {
-            // node.Label first: covers Text-in-Border AND the Label kind
-            // (whose Inner is a NatuiStack around icon + TextBlock).
+            if (node.Kind == "Text")
+            {
+                RefreshTextContent(node);
+                return;
+            }
+            // node.Label covers the Label kind (whose Inner is a NatuiStack
+            // around icon + TextBlock).
             if (node.Label is { } label)
             {
                 label.Text = node.JoinedText();
@@ -590,7 +698,7 @@ internal sealed partial class NodeMapper(
             switch (node.Inner)
             {
                 case ToggleSwitch toggle: // Toggle style="switch"
-                    toggle.Header = node.JoinedText();
+                    RefreshToggleHeader(toggle, node);
                     break;
                 case ContentControl control: // Button, CheckBox, HyperlinkButton, DropDownButton
                     RefreshContent(control, node);
@@ -601,6 +709,36 @@ internal sealed partial class NodeMapper(
         {
             _applyingRemote--;
         }
+    }
+
+    private void RefreshTextContent(NatuiNode node)
+    {
+        if (node.Inner is not Border box || node.Label is not { } label) return;
+
+        // Release child shells from the previous mixed-content wrapper before
+        // rebuilding, so they can be reparented in their current order.
+        if (box.Child is Panel oldWrapper) oldWrapper.Children.Clear();
+        box.Child = null;
+        if (node.Children.All(c => c.Kind == "#text"))
+        {
+            label.Text = node.JoinedText();
+            box.Child = label;
+            return;
+        }
+
+        // SwiftUI represents mixed Text content as a zero-spacing HStack.
+        // Use the same structure instead of silently discarding element
+        // children such as Image.
+        var stack = BuildMixedLabel(node, spacing: 0);
+        box.Child = stack;
+    }
+
+    private void RefreshToggleHeader(ToggleSwitch toggle, NatuiNode node)
+    {
+        if (toggle.Header is Panel oldWrapper) oldWrapper.Children.Clear();
+        toggle.Header = node.Children.All(c => c.Kind == "#text")
+            ? node.JoinedText()
+            : BuildMixedLabel(node, spacing: 4);
     }
 
     private void RefreshContent(ContentControl control, NatuiNode node)
@@ -618,10 +756,15 @@ internal sealed partial class NodeMapper(
         // Mixed labels like <Button><Image/> Delete</Button>: every child in
         // document order, #text children as inline text blocks, matching the
         // macOS host's labelContent (HStack(spacing: 4)).
-        var stack = new NatuiStack { Orientation = Orientation.Horizontal, Spacing = 4 };
+        control.Content = BuildMixedLabel(node, spacing: 4);
+    }
+
+    private NatuiStack BuildMixedLabel(NatuiNode node, double spacing)
+    {
+        var stack = new NatuiStack { Orientation = Orientation.Horizontal, Spacing = spacing };
         foreach (var child in node.Children) stack.Children.Add(EnsureElement(child));
         stack.RebuildLayout();
-        control.Content = stack;
+        return stack;
     }
 
     // -- prop application ------------------------------------------------------------
@@ -629,6 +772,7 @@ internal sealed partial class NodeMapper(
     public void ApplyProps(NatuiNode node)
     {
         if (node.Element is not { } shell || node.Inner is not { } inner) return;
+        inner = EnsureCurrentControlVariant(node, shell, inner);
         _applyingRemote++;
         try
         {
@@ -639,8 +783,65 @@ internal sealed partial class NodeMapper(
         {
             _applyingRemote--;
         }
+        RefreshListRow(node);
+        ApplyForegroundToDescendants(node);
         // Frame stretch, spacing, or spacer changes affect the parent's tracks.
         if (shell.Parent is NatuiStack parent) parent.RebuildLayout();
+        else if (shell.Parent is NatuiZStack zStack) zStack.RebuildLayout();
+    }
+
+    /// <summary>
+    /// A few protocol props select different native WinUI control classes.
+    /// Keep the outer frame shell stable, but replace its inner control when
+    /// those props change so updates match SwiftUI's reactive view selection.
+    /// </summary>
+    private FrameworkElement EnsureCurrentControlVariant(
+        NatuiNode node, FrameworkElement shell, FrameworkElement current)
+    {
+        var matches = node.Kind switch
+        {
+            "TextField" => node.Flag("secure")
+                ? current is PasswordBox
+                : current is TextBox,
+            "Toggle" => node.Str("style") == "switch"
+                ? current is ToggleSwitch
+                : current is CheckBox,
+            "Picker" => node.Str("style") switch
+            {
+                "segmented" => current is SelectorBar,
+                "radioGroup" => current is RadioButtons,
+                _ => current is ComboBox,
+            },
+            "DatePicker" => node.Str("displayedComponents") switch
+            {
+                "time" => current is TimePicker,
+                "dateTime" => current is NatuiDateTimePicker,
+                _ => current is CalendarDatePicker,
+            },
+            _ => true,
+        };
+        if (matches) return current;
+
+        if (node.Kind == "Toggle")
+        {
+            // Mixed labels may have parented child shells into the old
+            // control. Release them before constructing the replacement.
+            if (current is ToggleSwitch { Header: Panel header }) header.Children.Clear();
+            if (current is ContentControl { Content: Panel content }) content.Children.Clear();
+        }
+        var replacement = node.Kind switch
+        {
+            "TextField" => BuildTextField(node),
+            "Toggle" => BuildToggle(node),
+            "Picker" => BuildPicker(node),
+            "DatePicker" => BuildDatePicker(node),
+            _ => current,
+        };
+        replacement.Tag = node;
+        if (shell is Border border) border.Child = replacement;
+        node.Inner = replacement;
+        if (node.Kind == "Toggle") RefreshLabel(node);
+        return replacement;
     }
 
     private void ApplyKindProps(NatuiNode node, FrameworkElement element)
@@ -718,7 +919,7 @@ internal sealed partial class NodeMapper(
                 break;
             case "Image":
             {
-                var icon = (FontIcon)element;
+                var icon = (FontIcon)((Border)element).Child;
                 icon.Glyph = GlyphFor(node.Str("systemName"));
                 icon.FontSize = node.Num("size") ?? 15;
                 break;
@@ -740,7 +941,7 @@ internal sealed partial class NodeMapper(
                 ApplyContextMenuProps(node, element);
                 break;
             case "SplitView":
-                ApplySplitViewProps(node, (SplitView)element);
+                ApplySplitViewProps(node, (NatuiSplitView)element);
                 break;
             case "TabView":
                 ApplyTabViewProps(node, (TabView)element);
@@ -770,7 +971,7 @@ internal sealed partial class NodeMapper(
                 ApplySearchFieldProps(node, (AutoSuggestBox)element);
                 break;
             case "DatePicker":
-                ApplyDatePickerProps(node, (CalendarDatePicker)element);
+                ApplyDatePickerProps(node, element);
                 break;
             case "Stepper":
                 ApplyStepperProps(node, (NumberBox)element);
@@ -830,23 +1031,43 @@ internal sealed partial class NodeMapper(
 
     private static void ApplyButtonProps(NatuiNode node, Button button)
     {
-        if (node.Str("variant") == "prominent" && AccentButtonStyle() is { } accent)
+        var style = node.Str("variant") switch
         {
-            button.Style = accent;
-        }
-        else
-        {
-            // Back to the implicit default style (bordered/plain/link render
-            // as standard buttons for now).
-            button.ClearValue(FrameworkElement.StyleProperty);
-        }
+            "bordered" => ButtonStyleResource("DefaultButtonStyle"),
+            "prominent" => ButtonStyleResource("AccentButtonStyle"),
+            "plain" => PlainButtonStyle(),
+            "link" => ButtonStyleResource("TextBlockButtonStyle"),
+            _ => null,
+        };
+        if (style is not null) button.Style = style;
+        else button.ClearValue(FrameworkElement.StyleProperty);
     }
 
-    private static Style? AccentButtonStyle()
+    private static Style? _plainButtonStyle;
+
+    private static Style? PlainButtonStyle()
+    {
+        if (_plainButtonStyle is not null) return _plainButtonStyle;
+        if (ButtonStyleResource("DefaultButtonStyle") is not { } defaultStyle) return null;
+
+        var style = new Style(typeof(Button)) { BasedOn = defaultStyle };
+        style.Setters.Add(new Setter(
+            Control.BackgroundProperty,
+            new SolidColorBrush(Microsoft.UI.Colors.Transparent)));
+        style.Setters.Add(new Setter(
+            Control.BorderBrushProperty,
+            new SolidColorBrush(Microsoft.UI.Colors.Transparent)));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
+        _plainButtonStyle = style;
+        return style;
+    }
+
+    private static Style? ButtonStyleResource(string key)
     {
         try
         {
-            return Application.Current.Resources["AccentButtonStyle"] as Style;
+            return Application.Current.Resources[key] as Style;
         }
         catch (Exception)
         {
@@ -935,7 +1156,11 @@ internal sealed partial class NodeMapper(
                 if (node.Hosted is UIElement chrome) ChromePanel.Children.Remove(chrome);
                 break;
             case "Sheet":
-                if (node.Hosted is UIElement overlay) OverlayLayer.Children.Remove(overlay);
+                if (node.Hosted is ContentDialog sheet && _openSheets.Contains(node.Id))
+                {
+                    _sheetClosingRemote.Add(node.Id);
+                    sheet.Hide();
+                }
                 break;
             case "Alert":
                 if (node.Hosted is ContentDialog dialog)
@@ -955,6 +1180,8 @@ internal sealed partial class NodeMapper(
         node.Hosted = null;
         _contentSurface.Remove(node.Id);
         _tableParts.Remove(node.Id);
+        _toolbarLayouts.Remove(node.Id);
+        ReleaseListRow(node);
     }
 
     // -- common props ----------------------------------------------------------------
@@ -990,10 +1217,12 @@ internal sealed partial class NodeMapper(
         if (node.Inner is not { } inner) return;
         var fillsH = node.Kind is "Spacer" or "Divider"
             || NatuiStack.GreedyHorizontalKinds.Contains(node.Kind)
-            || inner is NatuiStack { HGreedy: true };
+            || inner is NatuiStack { HGreedy: true }
+            || inner is NatuiZStack { HGreedy: true };
         var fillsV = node.Kind is "Spacer" or "Divider"
             || NatuiStack.GreedyVerticalKinds.Contains(node.Kind)
-            || inner is NatuiStack { VGreedy: true };
+            || inner is NatuiStack { VGreedy: true }
+            || inner is NatuiZStack { VGreedy: true };
         inner.HorizontalAlignment = fillsH ? HorizontalAlignment.Stretch
             : node.InList ? HorizontalAlignment.Left
             : HorizontalAlignment.Center;
@@ -1006,7 +1235,10 @@ internal sealed partial class NodeMapper(
         // Target the element that produces the UIA peer: the TextBlock for
         // Text/#text nodes, the inner control otherwise (the frame shell
         // Border has no automation peer of its own).
-        FrameworkElement? target = node.Label ?? node.Inner;
+        FrameworkElement? target = node.Label
+            ?? (node.Kind == "Image" && node.Inner is Border { Child: FrameworkElement image }
+                ? image
+                : node.Inner);
         if (target is null) return;
         SetOrClearString(target, AutomationProperties.NameProperty,
             node.Str("accessibilityLabel"));
@@ -1084,6 +1316,40 @@ internal sealed partial class NodeMapper(
         if (property is null) return;
         if (radius is { } r) element.SetValue(property, new CornerRadius(r));
         else element.ClearValue(property);
+
+        if (element is not Panel) return;
+        element.SizeChanged -= UpdateRoundedPanelClip;
+        if (radius is { } panelRadius)
+        {
+            element.SizeChanged += UpdateRoundedPanelClip;
+            SetRoundedPanelClip(element, panelRadius);
+        }
+        else
+        {
+            ElementCompositionPreview.GetElementVisual(element).Clip = null;
+        }
+    }
+
+    private static void UpdateRoundedPanelClip(object sender, SizeChangedEventArgs _)
+    {
+        if (sender is FrameworkElement element
+            && element.Tag is NatuiNode node
+            && node.Num("cornerRadius") is { } radius)
+        {
+            SetRoundedPanelClip(element, radius);
+        }
+    }
+
+    private static void SetRoundedPanelClip(FrameworkElement element, double radius)
+    {
+        var width = Math.Max(0, element.ActualWidth);
+        var height = Math.Max(0, element.ActualHeight);
+        var effectiveRadius = Math.Max(0, Math.Min(radius, Math.Min(width, height) / 2));
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        var geometry = visual.Compositor.CreateRoundedRectangleGeometry();
+        geometry.Size = new Vector2((float)width, (float)height);
+        geometry.CornerRadius = new Vector2((float)effectiveRadius);
+        visual.Clip = visual.Compositor.CreateGeometricClip(geometry);
     }
 
     private static void ApplyFrame(NatuiNode node, FrameworkElement element)
@@ -1109,22 +1375,56 @@ internal sealed partial class NodeMapper(
 
     private static void ApplyForeground(NatuiNode node, FrameworkElement element)
     {
-        var brush = BrushFromHex(node.Str("color")) ?? DefaultForeground(node);
+        var brush = EffectiveForeground(node);
+        if (node.Label is { } label)
+        {
+            if (brush is not null) label.Foreground = brush;
+            else label.ClearValue(TextBlock.ForegroundProperty);
+        }
+
         switch (element)
         {
-            case Border when node.Label is { } label:
-                if (brush is not null) label.Foreground = brush;
-                else label.ClearValue(TextBlock.ForegroundProperty);
+            case Border { Child: FontIcon image }:
+                if (brush is not null) image.Foreground = brush;
+                else image.ClearValue(IconElement.ForegroundProperty);
                 break;
             case FontIcon icon:
                 if (brush is not null) icon.Foreground = brush;
                 else icon.ClearValue(IconElement.ForegroundProperty);
+                break;
+            case NatuiStack stack when node.Kind == "Label":
+                foreach (var child in stack.Children)
+                {
+                    if (child is not FontIcon labelIcon) continue;
+                    if (brush is not null) labelIcon.Foreground = brush;
+                    else labelIcon.ClearValue(IconElement.ForegroundProperty);
+                }
                 break;
             case Control control:
                 if (brush is not null) control.Foreground = brush;
                 else control.ClearValue(Control.ForegroundProperty);
                 break;
         }
+    }
+
+    private static Brush? EffectiveForeground(NatuiNode node)
+    {
+        for (NatuiNode? ancestor = node; ancestor is not null; ancestor = ancestor.Parent)
+        {
+            if (BrushFromHex(ancestor.Str("color")) is { } brush) return brush;
+        }
+        return DefaultForeground(node);
+    }
+
+    private static void ApplyForegroundTree(NatuiNode node)
+    {
+        if (node.Inner is { } inner) ApplyForeground(node, inner);
+        ApplyForegroundToDescendants(node);
+    }
+
+    private static void ApplyForegroundToDescendants(NatuiNode node)
+    {
+        foreach (var child in node.Children) ApplyForegroundTree(child);
     }
 
     private static Brush? DefaultForeground(NatuiNode node) => node.Kind switch

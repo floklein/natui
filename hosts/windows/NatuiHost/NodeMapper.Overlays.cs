@@ -9,17 +9,19 @@ using Windows.UI;
 namespace NatuiHost;
 
 /// <summary>
-/// Presentation kinds: Sheet (in-tree scrim + card overlay), Alert
-/// (ContentDialog), Popover (Flyout on the anchor). All three are controlled
-/// by the boolean "value" (presented); hosts only ever set it to false.
+/// Presentation kinds: Sheet and Alert (ContentDialog popup layers), Popover
+/// (Flyout on the anchor). All three are controlled by the boolean "value"
+/// (presented); hosts only ever set it to false.
 /// </summary>
 internal sealed partial class NodeMapper
 {
     /// <summary>
     /// Ids whose dialog/flyout is being closed by a remote update (value ->
-    /// false) or teardown, so the native Closed callback must not emit a
+    /// false) or teardown, so the native close callback must not emit a
     /// duplicate change event.
     /// </summary>
+    private readonly HashSet<int> _openSheets = [];
+    private readonly HashSet<int> _sheetClosingRemote = [];
     private readonly HashSet<int> _alertClosingRemote = [];
     private readonly HashSet<int> _popoverClosingRemote = [];
 
@@ -27,68 +29,75 @@ internal sealed partial class NodeMapper
 
     private FrameworkElement BuildSheet(NatuiNode node)
     {
-        // Children mount into the card's content stack via _contentSurface;
-        // the in-tree element is a collapsed placeholder. Unlike macOS
-        // (separate NSWindow), this overlay lives in the visual tree, so it
-        // IS captured by RenderTargetBitmap screenshots.
+        // Children mount directly into the popup dialog's content stack via
+        // _contentSurface. The in-tree element remains only as a collapsed
+        // placeholder, matching Alert and the macOS presentation model.
         var content = new NatuiStack
         {
             Orientation = Orientation.Vertical,
             CrossAlignment = "leading",
-            Spacing = 8,
+            Spacing = 0,
         };
         _contentSurface[node.Id] = content;
-        var card = new Border
+        node.Hosted = new ContentDialog
         {
-            Background = CardBackground(),
-            CornerRadius = new CornerRadius(8),
-            MaxWidth = 560,
-            Padding = new Thickness(20),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = content,
+            Content = content,
         };
-        var scrim = new Grid
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0x66, 0x00, 0x00, 0x00)),
-        };
-        scrim.Children.Add(card);
-        scrim.Tapped += (_, e) =>
-        {
-            // Only a click on the scrim itself dismisses, not one on (or
-            // bubbled through) the card.
-            if (!ReferenceEquals(e.OriginalSource, scrim)) return;
-            if (_applyingRemote > 0) return;
-            if (!(Json.Bool(node.Props, "value") ?? false)) return;
-            node.UserEdit(JsonValue.Create(false));
-        };
-        node.Hosted = scrim;
         return new Border { Visibility = Visibility.Collapsed };
     }
 
     private void ApplySheetProps(NatuiNode node)
     {
-        if (node.Hosted is not UIElement overlay) return;
+        if (node.Hosted is not ContentDialog dialog) return;
         var presented = Json.Bool(node.Props, "value") ?? false;
-        var attached = OverlayLayer.Children.Contains(overlay);
-        if (presented && !attached) OverlayLayer.Children.Add(overlay);
-        else if (!presented && attached) OverlayLayer.Children.Remove(overlay);
+        if (presented)
+        {
+            if (!_openSheets.Contains(node.Id)) _ = ShowSheetAsync(node, dialog);
+        }
+        else if (_openSheets.Contains(node.Id))
+        {
+            _sheetClosingRemote.Add(node.Id);
+            dialog.Hide();
+        }
     }
 
-    private static Brush CardBackground()
+    private async Task ShowSheetAsync(NatuiNode node, ContentDialog dialog)
     {
+        if (!(Json.Bool(node.Props, "value") ?? false) || _openSheets.Contains(node.Id)) return;
+        if (RootStack.XamlRoot is not { } xamlRoot)
+        {
+            RootStack.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                if ((Json.Bool(node.Props, "value") ?? false)
+                    && node.Hosted is ContentDialog current
+                    && !_openSheets.Contains(node.Id))
+                {
+                    _ = ShowSheetAsync(node, current);
+                }
+            });
+            return;
+        }
+
+        dialog.XamlRoot = xamlRoot;
+        _openSheets.Add(node.Id);
         try
         {
-            if (Application.Current.Resources["ApplicationPageBackgroundThemeBrush"] is Brush brush)
-            {
-                return brush;
-            }
+            await dialog.ShowAsync();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Resource lookup throws on a missing key; fall through.
+            Ipc.Log($"Sheet {node.Id}: ShowAsync failed: {ex.Message}");
+            _openSheets.Remove(node.Id);
+            _sheetClosingRemote.Remove(node.Id);
+            return;
         }
-        return new SolidColorBrush(Microsoft.UI.Colors.White);
+        _openSheets.Remove(node.Id);
+        if (_sheetClosingRemote.Remove(node.Id)) return;
+        if (ReferenceEquals(node.Hosted, dialog)
+            && (Json.Bool(node.Props, "value") ?? false))
+        {
+            node.UserEdit(JsonValue.Create(false));
+        }
     }
 
     // -- Alert --------------------------------------------------------------------
@@ -129,57 +138,78 @@ internal sealed partial class NodeMapper
             return;
         }
 
-        var dialog = new ContentDialog
+        var dialog = new ContentDialog { Title = node.Str("title") ?? "", XamlRoot = xamlRoot };
+        var body = new StackPanel { Spacing = 12 };
+        if (node.Str("message") is { } message)
         {
-            Title = node.Str("title") ?? "",
-            Content = node.Str("message") ?? "",
-            XamlRoot = xamlRoot,
-        };
-        // ContentDialog offers exactly primary/secondary/close: the cancel
-        // role maps to the close button (Esc), the first two non-cancel
-        // buttons to primary/secondary, extras are dropped with a warning.
+            body.Children.Add(new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+            });
+        }
+
+        var specs = new List<(string Id, string Label, string? Role)>();
         string? cancelId = null;
-        string? primaryId = null;
-        string? secondaryId = null;
+        var nativeCancelIndex = -1;
         foreach (var entry in Json.Arr(node.Props, "buttons") ?? [])
         {
             if (entry is not JsonObject button) continue;
             var id = Json.Str(button, "id") ?? "";
-            var label = Json.Str(button, "label") ?? "";
-            if (Json.Str(button, "role") == "cancel")
+            var role = Json.Str(button, "role");
+            specs.Add((id, Json.Str(button, "label") ?? id, role));
+            if (role == "cancel" && cancelId is null)
             {
-                if (cancelId is null)
-                {
-                    cancelId = id;
-                    dialog.CloseButtonText = label;
-                }
-                else
-                {
-                    Ipc.Log($"Alert {node.Id}: extra cancel button '{id}' dropped");
-                }
-            }
-            else if (primaryId is null)
-            {
-                primaryId = id;
-                dialog.PrimaryButtonText = label;
-            }
-            else if (secondaryId is null)
-            {
-                secondaryId = id;
-                dialog.SecondaryButtonText = label;
-            }
-            else
-            {
-                Ipc.Log($"Alert {node.Id}: more than two non-cancel buttons; '{id}' dropped");
+                cancelId = id;
+                nativeCancelIndex = specs.Count - 1;
+                dialog.CloseButtonText = Json.Str(button, "label") ?? id;
             }
         }
-        if (primaryId is not null) dialog.DefaultButton = ContentDialogButton.Primary;
 
+        // ContentDialog's native command area is limited to close plus two
+        // actions. Keep the first cancel action there so Escape and system
+        // back select it, then render every remaining action as a native
+        // Button in the dialog content instead of dropping extras.
+        var customSpecs = specs.Where((_, index) => index != nativeCancelIndex).ToList();
+        var actions = new StackPanel
+        {
+            Orientation = customSpecs.Count <= 2 ? Orientation.Horizontal : Orientation.Vertical,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8,
+        };
+        var buttonHandled = false;
+        foreach (var spec in customSpecs)
+        {
+            var action = new Button
+            {
+                Content = spec.Label,
+                HorizontalAlignment = customSpecs.Count <= 2
+                    ? HorizontalAlignment.Right
+                    : HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+            };
+            if (spec.Role == "destructive")
+            {
+                action.Foreground = new SolidColorBrush(
+                    Color.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
+            }
+            action.Click += (_, _) =>
+            {
+                if (buttonHandled || !ReferenceEquals(node.Hosted, dialog)) return;
+                buttonHandled = true;
+                // Normative order: select FIRST, then the dismissal change.
+                Ipc.Event(node.Id, "select", new JsonObject { ["value"] = spec.Id });
+                node.UserEdit(JsonValue.Create(false));
+                dialog.Hide();
+            };
+            actions.Children.Add(action);
+        }
+        if (actions.Children.Count > 0) body.Children.Add(actions);
+        dialog.Content = body;
         node.Hosted = dialog;
-        ContentDialogResult result;
         try
         {
-            result = await dialog.ShowAsync();
+            await dialog.ShowAsync();
         }
         catch (Exception ex)
         {
@@ -191,18 +221,12 @@ internal sealed partial class NodeMapper
         node.Hosted = null;
         // Remote close (value -> false, or teardown): no user action to report.
         if (_alertClosingRemote.Remove(node.Id)) return;
-
-        var selectedId = result switch
+        if (buttonHandled) return;
+        // Close button, Escape, or system back selects the first cancel-role
+        // action, matching the native alert convention.
+        if (cancelId is not null)
         {
-            ContentDialogResult.Primary => primaryId,
-            ContentDialogResult.Secondary => secondaryId,
-            // Esc / close button: the cancel-role id, which may be absent.
-            _ => cancelId,
-        };
-        // Normative order: select FIRST, then the dismissal change.
-        if (selectedId is not null)
-        {
-            Ipc.Event(node.Id, "select", new JsonObject { ["value"] = selectedId });
+            Ipc.Event(node.Id, "select", new JsonObject { ["value"] = cancelId });
         }
         node.UserEdit(JsonValue.Create(false));
     }

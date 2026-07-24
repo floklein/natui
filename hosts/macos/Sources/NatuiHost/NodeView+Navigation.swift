@@ -108,13 +108,17 @@ private struct TabNodeView: View {
         TabView(selection: selectionBinding) {
             ForEach(tabs, id: \.id) { tab in
                 NodeView(node: tab)
-                    // Plain Text only: the classic macOS tab strip drops
-                    // Label-based tab items (renders blank segments), and it
-                    // has no badge affordance; systemImage/badge are honored
-                    // on platforms whose tab bars support them (Windows).
                     .tabItem {
-                        Text(tab.str("title") ?? "")
+                        if let systemImage = tab.str("systemImage") {
+                            Label(tab.str("title") ?? "", systemImage: systemImage)
+                                // Keep the title visible even when the
+                                // surrounding tab style prefers icons.
+                                .labelStyle(.titleAndIcon)
+                        } else {
+                            Text(tab.str("title") ?? "")
+                        }
                     }
+                    .badge(tab.badgeText)
                     .tag(tab.str("id") ?? String(tab.id))
             }
         }

@@ -22,6 +22,13 @@ internal sealed partial class NodeMapper
     /// </summary>
     private readonly HashSet<int> _menuRebuildPending = [];
 
+    /// <summary>
+    /// Visual identity sequence from the last Toolbar update. When it is
+    /// unchanged, patch controls in place so host-local search text and focus
+    /// survive ordinary prop echoes.
+    /// </summary>
+    private readonly Dictionary<int, List<string>> _toolbarLayouts = [];
+
     // -- MenuBar ------------------------------------------------------------------
 
     private FrameworkElement BuildMenuBar(NatuiNode node)
@@ -68,10 +75,19 @@ internal sealed partial class NodeMapper
     private void ApplyToolbarProps(NatuiNode node)
     {
         if (node.Hosted is not CommandBar bar) return;
-        // Wholesale rebuild (NodeStore skips equal props). Items before the
-        // first flexibleSpace, plus ALL search items, go into the left
-        // CommandBar.Content region; items after it become PrimaryCommands,
-        // which the CommandBar right-aligns.
+        var items = Json.Arr(node.Props, "items") ?? [];
+        var layout = ToolbarLayout(items);
+        if (_toolbarLayouts.TryGetValue(node.Id, out var previous)
+            && previous.SequenceEqual(layout))
+        {
+            PatchToolbarItems(bar, node, items);
+            return;
+        }
+
+        // Preserve uncontrolled search fields across structural changes when
+        // their ids survive. Reusing the same AutoSuggestBox keeps its text,
+        // and focus is explicitly restored after reparenting.
+        var (searches, focusedSearch) = TakeToolbarSearches(bar);
         bar.PrimaryCommands.Clear();
         var left = new StackPanel
         {
@@ -81,24 +97,51 @@ internal sealed partial class NodeMapper
         };
         bar.Content = left;
         var afterFlexibleSpace = false;
-        foreach (var entry in Json.Arr(node.Props, "items") ?? [])
+        var visualIndex = 0;
+        foreach (var entry in items)
         {
             if (entry is not JsonObject item) continue;
-            switch (Json.Str(item, "type"))
+            var type = Json.Str(item, "type");
+            if (type == "flexibleSpace")
             {
-                case "flexibleSpace":
-                    afterFlexibleSpace = true;
-                    break;
+                afterFlexibleSpace = true;
+                continue;
+            }
+            var key = ToolbarVisualKey(item, afterFlexibleSpace, visualIndex++);
+            switch (type)
+            {
                 case "spacer":
                     if (afterFlexibleSpace) bar.PrimaryCommands.Add(new AppBarSeparator());
                     else left.Children.Add(new AppBarSeparator());
                     break;
                 case "search":
-                    left.Children.Add(BuildToolbarSearch(node, item));
+                {
+                    var id = Json.Str(item, "id") ?? "";
+                    var search = searches.Remove(id, out var existing)
+                        ? existing
+                        : BuildToolbarSearch(node, item);
+                    search.Tag = key;
+                    search.DataContext = id;
+                    ApplyToolbarSearch(search, item);
+                    if (afterFlexibleSpace)
+                    {
+                        bar.PrimaryCommands.Add(new AppBarElementContainer
+                        {
+                            Content = search,
+                            IsCompact = false,
+                            Tag = key,
+                        });
+                    }
+                    else
+                    {
+                        left.Children.Add(search);
+                    }
                     break;
+                }
                 case "button":
                 {
                     var button = BuildToolbarButton(node, item);
+                    button.Tag = key;
                     if (afterFlexibleSpace) bar.PrimaryCommands.Add(button);
                     else left.Children.Add(button);
                     break;
@@ -106,6 +149,7 @@ internal sealed partial class NodeMapper
                 case "toggle":
                 {
                     var toggle = BuildToolbarToggle(node, item);
+                    toggle.Tag = key;
                     if (afterFlexibleSpace) bar.PrimaryCommands.Add(toggle);
                     else left.Children.Add(toggle);
                     break;
@@ -113,72 +157,175 @@ internal sealed partial class NodeMapper
                 case "menu":
                 {
                     var menu = BuildToolbarMenu(node, item);
+                    menu.Tag = key;
                     if (afterFlexibleSpace) bar.PrimaryCommands.Add(menu);
                     else left.Children.Add(menu);
                     break;
                 }
             }
         }
+        _toolbarLayouts[node.Id] = layout;
+        // A value left in the dictionary was not reinserted.
+        if (focusedSearch is not null && !searches.Values.Contains(focusedSearch))
+            focusedSearch.Focus(FocusState.Programmatic);
+    }
+
+    private static List<string> ToolbarLayout(JsonArray items)
+    {
+        var result = new List<string>();
+        var right = false;
+        var visualIndex = 0;
+        foreach (var entry in items)
+        {
+            if (entry is not JsonObject item) continue;
+            if (Json.Str(item, "type") == "flexibleSpace")
+            {
+                right = true;
+                continue;
+            }
+            result.Add(ToolbarVisualKey(item, right, visualIndex++));
+        }
+        return result;
+    }
+
+    private static string ToolbarVisualKey(JsonObject item, bool right, int index) =>
+        $"{(right ? "right" : "left")}:{Json.Str(item, "type")}:{Json.Str(item, "id") ?? index.ToString()}";
+
+    private void PatchToolbarItems(
+        CommandBar bar, NatuiNode node, JsonArray items)
+    {
+        if (bar.Content is not StackPanel left) return;
+        var leftIndex = 0;
+        var rightIndex = 0;
+        var afterFlexibleSpace = false;
+        foreach (var entry in items)
+        {
+            if (entry is not JsonObject item) continue;
+            var type = Json.Str(item, "type");
+            if (type == "flexibleSpace")
+            {
+                afterFlexibleSpace = true;
+                continue;
+            }
+            FrameworkElement? element;
+            if (afterFlexibleSpace)
+            {
+                if (rightIndex >= bar.PrimaryCommands.Count) return;
+                element = bar.PrimaryCommands[rightIndex++] as FrameworkElement;
+                if (element is AppBarElementContainer container)
+                {
+                    element = container.Content as FrameworkElement;
+                }
+            }
+            else
+            {
+                if (leftIndex >= left.Children.Count) return;
+                element = left.Children[leftIndex++] as FrameworkElement;
+            }
+            switch (type)
+            {
+                case "button" when element is AppBarButton button:
+                    ApplyToolbarButton(button, item);
+                    break;
+                case "toggle" when element is AppBarToggleButton toggle:
+                    ApplyToolbarToggle(toggle, item);
+                    break;
+                case "menu" when element is AppBarButton menu:
+                    ApplyToolbarMenu(menu, node, item);
+                    break;
+                case "search" when element is AutoSuggestBox search:
+                    ApplyToolbarSearch(search, item);
+                    break;
+            }
+        }
+    }
+
+    private static (Dictionary<string, AutoSuggestBox> Searches, AutoSuggestBox? Focused)
+        TakeToolbarSearches(CommandBar bar)
+    {
+        var searches = new Dictionary<string, AutoSuggestBox>(StringComparer.Ordinal);
+        AutoSuggestBox? focused = null;
+        if (bar.Content is StackPanel left)
+        {
+            foreach (var box in left.Children.OfType<AutoSuggestBox>().ToList())
+            {
+                if (box.DataContext is string id) searches[id] = box;
+                if (box.FocusState != FocusState.Unfocused) focused = box;
+                left.Children.Remove(box);
+            }
+        }
+        foreach (var container in bar.PrimaryCommands.OfType<AppBarElementContainer>().ToList())
+        {
+            if (container.Content is not AutoSuggestBox box) continue;
+            if (box.DataContext is string id) searches[id] = box;
+            if (box.FocusState != FocusState.Unfocused) focused = box;
+            container.Content = null;
+        }
+        return (searches, focused);
     }
 
     private static AppBarButton BuildToolbarButton(NatuiNode owner, JsonObject item)
     {
-        var button = new AppBarButton
-        {
-            Label = Json.Str(item, "label") ?? "",
-            IsEnabled = !(Json.Bool(item, "disabled") ?? false),
-        };
-        if (Json.Str(item, "systemImage") is { } icon)
-        {
-            button.Icon = new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) };
-        }
+        var button = new AppBarButton();
+        ApplyToolbarButton(button, item);
         var id = Json.Str(item, "id") ?? "";
         button.Click += (_, _) =>
             Ipc.Event(owner.Id, "action", new JsonObject { ["value"] = id });
         return button;
     }
 
+    private static void ApplyToolbarButton(AppBarButton button, JsonObject item)
+    {
+        button.Label = Json.Str(item, "label") ?? "";
+        button.IsEnabled = !(Json.Bool(item, "disabled") ?? false);
+        button.Icon = Json.Str(item, "systemImage") is { } icon
+            ? new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) }
+            : null;
+    }
+
     private static AppBarToggleButton BuildToolbarToggle(NatuiNode owner, JsonObject item)
     {
-        var on = Json.Bool(item, "on") ?? false;
-        var toggle = new AppBarToggleButton
-        {
-            Label = Json.Str(item, "label") ?? "",
-            IsChecked = on,
-            IsEnabled = !(Json.Bool(item, "disabled") ?? false),
-        };
-        if (Json.Str(item, "systemImage") is { } icon)
-        {
-            toggle.Icon = new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) };
-        }
+        var toggle = new AppBarToggleButton();
+        ApplyToolbarToggle(toggle, item);
         var id = Json.Str(item, "id") ?? "";
         toggle.Click += (_, _) =>
         {
             // The pressed state is prop-driven ('on' in the spec), never
             // optimistic: reassert the spec state, then let the app's action
-            // handler echo the new 'on', which rebuilds this bar.
-            toggle.IsChecked = on;
+            // handler echo the new 'on'. DataContext carries the latest
+            // patched prop so an in-place update never reasserts stale state.
+            toggle.IsChecked = toggle.DataContext as bool? ?? false;
             Ipc.Event(owner.Id, "action", new JsonObject { ["value"] = id });
         };
         return toggle;
     }
 
+    private static void ApplyToolbarToggle(AppBarToggleButton toggle, JsonObject item)
+    {
+        var on = Json.Bool(item, "on") ?? false;
+        toggle.Label = Json.Str(item, "label") ?? "";
+        toggle.IsChecked = on;
+        toggle.IsEnabled = !(Json.Bool(item, "disabled") ?? false);
+        toggle.DataContext = on;
+        toggle.Icon = Json.Str(item, "systemImage") is { } icon
+            ? new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) }
+            : null;
+    }
+
     private AppBarButton BuildToolbarMenu(NatuiNode owner, JsonObject item)
     {
-        var button = new AppBarButton
-        {
-            Label = Json.Str(item, "label") ?? "",
-            IsEnabled = !(Json.Bool(item, "disabled") ?? false),
-        };
-        if (Json.Str(item, "systemImage") is { } icon)
-        {
-            button.Icon = new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) };
-        }
+        var button = new AppBarButton();
+        ApplyToolbarMenu(button, owner, item);
+        return button;
+    }
+
+    private void ApplyToolbarMenu(AppBarButton button, NatuiNode owner, JsonObject item)
+    {
+        ApplyToolbarButton(button, item);
         var flyout = new MenuFlyout();
         FillMenuItems(flyout.Items, owner, Json.Arr(item, "items"), "action");
         // AppBarButton derives from Button, so Flyout exists and opens on tap.
         button.Flyout = flyout;
-        return button;
     }
 
     private static AutoSuggestBox BuildToolbarSearch(NatuiNode owner, JsonObject item)
@@ -186,10 +333,10 @@ internal sealed partial class NodeMapper
         var box = new AutoSuggestBox
         {
             QueryIcon = new SymbolIcon(Symbol.Find),
-            PlaceholderText = Json.Str(item, "placeholder") ?? "",
             Width = 180,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        ApplyToolbarSearch(box, item);
         // Uncontrolled on the wire: fire-and-forget search events, and the
         // text is never echoed back into the spec (avoids focus races).
         box.TextChanged += (_, args) =>
@@ -201,6 +348,9 @@ internal sealed partial class NodeMapper
             Ipc.Event(owner.Id, "search", new JsonObject { ["value"] = box.Text });
         return box;
     }
+
+    private static void ApplyToolbarSearch(AutoSuggestBox box, JsonObject item) =>
+        box.PlaceholderText = Json.Str(item, "placeholder") ?? "";
 
     // -- Menu ---------------------------------------------------------------------
 

@@ -1,16 +1,16 @@
 /**
  * Automated E2E verification of the kitchen-sink app against the REAL
- * SwiftUI host: window chrome (MenuBar/Toolbar) semantics via the debug
+ * native host (SwiftUI on macOS, WinUI 3 on Windows): window chrome
+ * (MenuBar/Toolbar) semantics via the debug
  * `emit` channel, every controlled input kind through the real
  * optimistic-edit path (`edit`: local write + seq + change event), overlay
  * presentation round-trips, table sort/selection, and PNG screenshots.
  *
- * Documented limitation: sheets, alerts, popovers, and open menus live in
- * separate NSWindows and do not appear in cacheDisplay screenshots, so
- * presentation coverage is dump-based; the unified toolbar IS captured.
- * On macOS 26+ the TabView tab strip is a glass material whose labels
- * cacheDisplay also cannot capture (verified identical in pure SwiftUI);
- * the strip renders correctly on screen.
+ * Overlay presentation coverage is dump-based because native popup surfaces
+ * are not consistently included in backing-window screenshots. On macOS 26+
+ * the TabView tab strip is a glass material whose labels cacheDisplay cannot
+ * capture (verified identical in pure SwiftUI); the strip renders correctly
+ * on screen.
  *
  * Exits non-zero on any failure.
  */
@@ -30,6 +30,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Another running host would grab focus and confuse window-level checks.
 function runningHosts(): string {
   try {
+    if (process.platform === 'win32') {
+      const out = execFileSync(
+        'tasklist',
+        ['/FI', 'IMAGENAME eq NatuiHost.exe', '/NH'],
+        { encoding: 'utf8' },
+      ).trim();
+      return out.toLowerCase().includes('natuihost.exe') ? out : '';
+    }
+    // pgrep exits 1 when nothing matches; that is the good case.
     return execFileSync('pgrep', ['-lf', 'natui-host'], { encoding: 'utf8' }).trim();
   } catch {
     return '';
@@ -75,6 +84,22 @@ function assertValidPng(path: string): void {
     [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
     `${path} lacks a PNG signature`,
   );
+  if (process.platform === 'win32') {
+    // System.Drawing decodes the image; a corrupt file makes FromFile throw
+    // and the script exit non-zero (the Windows counterpart of sips below).
+    const width = execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `Add-Type -AssemblyName System.Drawing; $i = [System.Drawing.Image]::FromFile('${path.replace(/'/g, "''")}'); "pixelWidth: $($i.Width)"; $i.Dispose()`,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.match(width, /pixelWidth: \d+/, `${path} did not decode`);
+    return;
+  }
+  // sips decodes the image; a corrupt file makes it exit non-zero.
   const width = execFileSync('sips', ['-g', 'pixelWidth', path], { encoding: 'utf8' });
   assert.match(width, /pixelWidth: \d+/, `${path} did not decode`);
 }

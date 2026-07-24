@@ -9,19 +9,20 @@ Status: the base host is compiled and verified on Windows 11 (WASDK 1.7,
 passes against the real WinUI 3 window: tree dumps, button presses,
 optimistic edits with native seq/ack, screenshots, and the controlled-input
 stress phase. See "First Windows compile: findings" at the bottom for what
-the initial pass fixed. The newer app-shell kinds (see "App-shell kinds"
-below) are compile-checked by CI only so far.
+the initial pass fixed. The app-shell suite and embedded V8 runtime are also
+verified locally against real windows.
 
 ## Layout
 
 | file | contents |
 |---|---|
 | `Program.cs` | custom `Main`, code-only `App`, window shell, stdin reader thread, `Router` |
+| `EmbeddedJsHost.cs` | in-process V8 runtime, host callbacks, timers, and `natui/inproc` bridge |
 | `Ipc.cs` | locked NDJSON stdout writer (`ready`, `event`, `window`, `tree`, `shot` with optional `error`), stderr logging |
 | `NodeStore.cs` | node registry and op interpreter (same semantics as the Swift `Store.apply`), `UserEdit` |
 | `NodeMapper.cs` | node to `FrameworkElement` mapping, prop application, label refresh, events, `NatuiStack` |
 | `NodeMapper.Menus.cs` | MenuBar, Toolbar (CommandBar), Menu, ContextMenu, shared `MenuItemSpec` builder, shortcut parsing, command roles |
-| `NodeMapper.Overlays.cs` | Sheet (in-tree scrim + card), Alert (ContentDialog), Popover (Flyout) |
+| `NodeMapper.Overlays.cs` | Sheet and Alert (ContentDialog), Popover (Flyout) |
 | `NodeMapper.Structure.cs` | SplitView + Sidebar/Detail slots, TabView/Tab, Section, Table, DisclosureGroup, List/Table selection |
 | `NodeMapper.Inputs.cs` | SearchField, DatePicker, Stepper, TextEditor, Link, Label, segmented/radio Picker styles |
 
@@ -82,6 +83,14 @@ pnpm demo
 (`pnpm demo` is the root script; it builds the `natui` package and runs the
 `natui-demo` example via `pnpm --filter natui-demo dev`.)
 
+The host can also evaluate the browser bundle in-process with V8:
+
+```
+pnpm build
+pnpm --filter natui-demo build:embedded
+hosts\windows\NatuiHost\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NatuiHost.exe --bundle examples\demo\dist\embedded.js
+```
+
 Launching the exe by double-click shows a hint window and does nothing else
 (or exits immediately if the OS reports the invalid stdin handle as
 redirected): the protocol channel only exists when stdin/stdout are pipes.
@@ -102,9 +111,11 @@ redirected): the protocol channel only exists when stdin/stdout are pipes.
   `AutomationProperties.HelpText`, `accessibilityIdentifier` →
   `AutomationProperties.AutomationId` (set on the element that produces the
   automation peer, e.g. the inner control or TextBlock).
-- Stdio is the only transport; stdout carries protocol messages exclusively
-  and all diagnostics go to stderr (there is no `log` message type). Unknown
-  inbound message types are noted on stderr and ignored.
+- In Node mode, stdout carries protocol messages exclusively and all
+  diagnostics go to stderr. Embedded mode mirrors those messages through
+  `__natui_send` and `__natui_recv`, while redirected standard streams remain
+  available as a verification channel. Unknown inbound message types are
+  noted on stderr and ignored.
 
 ## Design notes
 
@@ -125,10 +136,8 @@ redirected): the protocol channel only exists when stdin/stdout are pipes.
   `alignment: leading/center/trailing` (VStack) and `top/center/bottom`
   (HStack) map to the children's cross-axis alignment. The root container
   mirrors the macOS RootView (`VStack(alignment: .leading, spacing: 0)`).
-- Button/Toggle labels: pure `#text` children collapse to a plain string;
-  mixed labels like `<Button><Image/> Delete</Button>` render every child in
-  document order in a horizontal stack (spacing 4), `#text` children as
-  inline text, exactly like the macOS host's `labelContent`.
+- Text, Button, and Toggle labels preserve mixed text and element children in
+  document order. Button and Toggle use a horizontal stack with spacing 4.
 - WinUI events fire for programmatic changes too (unlike SwiftUI bindings),
   so every change handler is double-guarded: an `applyingRemote` depth counter
   plus a compare against the stored prop value (TextChanged can arrive on a
@@ -152,57 +161,33 @@ Tab, Sheet, Alert, Popover (+ PopoverContent), Section, Table, DisclosureGroup,
 SearchField, DatePicker, Stepper, TextEditor, Link, Label, and the segmented/
 radioGroup Picker styles, plus List/Table selection and Table sort requests.
 
-Status: this expansion is compile-checked by the `windows-host` CI job only.
-Unlike the base host above, it has not been E2E-verified against a real
-window yet; the macOS host plus `pnpm verify:kitchen` is the behavioral
-reference.
+Status: the blocking `windows-host` CI job compile-checks this expansion, and
+`pnpm verify:kitchen` passes locally against a real WinUI 3 window.
 
-### Windows divergences (deliberate, v1)
+### Host implementation notes
 
-- Toolbar search items always render in the LEFT region (CommandBar.Content,
-  a horizontal StackPanel), regardless of their position in `items`; items
-  after the first `flexibleSpace` become right-aligned PrimaryCommands.
-  A toolbar props change rebuilds the CommandBar wholesale, which drops
-  in-progress search text and focus (the macOS host patches in place).
-- DatePicker is date-only. A `dateTime` value displays its date portion and
-  change events carry `YYYY-MM-DD`. A `time` value in `HH:mm` form is not
-  parseable by CalendarDatePicker, leaves the current native value unchanged,
-  and cannot emit a time-only value.
-- List rows inside `Section` children are not individually selectable (they
-  are not items of the outer ListView); `badge` is not rendered on List rows.
-- Toggle/Picker `style` and TextField `secure` are fixed at creation
-  (changing them later would need an element swap).
-- Sheet is an in-tree overlay (scrim + centered card in the overlay layer),
-  not a separate window, so unlike macOS it IS captured by
-  RenderTargetBitmap screenshots. Alerts, popovers, and open menus still are
-  not (ContentDialog and flyouts render in popup layers).
-- MenuBar/Toolbar hoist into the chrome row at creation, wherever they sit in
-  the tree (macOS hoists only the first root-level one and warns otherwise).
-- SplitView ignores `minSidebarWidth`/`maxSidebarWidth` (no interactive pane
-  resize in WinUI SplitView); sidebar visibility is JS-driven only.
-- Alert supports at most cancel + two non-cancel buttons (ContentDialog's
-  close/primary/secondary); extra buttons are dropped with a stderr warning,
-  and `destructive` button styling is not rendered.
-- A Menu label supports `#text` children (joined) or a `systemImage` icon;
-  element children inside a Menu label are ignored.
-- Table header sort indicators are text arrows (` ^`/` v`) on transparent
-  header buttons, not native column headers.
-
-### Compile-risk register (blind CI compiles)
-
-Ranked by likelihood of a member-name miss against WinAppSDK 1.7, with the
-planned fallback if the CI compile fails on it:
-
-| API used | risk | fallback |
-|---|---|---|
-| `SelectorBar`/`SelectorBarItem` (`Items`, `Text`, `SelectedItem`, `SelectionChanged`) | needs WASDK 1.5+; isolated in `BuildSegmentedPicker` + `ApplySegmentedPickerProps` | horizontal StackPanel of ToggleButtons |
-| `AppBarButton.Flyout` (inherited from `Button`) | verified: AppBarButton derives from Button | plain `Button` styled flat inside the left region |
-| `CommandBar.Content` left region layout | Content renders left of PrimaryCommands by template | put every item in `PrimaryCommands` and drop the split |
-| `FlyoutPlacementMode` Top/Bottom/Left/Right mapping | enum lives in `Controls.Primitives` | drop `Placement` assignment (default placement) |
-| `TabView.CanReorderTabs`/`CanDragTabs`/`IsAddTabButtonVisible` | straightforward properties | remove the assignments (defaults allow reorder, cosmetic only) |
-| `Expander.Expanding`/`Collapsed` event pair | asymmetric names are correct per docs | poll `IsExpanded` in a `SizeChanged` handler |
-| `TextBox` clipboard methods (`CutSelectionToClipboard` etc., 1809+) | min platform is 17763 | drop the edit roles to no-ops |
-| `FocusManager.GetFocusedElement(XamlRoot)` overload | WinUI 3 requires the XamlRoot overload | skip edit roles when unavailable |
+- Toolbar items before and after `flexibleSpace` use the CommandBar left and
+  right regions. Stable updates patch controls in place so search text and
+  focus survive.
+- DatePicker uses native date, time, or paired date-time controls and preserves
+  the protocol's canonical local ISO forms.
+- Direct and sectioned List rows share controlled selection and badge support.
+- Toggle and Picker styles, TextField secure mode, and DatePicker component
+  modes can swap the inner native control while keeping the React node stable.
+- Sheets and alerts use ContentDialog popup layers. Popovers and menus use
+  flyouts, so open popup content is outside RenderTargetBitmap screenshots.
+- MenuBar and Toolbar hoist into the chrome row at creation, wherever they sit
+  in the tree. Portable apps keep them at the root as the public API requires.
+- SplitView supplies a native visibility button, emits controlled changes, and
+  clamps its pane to the requested minimum and maximum widths.
+- Alert keeps every action, maps cancel to native close and Escape behavior,
+  and applies critical styling to destructive actions.
+- A Menu label supports `#text` children (joined) or a `systemImage` icon.
+  Element children inside a Menu label are ignored.
+- Table header buttons use native FontIcon sort chevrons.
+- ZStack propagates flexible-space proposals, Image has a paintable box,
+  container foreground color cascades, and rounded panels clip children.
+- Button variants map to the corresponding native WinUI styles.
 
 ## Known gaps and deliberate divergences
 
@@ -211,22 +196,6 @@ planned fallback if the CI compile fails on it:
   constrains the whole window frame rather than the client area; the macOS
   host constrains the content size, so the effective minimum differs by the
   title-bar height.
-- Mixed element children inside `Text` (e.g. `<Text>Total: <Image/></Text>`)
-  are dropped; only the `#text` parts render. The macOS host renders them
-  inline. Button/Toggle mixed labels are supported, and bare `#text` children
-  of containers (stacks, ScrollView, List) render as plain text like on macOS.
-- A `Spacer` inside a `ZStack` has no track to fill (ZStack is a plain Grid
-  overlay), so it collapses to zero size instead of expanding the stack the
-  way SwiftUI's ZStack proposal does.
-- `padding`/`background` on `Image` are not painted (FontIcon carries no box
-  properties of its own).
-- Button variants `bordered`, `plain`, and `link` all render as the default
-  button style; only `prominent` (AccentButtonStyle) is mapped.
-- A TextField's `secure` flag is fixed at creation; toggling it later is not
-  supported (would need an element swap).
-- `color` on containers does not cascade to children (WinUI panels have no
-  Foreground); set it on leaf nodes.
-- `cornerRadius` on panels rounds the background but does not clip children.
 - Stack `spacing` defaults to 8 when the prop is absent, approximating
   SwiftUI's default stack spacing.
 

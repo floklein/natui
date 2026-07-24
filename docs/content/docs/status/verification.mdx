@@ -32,9 +32,14 @@ They assert native tree dumps, interaction events, optimistic edits, sequence ac
 
 The blocking Windows CI job compiles the Release x64 WinUI host with .NET 8.
 
-The base Node-mode suite has also passed locally against a real WinUI 3 window, including screenshots and controlled-input stress behavior.
+Local real-window suites cover:
 
-The newer app-shell kinds are currently compile-checked on Windows. They have not yet received the same real-window end-to-end suite as macOS.
+- Base demo in Node mode
+- Kitchen-sink app-shell and multi-component workflows
+- Embedded V8 demo
+
+They cover the same tree, interaction, controlled-state, sequence
+acknowledgement, and screenshot evidence categories as the macOS suites.
 
 ## Evidence limits
 

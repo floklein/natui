@@ -9,32 +9,24 @@ NatUI is still in Alpha. Support claims distinguish implementation, compilation,
 |---|---|---|
 | Native toolkit | SwiftUI | WinUI 3 |
 | Base demo workflow | Real-window verified | Real-window verified |
-| Kitchen-sink app-shell workflow | Real-window verified | Compile-checked |
+| Kitchen-sink app-shell workflow | Real-window verified | Real-window verified |
 | Node process mode | Verified | Verified |
-| Embedded mode | JavaScriptCore verified | Not implemented |
+| Embedded mode | JavaScriptCore verified | V8 verified |
 | Host build in CI | Yes | Yes |
 | GUI suites in CI | No | No |
 
-## Windows differences
+## Cross-platform component support
 
-- Toolbar search items render in the left region. Rebuilding the toolbar drops current search text and focus.
-- `DatePicker` uses a date-only control. A `dateTime` value displays its date portion and emits `YYYY-MM-DD`; a `time` value cannot be represented and leaves the native value unchanged.
-- Rows nested in list sections are not individually selectable, and list row badges are not rendered.
-- Toggle and picker styles, plus text-field secure mode, are fixed when the control is created.
-- Sheet uses an in-tree overlay. Alerts, popovers, and menus use popup layers.
-- Split view ignores minimum and maximum sidebar widths. It has no native visibility affordance, so visibility is changed only through the React `value` prop and Windows does not emit `onChange`.
-- Alert supports one cancel button and two other buttons. Extra buttons are dropped, and destructive styling is not shown.
-- Table sort indicators are text arrows rather than native column-header indicators.
-- Mixed element children inside `Text` are dropped, while button and toggle mixed labels are supported.
-- `Spacer` inside `ZStack` collapses.
-- Image padding and background are not painted.
-- Only the prominent button variant has distinct styling.
-- Container foreground color does not cascade, and rounded panel backgrounds do not clip children.
+The Windows differences previously listed on this page are implemented. Both
+hosts cover all 37 public components, including their controlled-state,
+selection, presentation, and event paths. Individual component pages still
+describe platform-native conventions where the operating systems differ.
 
-## macOS details
+## Implementation details
 
 - Table uses a list-based fallback on macOS 14.0 through 14.3.
-- Tab icons and badges are currently not rendered in the native tab label.
-- The host supports embedded JavaScriptCore execution.
+- Embedded execution uses system JavaScriptCore on macOS and V8 on Windows.
+- GUI verification runs locally because the hosted CI jobs do not provide a
+  normal desktop window session.
 
-These are current implementation details, not promises of permanent divergence.
+These are current implementation details, not promises of permanent behavior.
