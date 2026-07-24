@@ -1,0 +1,59 @@
+---
+title: Data components
+description: Group content, display sortable tables, and reveal controlled detail.
+---
+
+## Section
+
+Groups children under optional `header` and `footer` text.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="SectionProps" />
+
+```tsx
+<Section header="Identity" footer="All fields are required.">
+  <TextField value={name} onChange={setName} />
+</Section>
+```
+
+Sections can appear in lists or ordinary layout containers. On Windows, rows nested inside a list section do not participate in the outer list's row selection.
+
+## Table
+
+Tables receive serializable columns and rows. Cells are strings keyed by column.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="TableProps" />
+
+```tsx
+<Table
+  columns={[
+    { key: 'name', label: 'Name' },
+    { key: 'status', label: 'Status', sortable: false },
+  ]}
+  rows={[
+    { id: 'one', cells: { name: 'Aurora', status: 'Active' } },
+  ]}
+  value={selection}
+  selectionMode="single"
+  sort={sort}
+  onChange={setSelection}
+  onSortChange={setSort}
+/>
+```
+
+The host never sorts rows. A header interaction requests a new `SortDescriptor`; the application sorts its data, provides the reordered rows, and echoes the descriptor.
+
+On macOS 14.0 through 14.3, natui uses a list-based table fallback because the dynamic table API requires macOS 14.4.
+
+## DisclosureGroup
+
+Shows or hides child content using a controlled Boolean value.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="DisclosureGroupProps" />
+
+```tsx
+<DisclosureGroup label="Details" value={expanded} onChange={setExpanded}>
+  <Text>Additional information</Text>
+</DisclosureGroup>
+```
+
+Disclosure state is always controlled. If React does not accept a native expansion change, natui corrects the host back to the current prop.

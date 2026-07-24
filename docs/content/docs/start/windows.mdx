@@ -1,0 +1,37 @@
+---
+title: Windows
+description: Build and run the native WinUI 3 host on Windows.
+---
+
+## Requirements
+
+- Windows 10 version 1809 or newer
+- Windows 11 recommended for the Segoe Fluent Icons font
+- .NET 8 SDK or newer
+- Node.js 22 or newer
+- pnpm 11
+
+The project targets `net8.0-windows` and Windows App SDK 1.7. It has been locally verified with a .NET 9 SDK building that .NET 8 target. CI uses the .NET 8 SDK.
+
+```powershell
+pnpm install
+dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
+pnpm demo
+```
+
+The host is an unpackaged, self-contained WinUI 3 executable. The JavaScript bridge locates normal debug and release output paths automatically. Set `NATUI_HOST` when your executable is elsewhere:
+
+```powershell
+$env:NATUI_HOST = "C:\path\to\NatuiHost.exe"
+pnpm demo
+```
+
+Do not use `dotnet run` as the spawn target. Its wrapper process breaks the parent-child lifetime and standard-stream semantics expected by natui.
+
+## Verification status
+
+The base demo and its Node-mode end-to-end suite have passed against a real WinUI 3 window, including tree dumps, interaction events, controlled edits, and screenshots.
+
+The newer app-shell components are compile-checked by the blocking Windows CI job but have not yet received equivalent real-window end-to-end coverage on Windows. Embedded mode is not implemented on Windows.
+
+See [platform support](/docs/status/platform-support) for component-level differences.

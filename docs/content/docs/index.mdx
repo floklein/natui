@@ -1,0 +1,42 @@
+---
+title: natui documentation
+description: Build real SwiftUI and WinUI 3 desktop interfaces with React and TypeScript.
+---
+
+natui is an experimental React 19 renderer for real native desktop controls. Your TypeScript and React state stay in JavaScript while SwiftUI on macOS or WinUI 3 on Windows owns layout, theming, focus, and accessibility.
+
+There is no webview, Electron runtime, or browser layout engine.
+
+```tsx typecheck
+import { useState } from 'react';
+import { Button, HStack, Text, VStack, run } from 'natui';
+
+function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <VStack spacing={12} padding={20} alignment="leading">
+      <Text font="largeTitle" weight="bold">Hello, native</Text>
+      <HStack spacing={8}>
+        <Button onPress={() => setCount((value) => value - 1)}>-</Button>
+        <Text font="title2" monospaced>{String(count)}</Text>
+        <Button onPress={() => setCount((value) => value + 1)}>+</Button>
+      </HStack>
+    </VStack>
+  );
+}
+
+await run(<App />, { title: 'my app', width: 480, height: 320 });
+```
+
+## Explore the documentation
+
+- [Get started](/docs/start) from a source checkout.
+- Browse all [37 components](/docs/components).
+- Learn how [controlled state](/docs/guides/controlled-state) stays responsive across the native bridge.
+- Choose between [Node and embedded runtime modes](/docs/guides/runtime-modes).
+- Review the current [platform support](/docs/status/platform-support) before depending on a feature.
+
+## Current status
+
+natui is a proof of concept, not a published registry package. The macOS host has the broadest real-window verification. The Windows base demo is verified against a real WinUI 3 window, while the newer app-shell component set is currently compile-checked there. Embedded JavaScriptCore mode is implemented and verified on macOS only.

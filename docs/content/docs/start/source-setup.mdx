@@ -1,0 +1,32 @@
+---
+title: Source setup
+description: Clone the natui repository and install its pnpm workspace prerequisites.
+---
+
+## Prerequisites
+
+- Node.js 22 or newer
+- pnpm 11
+- Git
+- The platform tools described in the macOS or Windows guide
+
+```bash
+git clone https://github.com/floklein/natui.git
+cd natui
+corepack enable
+pnpm install
+pnpm build
+pnpm typecheck
+```
+
+`pnpm build` emits the `natui` package into `packages/natui/dist`. The examples resolve the package through the pnpm workspace, so build the package before running a standalone typecheck.
+
+## Package entrypoints
+
+The workspace exposes three entrypoints:
+
+- `natui` for components, `run`, and advanced protocol exports
+- `natui/components` for component-only bundles that avoid Node built-ins
+- `natui/inproc` for the embedded host entrypoint
+
+natui is not documented as a public registry package. Keep installation and examples tied to a source checkout until a packaging workflow exists.

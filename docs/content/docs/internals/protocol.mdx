@@ -1,0 +1,164 @@
+---
+title: Wire protocol
+description: Specify natui protocol version 1 messages, operations, events, selection, and sequence acknowledgements.
+---
+
+The Node renderer and native host communicate with one UTF-8 JSON object per line. The process transport uses the host's standard input and output. Diagnostics go to standard error, and a host must not write non-protocol text to standard output.
+
+Receivers ignore unknown message types for forward compatibility.
+
+## Handshake
+
+1. The host sends `{"t":"ready","platform":"macos","protocol":1}`.
+2. JavaScript checks that the version is 1, the platform is known, and it matches the current operating system.
+3. JavaScript sends a `window` message, then begins committing the React tree.
+
+A mismatch is a startup failure. JavaScript terminates the incompatible or half-started host.
+
+## JavaScript to host messages
+
+| Message | Shape | Meaning |
+|---|---|---|
+| `window` | `{"t":"window","props":{...}}` | Configure and show the main window |
+| `commit` | `{"t":"commit","ops":[...]}` | Apply one atomic React commit |
+| `dump` | `{"t":"dump"}` | Request the native node tree |
+| `screenshot` | `{"t":"screenshot","path":string}` | Render the window to a PNG |
+| `emit` | `{"t":"emit","id":number,"name":string,"payload"?:object}` | Synthesize an event |
+| `edit` | `{"t":"edit","id":number,"value":any}` | Perform an optimistic controlled edit |
+| `quit` | `{"t":"quit"}` | Exit cleanly |
+
+Debug messages can be removed from a production host.
+
+## Commit operations
+
+Node ids are positive integers. Id `0` is the root container.
+
+| Operation | Meaning |
+|---|---|
+| `create` | Create a detached typed node with serialized props |
+| `createText` | Create a detached raw text node |
+| `append` | Append or move a child to the end of a parent |
+| `insert` | Insert or move a child before a sibling |
+| `remove` | Destroy a child and its subtree |
+| `update` | Replace all props, optionally carrying `ack` |
+| `text` | Replace raw text content |
+| `clear` | Destroy every root child |
+
+The host applies every operation in a commit before updating visible UI.
+
+## Host to JavaScript messages
+
+| Message | Meaning |
+|---|---|
+| `ready` | Report platform and protocol version |
+| `event` | Report an interaction on a node |
+| `window` | Report native window close |
+| `tree` | Reply to `dump` |
+| `shot` | Reply to `screenshot`, with optional `error` |
+
+The host always replies to `screenshot`. On failure it includes `error` and does not produce a usable file.
+
+## Events
+
+| Component | Event | Payload value |
+|---|---|---|
+| `Button`, `Link` | `press` | none |
+| `TextField`, `SearchField` | `change`, `submit` | string |
+| `Toggle` | `change` | boolean |
+| `Slider`, `Stepper` | `change` | number |
+| `Picker`, `TabView` | `change` | string |
+| `DatePicker` | `change` | local ISO string |
+| `TextEditor` | `change` | string |
+| `Sheet`, `Alert`, `Popover` | `change` | boolean |
+| `Alert` | `select` | button id |
+| `SplitView` | `change` | `all` or `detailOnly` on macOS; Windows has no native visibility event |
+| `DisclosureGroup` | `change` | boolean |
+| `List`, `Table` | `change` | string, string array, or null |
+| `Table` | `sortChange` | `{ key, order }` |
+| `MenuBar`, `Menu`, `ContextMenu` | `select` | item id |
+| `Toolbar` | `action` | item id |
+| `Toolbar` | `search` | text |
+
+Only `change` events carry `seq`. Press, submit, select, action, search, and sort requests are fire-and-forget.
+
+## Sequence acknowledgements
+
+On every optimistic controlled edit:
+
+1. The host increments a per-node counter and sends it as `seq`.
+2. JavaScript records the highest sequence processed for that node.
+3. An update generated after that event carries the sequence as `ack`.
+4. If the host has a newer sequence, it keeps its local `value` while applying other props.
+5. When `ack` equals the local counter, the full update is authoritative.
+
+An update without `ack` is fully authoritative.
+
+After the synchronous handler flush, JavaScript compares the committed value with the event value. If they differ, it synthesizes a corrective update with the event acknowledgement. This covers handlers that reject or clamp input and controls without handlers.
+
+An asynchronously adopted value is corrected first, then applied by the later React commit.
+
+## Controlled kinds
+
+Each controlled kind has exactly one controlled prop named `value`.
+
+| Kind | Value |
+|---|---|
+| `TextField`, `SearchField`, `TextEditor` | string |
+| `Toggle` | boolean |
+| `Slider`, `Stepper` | number |
+| `Picker`, `TabView` | string |
+| `DatePicker` | local ISO string |
+| `Sheet`, `Alert`, `Popover` | boolean |
+| `SplitView` | `all` or `detailOnly`; optimistic native changes occur on macOS only |
+| `List`, `Table` | string, string array, or null |
+| `DisclosureGroup` | boolean |
+
+Presentation hosts can optimistically set only `false`, representing native dismissal. Keeping `value` true prevents dismissal through the same corrective mechanism.
+
+## Presentation ordering
+
+Sheet and popover content materializes eagerly whether or not it is presented.
+
+Alert children are ignored because its content is data-driven. A button press emits `select` first and dismissal `change(false)` second. The ordering lets the select handler close state without re-presenting the alert between events.
+
+A popover's ordinary children form its anchor. Its first `PopoverContent` child forms the presented body; extra content slots are ignored with a diagnostic.
+
+## Menu and toolbar specifications
+
+Menu items are recursive JSON data:
+
+```text
+MenuItemSpec =
+  { id, label, systemImage?, role?, shortcut?, disabled?, checked?, children? }
+  | { divider: true }
+```
+
+Selection fires only for enabled leaves. `checked` is prop-driven. Command roles do not emit selection, except `destructive`, which is a style and still emits. Command roles invoke platform actions where supported; the Windows `about` role is currently inert.
+
+Shortcuts use tokens such as `cmd`, `shift`, `alt`, and `ctrl` plus a key.
+
+Toolbar items can be spacers, flexible spaces, buttons, toggles, menus, or search fields. Buttons and toggles emit `action`. Toolbar menu leaves also emit `action`. Search text emits `search` and is not echoed into the item spec.
+
+## Selection and sorting
+
+A `List` becomes selectable when its props include `value`, including null. Rows use the common `tag` prop as identity.
+
+Single selection is a string or null. Multiple selection is a sorted string array, and an empty selection is `[]`, not null. Rows without tags should not be used in selectable lists.
+
+Table selection uses row ids and the same value shapes.
+
+Sorting is request-based. The host emits `sortChange` without a sequence number and never reorders rows. The application sorts its data and returns both reordered rows and the new descriptor.
+
+## Root-attached chrome
+
+`MenuBar` and `Toolbar` remain protocol nodes and appear in tree dumps, but they do not render in normal content. For portable behavior, provide one direct root child of each kind. macOS hoists the first direct root child. Windows creates hosted chrome for every such node when it is created, even if it is nested, so duplicate or nested chrome is intentionally unsupported application structure.
+
+Structurally equal props do not rebuild chrome, which prevents unrelated React commits from tearing down an open menu.
+
+## Node props
+
+All dimensions are logical points. Colors are `#RRGGBB` or `#RRGGBBAA`.
+
+Common props cover padding, background, corner radius, frame, opacity, disabled and hidden state, foreground color, tooltips, selection tags, badges, and accessibility fields.
+
+Component-specific props and platform mappings are documented in the [component catalog](/docs/components). Every wire prop must be JSON-compatible. Event handlers remain in JavaScript and never cross the wire.

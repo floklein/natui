@@ -1,0 +1,49 @@
+---
+title: Runtime modes
+description: Choose between the Node development process and embedded JavaScriptCore on macOS.
+---
+
+## Node process
+
+The current development path runs React in Node. `run` locates and spawns the native host, then exchanges newline-delimited JSON over standard input and output.
+
+```tsx
+import { run } from 'natui';
+
+await run(<App />, { title: 'natui app' });
+```
+
+This mode provides the simplest development loop and works with the macOS and Windows hosts.
+
+## Embedded JavaScriptCore
+
+The macOS host can evaluate a browser-targeted bundle inside system JavaScriptCore:
+
+```tsx
+import { VStack, Text } from 'natui/components';
+import { runEmbedded } from 'natui/inproc';
+
+await runEmbedded(
+  <VStack padding={20}>
+    <Text>Hello from JavaScriptCore</Text>
+  </VStack>,
+  { title: 'embedded app' },
+);
+```
+
+Build and run the included embedded demo:
+
+```bash
+pnpm build:host:macos
+pnpm build
+pnpm --filter natui-demo build:embedded
+hosts/macos/.build/release/natui-host --bundle examples/demo/dist/embedded.js
+```
+
+Component imports come from `natui/components` so the bundle does not include Node built-ins. `natui/inproc` exchanges the same protocol messages through host-injected functions rather than standard streams.
+
+Embedded mode is implemented and verified on macOS only. A Windows Hermes path is a researched direction, not a shipped capability.
+
+## Packaging status
+
+natui does not yet provide a CLI or application bundler. The current source checkout proves both a Node-driven development mode and a macOS single-process runtime, but application packaging remains future work.

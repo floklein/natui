@@ -1,0 +1,44 @@
+---
+title: Transport API
+description: Reference the natui transport contract and standard-stream host implementation.
+---
+
+## Transport
+
+<auto-type-table path="../../../../packages/natui/src/bridge/transport.ts" name="Transport" />
+
+```ts
+interface Transport {
+  send(msg: OutboundMessage): void;
+  onMessage(cb: (msg: InboundMessage) => void): void;
+  onExit(cb: (code: number | null) => void): void;
+  close(): void;
+}
+```
+
+A transport delivers typed protocol messages in both directions and reports host exit.
+
+## HostCommand
+
+<auto-type-table path="../../../../packages/natui/src/bridge/transport.ts" name="HostCommand" />
+
+```ts
+interface HostCommand {
+  cmd: string;
+  args?: string[];
+}
+```
+
+## spawnStdioTransport
+
+```ts
+function spawnStdioTransport(host: HostCommand): Transport
+```
+
+Spawns a host process and exchanges newline-delimited JSON over its standard input and output. Host standard error is inherited for diagnostics.
+
+## defaultHostCommand
+
+Checks `NATUI_HOST` first, then searches upward from the current directory for known macOS or Windows build outputs.
+
+The shipped host process protocol uses standard streams. `natui/inproc` provides a separate internal transport for an embedding host.

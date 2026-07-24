@@ -1,0 +1,50 @@
+---
+title: Testing and debugging
+description: Validate renderer contracts and inspect the real native tree with natui debug messages.
+---
+
+## Contract and unit tests
+
+```bash
+pnpm test
+pnpm build
+pnpm typecheck
+```
+
+The JavaScript test suite covers reconciler mutation semantics, prop validation, bridge startup and failure behavior, sequence acknowledgements, menu and presentation data, and selection behavior.
+
+## Real-window suites
+
+```bash
+pnpm verify
+pnpm verify:kitchen
+pnpm verify:embedded
+```
+
+These commands require a desktop window session. The base and kitchen-sink suites run against the macOS SwiftUI host. The embedded suite additionally proves the JavaScriptCore path.
+
+The base Node-mode suite has also passed locally against a real Windows WinUI 3 window. The Windows CI job is a compile check and does not run GUI verification.
+
+## Debug messages
+
+`NatuiApp` exposes four debug helpers:
+
+```tsx
+const app = await run(<App />);
+
+const tree = await app.dump();
+await app.screenshot('/absolute/path/result.png');
+app.emit(nodeId, 'press');
+app.edit(nodeId, 'new value');
+```
+
+- `dump` returns the host's actual native node tree.
+- `screenshot` asks the host to render its window to a PNG.
+- `emit` synthesizes an event without optimistic local state.
+- `edit` performs a real optimistic edit and exercises sequence acknowledgements.
+
+Dump and screenshot requests time out rather than hanging forever. Screenshot failures return an error response and do not leave a successful-looking path.
+
+## Interpret evidence precisely
+
+A native tree dump proves materialization and props. An event assertion proves bridge behavior. A host-rendered PNG proves visible window content. None of these alone proves every popup layer, focus transition, or accessibility interaction.

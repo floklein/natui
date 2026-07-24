@@ -1,0 +1,46 @@
+---
+title: First app
+description: Render React state into a real native natui window.
+---
+
+Create a React component using natui host components:
+
+```tsx typecheck
+import { useState } from 'react';
+import { Button, Text, TextField, VStack, run } from 'natui';
+
+function App() {
+  const [name, setName] = useState('');
+
+  return (
+    <VStack spacing={12} padding={20} alignment="leading">
+      <Text font="title" weight="semibold">Welcome</Text>
+      <TextField
+        value={name}
+        placeholder="Your name"
+        onChange={setName}
+        frame={{ width: 260 }}
+      />
+      <Button variant="prominent" disabled={!name}>
+        {name ? `Continue as ${name}` : 'Continue'}
+      </Button>
+    </VStack>
+  );
+}
+
+await run(<App />, {
+  title: 'First natui app',
+  width: 420,
+  height: 260,
+});
+```
+
+`run` starts the platform host, validates its handshake, configures the window, and resolves after React's first commit has been flushed to the host transport. Protocol version 1 has no host acknowledgement for a completed native commit. Use `dump()` in verification code when you need to observe the host tree.
+
+All sizing uses logical points. Native layout decides the final geometry, so expect intentional visual differences between SwiftUI and WinUI 3.
+
+## Keep inputs controlled
+
+Interactive values are ordinary React state. Provide both `value` and `onChange` when the user should be able to edit a control. natui uses sequence acknowledgements to prevent a slower JavaScript round trip from overwriting newer native input.
+
+Continue with [controlled state](/docs/guides/controlled-state) for the complete model.

@@ -1,0 +1,29 @@
+---
+title: Kitchen sink
+description: Explore natui app-shell, form, data, menu, and presentation workflows in one native example.
+---
+
+`examples/kitchen-sink` is a project and task manager built to exercise app-shell and multi-component workflows. It includes application menus, a toolbar, split navigation, tabs, controlled forms, tables, context menus, sheets, alerts, and popovers. It is not the exhaustive 37-component catalog. Use the [component index](/docs/components) for the complete public surface.
+
+```bash
+pnpm build:host:macos
+pnpm --filter natui build
+pnpm --filter natui-kitchen-sink dev
+```
+
+Run its automated macOS verification with:
+
+```bash
+pnpm verify:kitchen
+```
+
+The suite drives the real SwiftUI window and writes screenshots under `screenshots/kitchen-sink/`.
+
+Use this example as a behavior reference, especially for:
+
+- Controlled forms and native sequence acknowledgements
+- App-shell components that are hoisted into native window chrome
+- Client-side table sorting and selection
+- Controlled presentation state for sheets, alerts, and popovers
+
+The kitchen-sink real-window verification is macOS-only today. Its Windows app-shell equivalents are compile-checked but not yet covered by the same GUI suite.

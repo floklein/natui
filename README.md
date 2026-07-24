@@ -39,13 +39,13 @@ React 19 ── react-reconciler 0.33 ── shadow tree ── NDJSON ops ─�
 ```
 
 A custom reconciler batches each React commit into one atomic op batch and streams
-it to a tiny native host process (~1k lines per platform) that materializes the
+it to a focused native host process that materializes the
 tree with the platform's own declarative UI framework. Events stream back and run
 your handlers at React's interactive priorities. Controlled inputs stay glitch-free
 under latency via protocol-level echo suppression (seq/ack).
 
-Full details: [docs/architecture.md](docs/architecture.md) ·
-wire protocol: [docs/protocol.md](docs/protocol.md)
+Full details: [architecture](docs/content/docs/internals/architecture.mdx) ·
+wire protocol: [protocol](docs/content/docs/internals/protocol.mdx)
 
 ## Try it (macOS)
 
@@ -95,14 +95,16 @@ App shell and navigation: `SplitView` (`Sidebar`/`Detail`) `TabView`/`Tab`
 Presentation: `Sheet` `Alert` `Popover` (`PopoverContent`).
 
 All typed props, shared across platforms (see
-[docs/protocol.md](docs/protocol.md) for the full mapping and event tables).
+[the protocol guide](docs/content/docs/internals/protocol.mdx) for the full mapping and event tables).
 Common props include selection tags, badges, and accessibility basics
 (`accessibilityLabel`, `accessibilityHint`, `accessibilityIdentifier`), mapped
 to the platform's AX attributes.
 
 The kitchen-sink example (`examples/kitchen-sink`, a small project/task
-manager) exercises every kind; `pnpm verify:kitchen` drives it end to end
-against the real native window (screenshots in `screenshots/kitchen-sink/`).
+manager) exercises the app-shell workflow and most component kinds;
+`pnpm verify:kitchen` drives it end to end against the real native window
+(screenshots in `screenshots/kitchen-sink/`). The component catalog documents
+the complete 37-component public surface.
 
 ## Single-process mode (no Node at runtime)
 
@@ -131,17 +133,19 @@ moves, seq/ack echo suppression, controlled-value enforcement for every input
 kind including Slider, prop validation, menu/toolbar item trees, presentation
 and selection semantics, startup handshake, screenshot failure/timeout
 handling), and three end-to-end suites drive the real SwiftUI window: the demo
-in Node dev mode, the kitchen-sink app (`pnpm verify:kitchen`, every component
-kind), and the demo in embedded-JSC single-process mode, all asserting against
-native tree dumps and validating the PNGs they capture; the embedded suite
+in Node dev mode, the kitchen-sink app (`pnpm verify:kitchen`, app-shell and
+multi-component workflows), and the demo in embedded-JSC single-process mode,
+all asserting against native tree dumps and validating the PNGs they capture;
+the embedded suite
 additionally pins the native seq/ack contract deterministically by injecting
 stale and current acks over the wire. On Windows, the contract tests and the
 Node-mode E2E suite pass against the real WinUI 3 window (screenshots in
 `screenshots/windows/`); the app-shell kinds are compile-checked by CI and not
 yet E2E-verified there, and embedded single-process mode remains macOS-only
 for now. See
-[docs/architecture.md](docs/architecture.md) for the staged packaging path
-(bun sidecar, then in-process JavaScriptCore / Hermes).
+[the architecture guide](docs/content/docs/internals/architecture.mdx) for the staged packaging path
+(Bun or Node SEA sidecar, then in-process JavaScriptCore or a researched
+Windows Hermes path).
 
 ## License
 

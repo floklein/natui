@@ -1,0 +1,35 @@
+---
+title: Bridge API
+description: Reference the lower-level bridge that batches commits and dispatches native events.
+---
+
+`Bridge` connects a renderer to a `Transport`. It owns the operation buffer, live event targets, startup handshake, sequence acknowledgements, and debug request waiters.
+
+<auto-type-table path="../../../../packages/natui/src/bridge/bridge.ts" name="BridgeOptions" />
+
+<auto-type-table path="../../../../packages/natui/src/bridge/bridge.ts" name="ReadyInfo" />
+
+```ts
+const bridge = new Bridge(transport, {
+  requestTimeoutMs: 10_000,
+});
+```
+
+Important methods include:
+
+| Method | Purpose |
+|---|---|
+| `waitForReady(timeoutMs)` | Await the buffered or future host handshake |
+| `push(op)` | Buffer one protocol operation |
+| `flush()` | Send one atomic commit |
+| `sendWindow(props)` | Configure the native window |
+| `requestDump()` | Request the native tree |
+| `requestScreenshot(path)` | Request a host-rendered PNG |
+| `emitDebugEvent(...)` | Synthesize a host event |
+| `editDebugValue(...)` | Perform an optimistic host edit |
+| `quit()` | Send the quit message |
+| `dispose(reason)` | Reject pending requests and mark the bridge dead |
+
+The reconciler also uses target registration, `latestSeqFor`, and `setPriorityRunner` to dispatch handlers and enforce controlled values.
+
+This is an advanced API. Most applications should use `run`.

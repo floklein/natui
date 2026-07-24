@@ -1,0 +1,48 @@
+---
+title: natui entrypoint
+description: Reference run, RunOptions, NatuiApp, components, protocol types, and advanced exports.
+---
+
+The primary entrypoint exports every component plus the Node-driven runtime.
+
+## run
+
+```ts
+function run(
+  element: ReactNode,
+  options?: RunOptions,
+): Promise<NatuiApp>
+```
+
+Starts the host, validates its platform and protocol handshake, sends window properties, and mounts the React element.
+
+## RunOptions
+
+`RunOptions` includes optional `title`, `width`, `height`, `minWidth`, and `minHeight`, plus:
+
+<auto-type-table path="../../../../packages/natui/src/run.ts" name="RunOptions" />
+
+| Property | Purpose |
+|---|---|
+| `host` | Host executable string or `{ cmd, args? }` override |
+| `onClose` | Callback for native window close |
+| `readyTimeoutMs` | Startup handshake timeout override |
+
+Without `onClose`, closing the native window unmounts React, sends `quit`, and exits the Node process.
+
+## NatuiApp
+
+<auto-type-table path="../../../../packages/natui/src/run.ts" name="NatuiApp" />
+
+| Method | Result |
+|---|---|
+| `dump()` | Resolves to the current native `TreeNode` |
+| `screenshot(path)` | Resolves to the written PNG path |
+| `emit(id, name, payload?)` | Synthesizes a debug event |
+| `edit(id, value)` | Performs an optimistic debug edit |
+| `update(element)` | Renders a new React element |
+| `quit()` | Unmounts, asks the host to quit, and closes transport |
+
+## Other exports
+
+The entrypoint re-exports all components, protocol types, `PROTOCOL_VERSION`, `ROOT_ID`, `Bridge`, `createNatuiRenderer`, `spawnStdioTransport`, `Transport`, `HostCommand`, and `defaultHostCommand`.

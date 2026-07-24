@@ -23,6 +23,24 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
 
+  docs:
+    name: Documentation checks and build
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+      SITE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm docs:check
+      - run: pnpm docs:build
+      - run: pnpm docs:smoke
+
   macos-host:
     name: Swift host build + JS suite (macOS)
     runs-on: macos-15

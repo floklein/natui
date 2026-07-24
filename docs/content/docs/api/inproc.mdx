@@ -1,0 +1,37 @@
+---
+title: natui/inproc
+description: Reference the in-process runtime for a native host that embeds JavaScript.
+---
+
+## runEmbedded
+
+<auto-type-table path="../../../../packages/natui/src/inproc.ts" name="RunEmbeddedOptions" />
+
+```ts
+function runEmbedded(
+  element: ReactNode,
+  options?: RunEmbeddedOptions,
+): Promise<void>
+```
+
+Mounts a React element inside an embedding native host. `RunEmbeddedOptions` is the same window property shape used by the protocol.
+
+The host must provide:
+
+- `globalThis.__natui_send(json)` for JavaScript-to-host messages
+- A ready handshake after evaluating the bundle
+
+The module installs `globalThis.__natui_recv(json)` for host-to-JavaScript messages.
+
+```tsx
+import { Text } from 'natui/components';
+import { runEmbedded } from 'natui/inproc';
+
+await runEmbedded(<Text>Hello</Text>, {
+  title: 'embedded natui',
+  width: 400,
+  height: 240,
+});
+```
+
+The entrypoint contains no Node built-ins and is intended for browser-platform bundling. The repository currently implements this embedding contract with JavaScriptCore on macOS.

@@ -370,7 +370,7 @@ export function App() {
                 <VStack spacing={10} padding={14} alignment="leading">
                   <Label systemImage="calendar">{`Due ${due}`}</Label>
                   <Label systemImage="person">{`Assignee: ${assignee}`}</Label>
-                  <Link url="https://github.com/anthropics/natui">Project repository</Link>
+                  <Link url="https://github.com/floklein/natui">Project repository</Link>
                   <ProgressView value={progress / 100} frame={{ maxWidth: 300 }} />
                   <DisclosureGroup label="Description" value={descOpen} onChange={setDescOpen}>
                     <Text>{notes}</Text>

@@ -1,0 +1,46 @@
+---
+title: Overlays
+description: Coordinate controlled sheet, alert, and popover presentation.
+---
+
+Sheet, alert, and popover visibility belongs to React state:
+
+```tsx
+const [open, setOpen] = useState(false);
+
+<>
+  <Button onPress={() => setOpen(true)}>Open</Button>
+  <Sheet value={open} onChange={setOpen}>
+    <Editor onDone={() => setOpen(false)} />
+  </Sheet>
+</>
+```
+
+Native dismissal emits `change(false)`. If React retains `true`, the normal controlled-value correction restores the presented state.
+
+## Avoid unnecessary mounted work
+
+Sheet children are part of the native tree even while not presented. Gate expensive content when it does not need to retain local state:
+
+```tsx
+<Sheet value={open} onChange={setOpen}>
+  {open ? <ExpensiveEditor /> : null}
+</Sheet>
+```
+
+## Alert event order
+
+When an alert button is pressed, `onSelect(buttonId)` runs before `onChange(false)`. Handle the chosen action in `onSelect`, then let `onChange` update presentation state.
+
+## Popover structure
+
+A `Popover` has two roles among its children:
+
+- Ordinary children render as the anchor.
+- One `PopoverContent` child provides the presented body.
+
+## Screenshot limitations
+
+macOS and Windows host screenshots capture their own native window content. Popup layers can be outside that rendered surface. On Windows, the in-tree sheet is captured, while open alerts, popovers, and menus are not.
+
+Use tree dumps and event assertions for popup behavior instead of treating screenshots as complete proof.
