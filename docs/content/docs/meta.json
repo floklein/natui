@@ -1,0 +1,12 @@
+{
+  "title": "NatUI",
+  "pages": [
+    "index",
+    "start",
+    "components",
+    "guides",
+    "api",
+    "internals",
+    "status"
+  ]
+}

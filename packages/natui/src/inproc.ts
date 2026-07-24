@@ -38,7 +38,7 @@ class InProcTransport implements Transport {
     if (typeof g.__natui_send !== 'function') {
       throw new Error(
         'natui/inproc: no embedding host detected (__natui_send is missing). ' +
-          'Run this bundle inside the natui host with --bundle.',
+          'Run this bundle inside the NatUI host with --bundle.',
       );
     }
     this.hostSend = g.__natui_send;

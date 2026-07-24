@@ -18,7 +18,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     func configure(props: [String: JSONValue]) {
         let width = props["width"]?.cgFloatValue ?? 640
         let height = props["height"]?.cgFloatValue ?? 480
-        let title = props["title"]?.stringValue ?? "natui"
+        let title = props["title"]?.stringValue ?? "NatUI"
 
         let window = self.window ?? makeWindow()
         window.title = title

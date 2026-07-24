@@ -1,0 +1,24 @@
+---
+title: Components
+description: Browse all 37 typed NatUI host components by capability.
+---
+
+Every NatUI component is a typed React function component whose element kind is materialized by the native host. Components accept documented JSON-compatible props and React event handlers.
+
+| Group | Components |
+|---|---|
+| [Layout](/docs/components/layout) | `VStack`, `HStack`, `ZStack`, `Spacer`, `Divider`, `ScrollView`, `List` |
+| [Content](/docs/components/content) | `Text`, `Image`, `ProgressView`, `Link`, `Label` |
+| [Inputs](/docs/components/inputs) | `Button`, `TextField`, `Toggle`, `Slider`, `Picker`, `SearchField`, `DatePicker`, `Stepper`, `TextEditor` |
+| [App shell and navigation](/docs/components/app-shell-navigation) | `MenuBar`, `Toolbar`, `SplitView`, `Sidebar`, `Detail`, `TabView`, `Tab` |
+| [Menus](/docs/components/menus) | `Menu`, `ContextMenu` |
+| [Presentation](/docs/components/presentation) | `Sheet`, `Alert`, `Popover`, `PopoverContent` |
+| [Data](/docs/components/data) | `Section`, `Table`, `DisclosureGroup` |
+
+The catalog contains exactly 37 public host components from `packages/natui/src/components.ts`.
+
+## Shared behavior
+
+Most components accept [common props](/docs/guides/common-props) for sizing, padding, color, visibility, selection identity, badges, tooltips, and accessibility.
+
+Native layout is intentional. A component maps to the closest platform control instead of reproducing pixel-identical output across operating systems.

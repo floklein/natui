@@ -1,14 +1,19 @@
 packages:
   - packages/*
   - examples/*
+  - docs
 
 # Repo-local overrides. A global minimumReleaseAge guard chokes on registry
-# metadata missing "time" for these exact pinned packages (react-reconciler
-# 0.33.0, react 19.2.8), so exclude them instead of disabling the guard
+# metadata missing "time" or the release is newer than the guard for these
+# exact pinned packages (react-reconciler 0.33.0, React 19.2.8), so exclude
+# them instead of disabling the guard
 # repo-wide.
 resolutionMode: highest
 minimumReleaseAgeExclude:
   - react-reconciler
   - react
+  - react-dom
+  - '@radix-ui/primitive'
 allowBuilds:
   esbuild: true
+  sharp: true

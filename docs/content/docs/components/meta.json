@@ -1,0 +1,13 @@
+{
+  "title": "Components",
+  "pages": [
+    "index",
+    "layout",
+    "content",
+    "inputs",
+    "app-shell-navigation",
+    "menus",
+    "presentation",
+    "data"
+  ]
+}

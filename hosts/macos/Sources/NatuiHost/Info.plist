@@ -5,7 +5,7 @@
     <key>CFBundleIdentifier</key>
     <string>dev.natui.host</string>
     <key>CFBundleName</key>
-    <string>natui</string>
+    <string>NatUI</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>NSHighResolutionCapable</key>

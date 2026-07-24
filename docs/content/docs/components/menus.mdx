@@ -1,0 +1,51 @@
+---
+title: Menus
+description: Add native dropdown and context menus from serializable item trees.
+---
+
+## Menu
+
+Renders a dropdown-menu button. Children form its label and `items` defines the native menu tree.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="MenuProps" />
+
+```tsx
+<Menu
+  systemImage="square.and.arrow.up"
+  items={[
+    { id: 'png', label: 'PNG' },
+    { id: 'csv', label: 'CSV' },
+    { divider: true },
+    { id: 'delete', label: 'Delete', role: 'destructive' },
+  ]}
+  onSelect={exportAs}
+>
+  Export
+</Menu>
+```
+
+## ContextMenu
+
+Wraps its children as a right-click target.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ContextMenuProps" />
+
+```tsx
+<ContextMenu
+  items={[
+    { id: 'duplicate', label: 'Duplicate' },
+    { id: 'delete', label: 'Delete', role: 'destructive' },
+  ]}
+  onSelect={handleRowAction}
+>
+  <Text>Selected row</Text>
+</ContextMenu>
+```
+
+## Item trees
+
+Action items support `id`, `label`, `systemImage`, `role`, `shortcut`, `disabled`, `checked`, and nested `children`. A divider is `{ divider: true }`.
+
+Selection events fire only for enabled leaf actions. Checkmarks are prop-driven, so update the source data after selection. Command roles do not emit a selection event. Most invoke a platform command, while the Windows `about` role is currently inert.
+
+On Windows, element children inside a `Menu` label are ignored. Use text children or `systemImage`.

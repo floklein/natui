@@ -1,0 +1,85 @@
+---
+title: Protocol API
+description: Reference NatUI protocol constants, messages, operations, and tree types.
+---
+
+## Constants
+
+```ts
+const PROTOCOL_VERSION = 1;
+const ROOT_ID = 0;
+```
+
+## Value types
+
+`PropValue` is JSON-compatible data: strings, numbers, booleans, null, arrays, and plain objects. `SerializedProps` maps property names to those values.
+
+```ts
+type PropValue =
+  | string
+  | number
+  | boolean
+  | null
+  | PropValue[]
+  | { [key: string]: PropValue };
+
+type SerializedProps = Record<string, PropValue>;
+```
+
+## WindowProps
+
+<auto-type-table path="../../../../packages/natui/src/protocol.ts" name="WindowProps" />
+
+```ts
+interface WindowProps {
+  title?: string;
+  width?: number;
+  height?: number;
+  minWidth?: number;
+  minHeight?: number;
+}
+```
+
+## Operations
+
+The `Op` union includes `create`, `createText`, `append`, `insert`, `remove`, `update`, `text`, and `clear`. An update may include `ack` for controlled-value echo suppression.
+
+```ts
+type Op =
+  | { op: 'create'; id: number; kind: string; props: SerializedProps }
+  | { op: 'createText'; id: number; text: string }
+  | { op: 'append'; parent: number; child: number }
+  | { op: 'insert'; parent: number; child: number; before: number }
+  | { op: 'remove'; parent: number; child: number }
+  | { op: 'update'; id: number; props: SerializedProps; ack?: number }
+  | { op: 'text'; id: number; text: string }
+  | { op: 'clear' };
+```
+
+## Messages
+
+`OutboundMessage` includes:
+
+- `window`
+- `commit`
+- `dump`
+- `screenshot`
+- `emit`
+- `edit`
+- `quit`
+
+`InboundMessage` includes:
+
+- `ready`
+- `event`
+- `window` close
+- `tree`
+- `shot`
+
+## TreeNode
+
+A debug tree node contains an `id`, `kind`, optional serialized `props`, optional raw `text`, and optional child nodes.
+
+<auto-type-table path="../../../../packages/natui/src/protocol.ts" name="TreeNode" />
+
+See the [wire protocol](/docs/internals/protocol) for ordering, lifecycle, event, selection, and sequence-acknowledgement semantics.

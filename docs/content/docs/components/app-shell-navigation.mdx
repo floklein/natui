@@ -1,0 +1,89 @@
+---
+title: App shell and navigation
+description: Build native menus, toolbars, split views, and tab navigation.
+---
+
+## MenuBar
+
+Defines the application menu bar from serializable `MenuSpec` data. It must be a direct child of the React root.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="MenuBarProps" />
+
+```tsx
+<MenuBar
+  menus={[
+    {
+      id: 'file',
+      label: 'File',
+      items: [{ id: 'new', label: 'New', shortcut: 'cmd+n' }],
+    },
+  ]}
+  onSelect={(id) => handleCommand(id)}
+/>
+```
+
+macOS prepends its standard application menu. Command-role items such as `copy`, `paste`, and `quit` invoke platform commands and do not emit `onSelect`. The `about` role opens the standard About panel on macOS and is inert on Windows.
+
+## Toolbar
+
+Defines native window toolbar items from `ToolbarItemSpec[]`. It must be a direct root child.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ToolbarProps" />
+
+```tsx
+<Toolbar
+  items={[
+    { type: 'button', id: 'add', label: 'Add', systemImage: 'plus' },
+    { type: 'flexibleSpace' },
+    { type: 'search', id: 'search', placeholder: 'Filter' },
+  ]}
+  onAction={handleAction}
+  onSearch={setQuery}
+/>
+```
+
+Toolbar search text is host-local and reported through `onSearch`. Windows always places search items in the left region and may rebuild the toolbar after prop changes, which drops active search text and focus.
+
+## SplitView, Sidebar, and Detail
+
+`SplitView` routes `Sidebar` and `Detail` children into native navigation slots. Use exactly one of each. macOS chooses the first matching child, while Windows assigns each matching child as it is attached, so duplicate slots have platform-dependent results.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="SplitViewProps" />
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="SidebarProps" />
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="DetailProps" />
+
+```tsx
+<SplitView value={visibility} onChange={setVisibility} sidebarWidth={220}>
+  <Sidebar>{navigation}</Sidebar>
+  <Detail>{content}</Detail>
+</SplitView>
+```
+
+Use `value="all"` or `value="detailOnly"` to control visibility. macOS can report a native visibility change through `onChange`. Windows has no native visibility affordance, does not emit `onChange` for split visibility, and ignores minimum and maximum sidebar widths.
+
+## TabView and Tab
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="TabViewProps" />
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="TabProps" />
+
+```tsx
+<TabView value={tab} onChange={setTab}>
+  <Tab id="overview" title="Overview" systemImage="info.circle">
+    <Text>Summary</Text>
+  </Tab>
+  <Tab id="settings" title="Settings" badge={2}>
+    <Text>Preferences</Text>
+  </Tab>
+</TabView>
+```
+
+`TabView` is controlled by a child `Tab` id. A tab click updates native selection optimistically, then reports the id through `onChange`.
+
+The macOS host currently renders plain tab titles without the provided tab icon or badge. Windows renders native tab items.
+
+## Verification note
+
+These seven app-shell kinds are exercised by the macOS kitchen-sink real-window suite. They are compile-checked on Windows but do not yet have equivalent Windows GUI end-to-end coverage.

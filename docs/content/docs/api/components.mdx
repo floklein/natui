@@ -1,0 +1,36 @@
+---
+title: natui/components
+description: Reference the Node-free component entrypoint and its shared TypeScript types.
+---
+
+This entrypoint exports all 37 host components and their prop types without importing the Node process runtime.
+
+```tsx
+import { Button, Text, VStack } from 'natui/components';
+```
+
+Use it for embedded bundles and anywhere that should remain free of Node built-ins. Use the primary `natui` entrypoint for a normal Node-driven application.
+
+## Shared types
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="CommonProps" />
+
+- `Color`
+- `EdgeInsets`
+- `Frame`
+- `CommonProps`
+- `ContainerProps`
+- `FontStyle`
+- `PickerOption`
+- `MenuItemRole`
+- `MenuActionSpec`
+- `MenuDividerSpec`
+- `MenuItemSpec`
+- `MenuSpec`
+- `ToolbarItemSpec`
+- `AlertButtonSpec`
+- `TableColumnSpec`
+- `TableRowSpec`
+- `SortDescriptor`
+
+See the [component catalog](/docs/components) for grouped usage and platform behavior.

@@ -1,7 +1,7 @@
 import type { FC, ReactNode } from 'react';
 
 /**
- * natui's typed component API. Each component is a host-element tag (a plain
+ * NatUI's typed component API. Each component is a host-element tag (a plain
  * string the reconciler passes through as the node `kind`) cast to a typed FC
  * so JSX gets full prop checking with zero runtime cost.
  */

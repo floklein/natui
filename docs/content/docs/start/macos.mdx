@@ -1,0 +1,37 @@
+---
+title: macOS
+description: Build and verify the native SwiftUI host on macOS.
+---
+
+## Requirements
+
+- macOS 14 or newer
+- Xcode command line tools with a Swift 6 toolchain
+- Node.js 22 or newer
+- pnpm 11
+
+From the repository root:
+
+```bash
+pnpm install
+pnpm build:host:macos
+pnpm demo
+```
+
+The host is a Swift Package Manager executable that opens a real `NSWindow` and renders SwiftUI views.
+
+## Verification
+
+```bash
+pnpm verify
+pnpm verify:kitchen
+pnpm verify:embedded
+```
+
+These local suites require a real window session. They use native tree dumps, synthesized events, optimistic edits, and host-rendered PNG files. They do not rely on browser automation.
+
+- `pnpm verify` covers the base demo and controlled-input stress cases.
+- `pnpm verify:kitchen` exercises app-shell and multi-component workflows through the kitchen-sink app.
+- `pnpm verify:embedded` runs the demo inside the host with JavaScriptCore and no Node process at runtime.
+
+The headless macOS CI job builds the Swift host and JavaScript package but does not run these GUI suites.

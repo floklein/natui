@@ -1,0 +1,62 @@
+---
+title: App shell and data
+description: Coordinate native window chrome, navigation, selection, and sorting from React state.
+---
+
+## Root-attached chrome
+
+Place `MenuBar` and `Toolbar` directly under the React root. Hosts hoist them into native window chrome instead of inserting them in normal layout.
+
+```tsx
+function App() {
+  return (
+    <>
+      <MenuBar menus={menus} onSelect={handleMenu} />
+      <Toolbar items={toolbarItems} onAction={handleToolbar} />
+      <SplitView>{content}</SplitView>
+    </>
+  );
+}
+```
+
+macOS accepts the first root-level menu bar and toolbar. Windows hoists chrome components wherever they are created, but relying on that difference makes the tree non-portable.
+
+## Stable selection identity
+
+Use `tag` for list rows and `id` for table rows:
+
+```tsx
+<List value={projectId} onChange={(value) => setProjectId(value as string | null)}>
+  {projects.map((project) => (
+    <Label key={project.id} tag={project.id} systemImage="folder">
+      {project.name}
+    </Label>
+  ))}
+</List>
+```
+
+Selection can be a string, a string array, or null. Providing the `value` prop, even with null, enables selection.
+
+## Sort in the application
+
+The native table emits a requested `SortDescriptor`. Keep data operations in JavaScript:
+
+```tsx
+const visibleRows = useMemo(
+  () => sortRows(rows, sort),
+  [rows, sort],
+);
+
+<Table
+  columns={columns}
+  rows={visibleRows}
+  sort={sort}
+  onSortChange={setSort}
+/>
+```
+
+Filtering follows the same model. The host receives final row data and does not own a separate sorted or filtered copy.
+
+## Use serializable specs
+
+Menu, toolbar, alert, and table structures are data props rather than React child trees. Keep them JSON-compatible and update the data when checkmarks, toggle states, disabled states, or rows change.
