@@ -100,11 +100,11 @@ export default async function HomePage() {
             </div>
             <div className="runtime-note">
               <span className="status-dot" aria-hidden="true" />
-              NatUI is still in Alpha
+              NatUI is still in alpha release, and might be subject to breaking changes.
             </div>
           </div>
 
-          <div className="hero-showcase" aria-label="NatUI code and native output">
+          <div className="hero-showcase" aria-label="NatUI code and native outputs">
             <div className="code-card">
               <div className="code-card-top">
                 <span>App.tsx</span>
@@ -113,7 +113,21 @@ export default async function HomePage() {
               {highlightedHeroCode}
             </div>
 
-            <div className="native-card">
+            <div className="native-card native-card-macos">
+              <div className="native-card-label" aria-hidden="true">
+                <span>Native output</span>
+                <span>SwiftUI</span>
+              </div>
+              <Image
+                src="/images/macos-demo-final.png"
+                width={960}
+                height={1296}
+                alt="The matching NatUI demo rendered with SwiftUI on macOS"
+                loading="eager"
+              />
+            </div>
+
+            <div className="native-card native-card-windows">
               <div className="native-card-label" aria-hidden="true">
                 <span>Native output</span>
                 <span>WinUI 3</span>
@@ -123,15 +137,15 @@ export default async function HomePage() {
                 width={480}
                 height={620}
                 alt="The matching NatUI demo rendered with WinUI 3 on Windows"
-                priority
+                loading="eager"
               />
             </div>
           </div>
         </section>
 
         <section className="component-rail" aria-label="Component groups">
-          <span className="component-count">37 components</span>
           <div className="component-list">
+            <span className="component-count">37 components</span>
             {componentGroups.map((group) => (
               <span key={group}>{group}</span>
             ))}
@@ -247,7 +261,6 @@ export default async function HomePage() {
 
       <footer className="home-footer">
         <span>NatUI</span>
-        <span>React to SwiftUI and WinUI 3</span>
         <a href="https://github.com/floklein/natui/blob/main/LICENSE">MIT License</a>
       </footer>
     </div>
