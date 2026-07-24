@@ -16,14 +16,23 @@ namespace NatuiHost;
 internal sealed partial class NodeMapper
 {
     /// <summary>
-    /// Ids whose dialog/flyout is being closed by a remote update (value ->
-    /// false) or teardown, so the native close callback must not emit a
-    /// duplicate change event.
+    /// WinUI permits one ContentDialog per window. The gate serializes sheets
+    /// and alerts; a requested alert temporarily hides the active sheet, then
+    /// restores it if its controlled value is still true. The state sets also
+    /// distinguish remote closure from native user dismissal.
     /// </summary>
+    private readonly SemaphoreSlim _contentDialogGate = new(1, 1);
+    private readonly Dictionary<int, NatuiNode> _sheetNodes = [];
+    private readonly Dictionary<int, NatuiNode> _alertNodes = [];
+    private readonly HashSet<int> _pendingSheets = [];
+    private readonly HashSet<int> _pendingAlerts = [];
     private readonly HashSet<int> _openSheets = [];
+    private readonly HashSet<int> _openAlerts = [];
     private readonly HashSet<int> _sheetClosingRemote = [];
+    private readonly HashSet<int> _sheetSuspendedForAlert = [];
     private readonly HashSet<int> _alertClosingRemote = [];
     private readonly HashSet<int> _popoverClosingRemote = [];
+    private int _alertPresentationCount;
 
     // -- Sheet --------------------------------------------------------------------
 
@@ -43,6 +52,7 @@ internal sealed partial class NodeMapper
         {
             Content = content,
         };
+        _sheetNodes[node.Id] = node;
         return new Border { Visibility = Visibility.Collapsed };
     }
 
@@ -52,7 +62,7 @@ internal sealed partial class NodeMapper
         var presented = Json.Bool(node.Props, "value") ?? false;
         if (presented)
         {
-            if (!_openSheets.Contains(node.Id)) _ = ShowSheetAsync(node, dialog);
+            RequestSheet(node, dialog);
         }
         else if (_openSheets.Contains(node.Id))
         {
@@ -61,175 +71,313 @@ internal sealed partial class NodeMapper
         }
     }
 
+    private void RequestSheet(NatuiNode node, ContentDialog dialog)
+    {
+        if (_alertPresentationCount > 0
+            || _openSheets.Contains(node.Id)
+            || !_pendingSheets.Add(node.Id))
+        {
+            return;
+        }
+        _ = ShowSheetAsync(node, dialog);
+    }
+
     private async Task ShowSheetAsync(NatuiNode node, ContentDialog dialog)
     {
-        if (!(Json.Bool(node.Props, "value") ?? false) || _openSheets.Contains(node.Id)) return;
-        if (RootStack.XamlRoot is not { } xamlRoot)
-        {
-            RootStack.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-            {
-                if ((Json.Bool(node.Props, "value") ?? false)
-                    && node.Hosted is ContentDialog current
-                    && !_openSheets.Contains(node.Id))
-                {
-                    _ = ShowSheetAsync(node, current);
-                }
-            });
-            return;
-        }
-
-        dialog.XamlRoot = xamlRoot;
-        _openSheets.Add(node.Id);
+        await _contentDialogGate.WaitAsync();
+        _pendingSheets.Remove(node.Id);
+        var resumeImmediately = true;
         try
         {
-            await dialog.ShowAsync();
+            if (!IsCurrentSheet(node, dialog)
+                || !(Json.Bool(node.Props, "value") ?? false)
+                || _alertPresentationCount > 0)
+            {
+                return;
+            }
+            if (RootStack.XamlRoot is not { } xamlRoot)
+            {
+                resumeImmediately = false;
+                RootStack.DispatcherQueue.TryEnqueue(
+                    DispatcherQueuePriority.Low,
+                    ResumePresentedSheets);
+                return;
+            }
+
+            dialog.XamlRoot = xamlRoot;
+            _openSheets.Add(node.Id);
+            try
+            {
+                await dialog.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                Ipc.Log($"Sheet {node.Id}: ShowAsync failed: {ex.Message}");
+                _sheetClosingRemote.Remove(node.Id);
+                _sheetSuspendedForAlert.Remove(node.Id);
+                if (IsCurrentSheet(node, dialog)
+                    && (Json.Bool(node.Props, "value") ?? false))
+                {
+                    node.UserEdit(JsonValue.Create(false));
+                }
+                return;
+            }
+            finally
+            {
+                _openSheets.Remove(node.Id);
+            }
+
+            var closedRemotely = _sheetClosingRemote.Remove(node.Id);
+            var suspended = _sheetSuspendedForAlert.Remove(node.Id);
+            if (!closedRemotely
+                && !suspended
+                && IsCurrentSheet(node, dialog)
+                && (Json.Bool(node.Props, "value") ?? false))
+            {
+                node.UserEdit(JsonValue.Create(false));
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            Ipc.Log($"Sheet {node.Id}: ShowAsync failed: {ex.Message}");
             _openSheets.Remove(node.Id);
-            _sheetClosingRemote.Remove(node.Id);
-            return;
+            _contentDialogGate.Release();
+            if (resumeImmediately && _alertPresentationCount == 0) ResumePresentedSheets();
         }
-        _openSheets.Remove(node.Id);
-        if (_sheetClosingRemote.Remove(node.Id)) return;
-        if (ReferenceEquals(node.Hosted, dialog)
-            && (Json.Bool(node.Props, "value") ?? false))
+    }
+
+    private bool IsCurrentSheet(NatuiNode node, ContentDialog dialog) =>
+        _sheetNodes.TryGetValue(node.Id, out var current)
+        && ReferenceEquals(current, node)
+        && ReferenceEquals(node.Hosted, dialog);
+
+    private void ResumePresentedSheets()
+    {
+        if (_alertPresentationCount > 0) return;
+        foreach (var node in _sheetNodes.Values.ToList())
         {
-            node.UserEdit(JsonValue.Create(false));
+            if ((Json.Bool(node.Props, "value") ?? false)
+                && node.Hosted is ContentDialog dialog)
+            {
+                RequestSheet(node, dialog);
+            }
         }
     }
 
     // -- Alert --------------------------------------------------------------------
 
-    private FrameworkElement BuildAlert(NatuiNode node) =>
+    private FrameworkElement BuildAlert(NatuiNode node)
+    {
         // Fully data-driven: children are ignored, the dialog is built from
         // props in ShowAlertAsync when value flips true.
-        new Border { Visibility = Visibility.Collapsed };
+        _alertNodes[node.Id] = node;
+        return new Border { Visibility = Visibility.Collapsed };
+    }
 
     private void ApplyAlertProps(NatuiNode node)
     {
         var presented = Json.Bool(node.Props, "value") ?? false;
         if (presented)
         {
-            if (node.Hosted is null) _ = ShowAlertAsync(node);
+            RequestAlert(node);
         }
-        else if (node.Hosted is ContentDialog dialog)
+        else if (node.Hosted is ContentDialog dialog && _openAlerts.Contains(node.Id))
         {
             _alertClosingRemote.Add(node.Id);
             dialog.Hide();
         }
     }
 
+    private void RequestAlert(NatuiNode node)
+    {
+        if (!_alertNodes.TryGetValue(node.Id, out var current)
+            || !ReferenceEquals(current, node)
+            || _openAlerts.Contains(node.Id)
+            || !_pendingAlerts.Add(node.Id))
+        {
+            return;
+        }
+
+        _alertPresentationCount++;
+        SuspendOpenSheetsForAlert();
+        _ = ShowAlertAsync(node);
+    }
+
+    private void SuspendOpenSheetsForAlert()
+    {
+        foreach (var id in _openSheets.ToList())
+        {
+            if (!_sheetNodes.TryGetValue(id, out var sheet)
+                || sheet.Hosted is not ContentDialog dialog)
+            {
+                continue;
+            }
+            _sheetSuspendedForAlert.Add(id);
+            dialog.Hide();
+        }
+    }
+
     private async Task ShowAlertAsync(NatuiNode node)
     {
-        if (RootStack.XamlRoot is not { } xamlRoot)
-        {
-            // The very first commit can arrive before the window content is
-            // loaded; retry on a later dispatcher pass, only while still
-            // presented (low priority so a degenerate loop cannot starve UI).
-            RootStack.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-            {
-                if ((Json.Bool(node.Props, "value") ?? false) && node.Hosted is null)
-                {
-                    _ = ShowAlertAsync(node);
-                }
-            });
-            return;
-        }
-
-        var dialog = new ContentDialog { Title = node.Str("title") ?? "", XamlRoot = xamlRoot };
-        var body = new StackPanel { Spacing = 12 };
-        if (node.Str("message") is { } message)
-        {
-            body.Children.Add(new TextBlock
-            {
-                Text = message,
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-
-        var specs = new List<(string Id, string Label, string? Role)>();
-        string? cancelId = null;
-        var nativeCancelIndex = -1;
-        foreach (var entry in Json.Arr(node.Props, "buttons") ?? [])
-        {
-            if (entry is not JsonObject button) continue;
-            var id = Json.Str(button, "id") ?? "";
-            var role = Json.Str(button, "role");
-            specs.Add((id, Json.Str(button, "label") ?? id, role));
-            if (role == "cancel" && cancelId is null)
-            {
-                cancelId = id;
-                nativeCancelIndex = specs.Count - 1;
-                dialog.CloseButtonText = Json.Str(button, "label") ?? id;
-            }
-        }
-
-        // ContentDialog's native command area is limited to close plus two
-        // actions. Keep the first cancel action there so Escape and system
-        // back select it, then render every remaining action as a native
-        // Button in the dialog content instead of dropping extras.
-        var customSpecs = specs.Where((_, index) => index != nativeCancelIndex).ToList();
-        var actions = new StackPanel
-        {
-            Orientation = customSpecs.Count <= 2 ? Orientation.Horizontal : Orientation.Vertical,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 8,
-        };
-        var buttonHandled = false;
-        foreach (var spec in customSpecs)
-        {
-            var action = new Button
-            {
-                Content = spec.Label,
-                HorizontalAlignment = customSpecs.Count <= 2
-                    ? HorizontalAlignment.Right
-                    : HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-            };
-            if (spec.Role == "destructive")
-            {
-                action.Foreground = new SolidColorBrush(
-                    Color.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
-            }
-            action.Click += (_, _) =>
-            {
-                if (buttonHandled || !ReferenceEquals(node.Hosted, dialog)) return;
-                buttonHandled = true;
-                // Normative order: select FIRST, then the dismissal change.
-                Ipc.Event(node.Id, "select", new JsonObject { ["value"] = spec.Id });
-                node.UserEdit(JsonValue.Create(false));
-                dialog.Hide();
-            };
-            actions.Children.Add(action);
-        }
-        if (actions.Children.Count > 0) body.Children.Add(actions);
-        dialog.Content = body;
-        node.Hosted = dialog;
+        await _contentDialogGate.WaitAsync();
+        _pendingAlerts.Remove(node.Id);
+        var retryAfterRelease = false;
+        var retryOnDispatcher = false;
         try
         {
-            await dialog.ShowAsync();
+            if (!IsCurrentAlert(node) || !(Json.Bool(node.Props, "value") ?? false))
+            {
+                _alertClosingRemote.Remove(node.Id);
+                return;
+            }
+            if (RootStack.XamlRoot is not { } xamlRoot)
+            {
+                retryOnDispatcher = true;
+                return;
+            }
+
+            var dialog = new ContentDialog { Title = node.Str("title") ?? "", XamlRoot = xamlRoot };
+            var body = new StackPanel { Spacing = 12 };
+            if (node.Str("message") is { } message)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = message,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+
+            var specs = new List<(string Id, string Label, string? Role)>();
+            string? cancelId = null;
+            var nativeCancelIndex = -1;
+            foreach (var entry in Json.Arr(node.Props, "buttons") ?? [])
+            {
+                if (entry is not JsonObject button) continue;
+                var id = Json.Str(button, "id") ?? "";
+                var role = Json.Str(button, "role");
+                specs.Add((id, Json.Str(button, "label") ?? id, role));
+                if (role == "cancel" && cancelId is null)
+                {
+                    cancelId = id;
+                    nativeCancelIndex = specs.Count - 1;
+                    dialog.CloseButtonText = Json.Str(button, "label") ?? id;
+                }
+            }
+
+            // ContentDialog's native command area is limited to close plus two
+            // actions. Keep the first cancel action there so Escape and system
+            // back select it, then render every remaining action as a native
+            // Button in the dialog content instead of dropping extras.
+            var customSpecs = specs.Where((_, index) => index != nativeCancelIndex).ToList();
+            var actions = new StackPanel
+            {
+                Orientation = customSpecs.Count <= 2
+                    ? Orientation.Horizontal
+                    : Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 8,
+            };
+            var buttonHandled = false;
+            foreach (var spec in customSpecs)
+            {
+                var action = new Button
+                {
+                    Content = spec.Label,
+                    HorizontalAlignment = customSpecs.Count <= 2
+                        ? HorizontalAlignment.Right
+                        : HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                };
+                if (spec.Role == "destructive")
+                {
+                    action.Foreground = new SolidColorBrush(
+                        Color.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
+                }
+                action.Click += (_, _) =>
+                {
+                    if (buttonHandled || !ReferenceEquals(node.Hosted, dialog)) return;
+                    buttonHandled = true;
+                    // Normative order: select FIRST, then the dismissal change.
+                    Ipc.Event(node.Id, "select", new JsonObject { ["value"] = spec.Id });
+                    node.UserEdit(JsonValue.Create(false));
+                    dialog.Hide();
+                };
+                actions.Children.Add(action);
+            }
+            if (actions.Children.Count > 0) body.Children.Add(actions);
+            dialog.Content = body;
+            node.Hosted = dialog;
+            _openAlerts.Add(node.Id);
+            try
+            {
+                await dialog.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                Ipc.Log($"Alert {node.Id}: ShowAsync failed: {ex.Message}");
+                _alertClosingRemote.Remove(node.Id);
+                if (IsCurrentAlert(node) && (Json.Bool(node.Props, "value") ?? false))
+                {
+                    node.UserEdit(JsonValue.Create(false));
+                }
+                return;
+            }
+            finally
+            {
+                _openAlerts.Remove(node.Id);
+                if (ReferenceEquals(node.Hosted, dialog)) node.Hosted = null;
+            }
+
+            // Remote close (value -> false, or teardown): no user action to report.
+            if (_alertClosingRemote.Remove(node.Id))
+            {
+                retryAfterRelease =
+                    IsCurrentAlert(node) && (Json.Bool(node.Props, "value") ?? false);
+                return;
+            }
+            if (buttonHandled || !IsCurrentAlert(node)) return;
+
+            // Close button, Escape, or system back selects the first cancel-role
+            // action, matching the native alert convention.
+            if (cancelId is not null)
+            {
+                Ipc.Event(node.Id, "select", new JsonObject { ["value"] = cancelId });
+            }
+            node.UserEdit(JsonValue.Create(false));
         }
-        catch (Exception ex)
+        finally
         {
-            Ipc.Log($"Alert {node.Id}: ShowAsync failed: {ex.Message}");
-            node.Hosted = null;
-            _alertClosingRemote.Remove(node.Id);
-            return;
+            _openAlerts.Remove(node.Id);
+            _contentDialogGate.Release();
+            _alertPresentationCount = Math.Max(0, _alertPresentationCount - 1);
+
+            if (retryAfterRelease && IsCurrentAlert(node))
+            {
+                RequestAlert(node);
+            }
+            else if (retryOnDispatcher)
+            {
+                RootStack.DispatcherQueue.TryEnqueue(
+                    DispatcherQueuePriority.Low,
+                    () =>
+                    {
+                        if (IsCurrentAlert(node)
+                            && (Json.Bool(node.Props, "value") ?? false))
+                        {
+                            RequestAlert(node);
+                        }
+                    });
+            }
+
+            if (!retryOnDispatcher && _alertPresentationCount == 0)
+            {
+                ResumePresentedSheets();
+            }
         }
-        node.Hosted = null;
-        // Remote close (value -> false, or teardown): no user action to report.
-        if (_alertClosingRemote.Remove(node.Id)) return;
-        if (buttonHandled) return;
-        // Close button, Escape, or system back selects the first cancel-role
-        // action, matching the native alert convention.
-        if (cancelId is not null)
-        {
-            Ipc.Event(node.Id, "select", new JsonObject { ["value"] = cancelId });
-        }
-        node.UserEdit(JsonValue.Create(false));
     }
+
+    private bool IsCurrentAlert(NatuiNode node) =>
+        _alertNodes.TryGetValue(node.Id, out var current)
+        && ReferenceEquals(current, node);
 
     // -- Popover ------------------------------------------------------------------
 

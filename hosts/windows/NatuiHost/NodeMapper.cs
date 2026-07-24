@@ -534,7 +534,7 @@ internal sealed partial class NodeMapper(
         if (parent is not null && LabelKinds.Contains(parent.Kind))
         {
             RefreshLabel(parent);
-            ApplyForegroundTree(child);
+            ApplyForegroundToDescendants(parent);
             return;
         }
         if (!IsAttachable(parentId, parent, child)) return;
@@ -595,6 +595,7 @@ internal sealed partial class NodeMapper(
         if (parent is not null && LabelKinds.Contains(parent.Kind))
         {
             RefreshLabel(parent);
+            ApplyForegroundToDescendants(parent);
             return;
         }
         if (parent is not null && DetachFromSlottedParent(parent, child)) return;
@@ -675,7 +676,11 @@ internal sealed partial class NodeMapper(
     public void TextChanged(NatuiNode textNode, NatuiNode? parent)
     {
         if (textNode.Label is { } label) label.Text = textNode.Text; // root-attached raw text
-        if (parent is not null && LabelKinds.Contains(parent.Kind)) RefreshLabel(parent);
+        if (parent is not null && LabelKinds.Contains(parent.Kind))
+        {
+            RefreshLabel(parent);
+            ApplyForegroundToDescendants(parent);
+        }
     }
 
     private void RefreshLabel(NatuiNode node)
@@ -717,12 +722,21 @@ internal sealed partial class NodeMapper(
 
         // Release child shells from the previous mixed-content wrapper before
         // rebuilding, so they can be reparented in their current order.
-        if (box.Child is Panel oldWrapper) oldWrapper.Children.Clear();
+        if (box.Child is ContentControl { Content: Panel mixedPanel } oldMixed)
+        {
+            mixedPanel.Children.Clear();
+            oldMixed.Content = null;
+        }
+        else if (box.Child is Panel oldWrapper)
+        {
+            oldWrapper.Children.Clear();
+        }
         box.Child = null;
         if (node.Children.All(c => c.Kind == "#text"))
         {
             label.Text = node.JoinedText();
             box.Child = label;
+            ApplyAutomationProps(node);
             return;
         }
 
@@ -730,7 +744,15 @@ internal sealed partial class NodeMapper(
         // Use the same structure instead of silently discarding element
         // children such as Image.
         var stack = BuildMixedLabel(node, spacing: 0);
-        box.Child = stack;
+        box.Child = new ContentControl
+        {
+            Content = stack,
+            IsTabStop = false,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+        };
+        ApplyTextProps(node);
+        ApplyAutomationProps(node);
     }
 
     private void RefreshToggleHeader(ToggleSwitch toggle, NatuiNode node)
@@ -990,10 +1012,31 @@ internal sealed partial class NodeMapper(
 
     private void ApplyTextProps(NatuiNode node)
     {
-        var label = node.Label!;
-        label.Text = node.Kind == "#text" ? node.Text : node.JoinedText();
+        if (node.Label is { } label)
+        {
+            ApplyTextStyle(
+                node,
+                label,
+                node.Kind == "#text" ? node.Text : node.JoinedText());
+        }
+        if (node.Kind != "Text" || node.Children.All(child => child.Kind == "#text")) return;
 
-        var (fontSize, fontWeight) = node.Str("font") switch
+        // Raw text fragments in a mixed Text have no props of their own.
+        // They inherit the enclosing Text's typography in SwiftUI, so apply
+        // that style explicitly to their retained WinUI TextBlocks.
+        foreach (var child in node.Children)
+        {
+            if (child.Kind == "#text" && child.Label is { } fragment)
+            {
+                ApplyTextStyle(node, fragment, child.Text);
+            }
+        }
+    }
+
+    private static void ApplyTextStyle(NatuiNode style, TextBlock label, string text)
+    {
+        label.Text = text;
+        var (fontSize, fontWeight) = style.Str("font") switch
         {
             "largeTitle" => (28.0, (FontWeight?)FontWeights.SemiBold),
             "title" => (22.0, (FontWeight?)null),
@@ -1004,9 +1047,9 @@ internal sealed partial class NodeMapper(
             "caption" => (12.0, (FontWeight?)null),
             _ => (14.0, (FontWeight?)null), // body / default
         };
-        label.FontSize = node.Num("size") ?? fontSize;
+        label.FontSize = style.Num("size") ?? fontSize;
 
-        var weight = node.Str("weight") switch
+        var weight = style.Str("weight") switch
         {
             "regular" => (FontWeight?)FontWeights.Normal,
             "medium" => FontWeights.Medium,
@@ -1016,17 +1059,17 @@ internal sealed partial class NodeMapper(
         } ?? fontWeight;
         label.FontWeight = weight ?? FontWeights.Normal;
 
-        label.FontStyle = node.Flag("italic")
+        label.FontStyle = style.Flag("italic")
             ? Windows.UI.Text.FontStyle.Italic
             : Windows.UI.Text.FontStyle.Normal;
-        label.TextDecorations = node.Flag("strikethrough")
+        label.TextDecorations = style.Flag("strikethrough")
             ? Windows.UI.Text.TextDecorations.Strikethrough
             : Windows.UI.Text.TextDecorations.None;
 
-        if (node.Flag("monospaced")) label.FontFamily = new FontFamily("Consolas");
+        if (style.Flag("monospaced")) label.FontFamily = new FontFamily("Consolas");
         else label.ClearValue(TextBlock.FontFamilyProperty);
 
-        label.MaxLines = node.Num("lineLimit") is { } limit ? (int)limit : 0;
+        label.MaxLines = style.Num("lineLimit") is { } limit ? (int)limit : 0;
     }
 
     private static void ApplyButtonProps(NatuiNode node, Button button)
@@ -1156,6 +1199,8 @@ internal sealed partial class NodeMapper(
                 if (node.Hosted is UIElement chrome) ChromePanel.Children.Remove(chrome);
                 break;
             case "Sheet":
+                _sheetNodes.Remove(node.Id);
+                _pendingSheets.Remove(node.Id);
                 if (node.Hosted is ContentDialog sheet && _openSheets.Contains(node.Id))
                 {
                     _sheetClosingRemote.Add(node.Id);
@@ -1163,7 +1208,9 @@ internal sealed partial class NodeMapper(
                 }
                 break;
             case "Alert":
-                if (node.Hosted is ContentDialog dialog)
+                _alertNodes.Remove(node.Id);
+                _pendingAlerts.Remove(node.Id);
+                if (node.Hosted is ContentDialog dialog && _openAlerts.Contains(node.Id))
                 {
                     _alertClosingRemote.Add(node.Id);
                     dialog.Hide();
@@ -1199,7 +1246,9 @@ internal sealed partial class NodeMapper(
         SyncInnerAlignment(node);
         shell.Opacity = node.Num("opacity") ?? 1.0;
         shell.Visibility = node.Flag("hidden") ? Visibility.Collapsed : Visibility.Visible;
-        if (inner is Control control) control.IsEnabled = !node.Flag("disabled");
+        var enabled = !node.Flag("disabled");
+        if (inner is Control control) control.IsEnabled = enabled;
+        else if (inner is NatuiSplitView splitView) splitView.NativeSplit.IsEnabled = enabled;
         ApplyForeground(node, inner);
         ToolTipService.SetToolTip(shell, node.Str("help"));
         ApplyAutomationProps(node);
@@ -1235,10 +1284,14 @@ internal sealed partial class NodeMapper(
         // Target the element that produces the UIA peer: the TextBlock for
         // Text/#text nodes, the inner control otherwise (the frame shell
         // Border has no automation peer of its own).
-        FrameworkElement? target = node.Label
-            ?? (node.Kind == "Image" && node.Inner is Border { Child: FrameworkElement image }
-                ? image
-                : node.Inner);
+        FrameworkElement? target = node.Kind == "Text"
+            && node.Inner is Border { Child: ContentControl mixedText }
+                ? mixedText
+                : node.Label
+                    ?? (node.Kind == "Image"
+                        && node.Inner is Border { Child: FrameworkElement image }
+                            ? image
+                            : node.Inner);
         if (target is null) return;
         SetOrClearString(target, AutomationProperties.NameProperty,
             node.Str("accessibilityLabel"));
