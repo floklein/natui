@@ -1,22 +1,36 @@
 # natui
 
-Write React TypeScript. Get **real native desktop UI**: SwiftUI on macOS, WinUI 3 on
-Windows. No webview, no Electron, no Yoga, the platform's own layout engine,
-controls, dark mode, and accessibility.
+[![CI](https://github.com/floklein/natui/actions/workflows/ci.yml/badge.svg)](https://github.com/floklein/natui/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Write React and TypeScript. Get real native desktop UI through SwiftUI on
+macOS and WinUI 3 on Windows. There is no webview, Electron runtime, Yoga, or
+browser layout engine. The platform owns layout, controls, dark mode, focus,
+and accessibility.
+
+> [!IMPORTANT]
+> natui is an experimental proof of concept, not a published registry package.
+> Use it from a source checkout while packaging and compatibility policies are
+> still being designed.
 
 ```tsx
 import { useState } from 'react';
-import { run, VStack, HStack, Text, Button, TextField } from 'natui';
+import { Button, HStack, Text, VStack, run } from 'natui';
 
 function App() {
   const [count, setCount] = useState(0);
+
   return (
     <VStack spacing={12} padding={20} alignment="leading">
       <Text font="largeTitle" weight="bold">Hello, native</Text>
       <HStack spacing={8}>
-        <Button variant="bordered" onPress={() => setCount(c => c - 1)}>−</Button>
+        <Button variant="bordered" onPress={() => setCount((value) => value - 1)}>
+          −
+        </Button>
         <Text font="title2" monospaced>{String(count)}</Text>
-        <Button variant="bordered" onPress={() => setCount(c => c + 1)}>+</Button>
+        <Button variant="bordered" onPress={() => setCount((value) => value + 1)}>
+          +
+        </Button>
       </HStack>
     </VStack>
   );
@@ -25,127 +39,183 @@ function App() {
 await run(<App />, { title: 'my app', width: 480, height: 320 });
 ```
 
-That `<VStack>` is a real SwiftUI `VStack` in a real `NSWindow` (and a WinUI grid
-stack on Windows). `useState`, keys, conditional rendering, effects, all of React
-works, because this *is* React (19) driving a custom renderer.
+That `<VStack>` becomes a real SwiftUI `VStack` in an `NSWindow`, or a native
+WinUI grid stack on Windows. React 19 still owns state, keys, effects,
+conditional rendering, and reconciliation.
 
-<p align="center"><img src="screenshots/03-final.png" width="480" alt="the demo app running as native SwiftUI, dark mode"/></p>
+<p align="center">
+  <img src="screenshots/03-final.png" width="480" alt="The natui demo running as native SwiftUI in dark mode">
+</p>
 
-## How it works
+## Quick start from source
 
-```
-React 19 ── react-reconciler 0.33 ── shadow tree ── NDJSON ops ──► native host
-                                                    ◄── events ──  (SwiftUI / WinUI 3)
-```
+Shared prerequisites:
 
-A custom reconciler batches each React commit into one atomic op batch and streams
-it to a focused native host process that materializes the
-tree with the platform's own declarative UI framework. Events stream back and run
-your handlers at React's interactive priorities. Controlled inputs stay glitch-free
-under latency via protocol-level echo suppression (seq/ack).
+- Git
+- Node.js 22 or newer
+- pnpm 11
 
-Full details: [architecture](docs/content/docs/internals/architecture.mdx) ·
-wire protocol: [protocol](docs/content/docs/internals/protocol.mdx)
-
-## Try it (macOS)
-
-Prerequisites: macOS 14+, Xcode command line tools with a Swift 6 toolchain,
-Node.js 22+, pnpm 11 (`corepack enable`).
+Clone the repository and install the workspace:
 
 ```bash
+git clone https://github.com/floklein/natui.git
+cd natui
+corepack enable
 pnpm install
-pnpm build:host:macos        # swift build -c release --package-path hosts/macos
-pnpm demo                    # builds the package, opens the native demo window
+pnpm build
 ```
 
-Automated end-to-end verification (drives the real SwiftUI window via the debug
-protocol: tree dumps, real optimistic edits, host-rendered screenshots, plus a
-controlled-input stress phase exercising native seq/ack):
+### macOS
+
+Requires macOS 14 or newer and Xcode command line tools with a Swift 6
+toolchain.
 
 ```bash
-pnpm verify
+pnpm build:host:macos
+pnpm demo
 ```
 
-Contract and unit tests, typecheck, package build (no GUI needed):
+### Windows
 
-```bash
-pnpm test && pnpm typecheck && pnpm build
-```
-
-## Windows
-
-`hosts/windows/NatuiHost` implements the same protocol as a WinUI 3 unpackaged
-self-contained app, verified end to end on Windows 11 (.NET 8 SDK required),
-see `hosts/windows/NatuiHost/README.md`.
+Requires Windows 10 1809 or newer and the .NET 8 SDK. Windows 11 is
+recommended.
 
 ```powershell
 dotnet build hosts/windows/NatuiHost -p:Platform=x64
-pnpm demo     # locate.ts finds the exe; or set NATUI_HOST
-pnpm verify   # same E2E suite as macOS, against the real WinUI 3 window
+pnpm demo
 ```
 
-## Components (POC set)
+The JavaScript side locates the built host automatically. Set `NATUI_HOST` to
+an explicit executable path when using a different build location. See the
+[Windows host guide](hosts/windows/NatuiHost/README.md) for ARM builds,
+troubleshooting, and current platform differences.
 
-Layout and content: `VStack` `HStack` `ZStack` `Spacer` `Divider` `ScrollView`
-`List` `Section` `Text` `Label` `Image` `ProgressView` `Link`.
-Inputs: `Button` `TextField` `TextEditor` `SearchField` `Toggle` `Slider`
-`Stepper` `Picker` `DatePicker` `DisclosureGroup`.
-App shell and navigation: `SplitView` (`Sidebar`/`Detail`) `TabView`/`Tab`
-`MenuBar` `Toolbar` `Menu` `ContextMenu` `Table` (sortable, selectable).
-Presentation: `Sheet` `Alert` `Popover` (`PopoverContent`).
+## Documentation
 
-All typed props, shared across platforms (see
-[the protocol guide](docs/content/docs/internals/protocol.mdx) for the full mapping and event tables).
-Common props include selection tags, badges, and accessibility basics
-(`accessibilityLabel`, `accessibilityHint`, `accessibilityIdentifier`), mapped
-to the platform's AX attributes.
+- [Get started](docs/content/docs/start/index.mdx)
+- [Browse all 37 components](docs/content/docs/components/index.mdx)
+- [Read the guides](docs/content/docs/guides/index.mdx)
+- [Explore the API](docs/content/docs/api/index.mdx)
+- [Review platform support](docs/content/docs/status/platform-support.mdx)
+- [See the roadmap](docs/content/docs/status/roadmap.mdx)
 
-The kitchen-sink example (`examples/kitchen-sink`, a small project/task
-manager) exercises the app-shell workflow and most component kinds;
-`pnpm verify:kitchen` drives it end to end against the real native window
-(screenshots in `screenshots/kitchen-sink/`). The component catalog documents
-the complete 37-component public surface.
-
-## Single-process mode (no Node at runtime)
-
-The host can evaluate the React bundle **in-process with JavaScriptCore**, so
-the shipped app is one native process with zero Node at runtime.
+Run the documentation site locally:
 
 ```bash
-pnpm build                                                 # emit packages/natui/dist first
+pnpm docs:dev
+```
+
+Validate its links, examples, component coverage, production build, and smoke
+tests with:
+
+```bash
+pnpm docs:check
+pnpm docs:build
+pnpm docs:smoke
+```
+
+## How it works
+
+```text
+React 19 ── react-reconciler 0.33 ── shadow tree ── NDJSON ops ──► native host
+                                                    ◄── events ──  SwiftUI / WinUI 3
+```
+
+A custom React reconciler batches each commit into one atomic operation batch.
+It streams that batch to a focused native host process, which materializes the
+tree with the platform's declarative UI framework. Events stream back at
+React's interactive priorities.
+
+Controlled inputs use protocol-level sequence acknowledgements to suppress
+stale echoes, so optimistic native edits remain responsive even when the
+JavaScript process is delayed.
+
+Read the [architecture guide](docs/content/docs/internals/architecture.mdx)
+and [wire protocol](docs/content/docs/internals/protocol.mdx) for the full
+design.
+
+## Components
+
+The current public surface contains 37 typed host components:
+
+- Layout: `VStack`, `HStack`, `ZStack`, `Spacer`, `Divider`, `ScrollView`,
+  `List`, `Section`
+- Content: `Text`, `Label`, `Image`, `ProgressView`, `Link`
+- Inputs: `Button`, `TextField`, `TextEditor`, `SearchField`, `Toggle`,
+  `Slider`, `Stepper`, `Picker`, `DatePicker`, `DisclosureGroup`
+- App shell and navigation: `SplitView`, `Sidebar`, `Detail`, `TabView`, `Tab`,
+  `MenuBar`, `Toolbar`
+- Menus and data: `Menu`, `ContextMenu`, `Table`
+- Presentation: `Sheet`, `Alert`, `Popover`, `PopoverContent`
+
+Common props include selection tags, badges, and accessibility metadata such
+as `accessibilityLabel`, `accessibilityHint`, and
+`accessibilityIdentifier`. See the [component
+catalog](docs/content/docs/components/index.mdx) for props, examples, and
+platform notes.
+
+## Runtime modes
+
+The default development mode runs React in Node.js and communicates with the
+native host over standard input and output.
+
+On macOS, the host can also evaluate a bundled React application in-process
+with JavaScriptCore. The shipped application is then one native process with
+no Node.js runtime:
+
+```bash
+pnpm build
 cd examples/demo
-pnpm build:embedded                                        # esbuild -> dist/embedded.js
+pnpm build:embedded
 ../../hosts/macos/.build/release/natui-host --bundle dist/embedded.js
 ```
 
-Automated proof (mount + interactions + screenshot + a closed-stdin lifecycle
-regression, driven over the debug port):
+Read the [runtime modes guide](docs/content/docs/guides/runtime-modes.mdx) for
+the lifecycle and packaging tradeoffs.
 
-```bash
-pnpm verify:embedded
-```
+## Examples and verification
 
-## Status
+`examples/demo` is the smallest end-to-end application.
+`examples/kitchen-sink` is a small project manager that exercises the app
+shell and most component kinds.
 
-Experimental proof of concept. What the automated checks demonstrate today, on
-macOS: 77 contract/unit tests cover the reconciler-host op semantics (keyed
-moves, seq/ack echo suppression, controlled-value enforcement for every input
-kind including Slider, prop validation, menu/toolbar item trees, presentation
-and selection semantics, startup handshake, screenshot failure/timeout
-handling), and three end-to-end suites drive the real SwiftUI window: the demo
-in Node dev mode, the kitchen-sink app (`pnpm verify:kitchen`, app-shell and
-multi-component workflows), and the demo in embedded-JSC single-process mode,
-all asserting against native tree dumps and validating the PNGs they capture;
-the embedded suite
-additionally pins the native seq/ack contract deterministically by injecting
-stale and current acks over the wire. On Windows, the contract tests and the
-Node-mode E2E suite pass against the real WinUI 3 window (screenshots in
-`screenshots/windows/`); the app-shell kinds are compile-checked by CI and not
-yet E2E-verified there, and embedded single-process mode remains macOS-only
-for now. See
-[the architecture guide](docs/content/docs/internals/architecture.mdx) for the staged packaging path
-(Bun or Node SEA sidecar, then in-process JavaScriptCore or a researched
-Windows Hermes path).
+| Command | Purpose |
+|---|---|
+| `pnpm demo` | Build the package and open the base native demo |
+| `pnpm verify` | Drive the base demo through native tree dumps, edits, and screenshots |
+| `pnpm verify:kitchen` | Verify app-shell and multi-component workflows |
+| `pnpm verify:embedded` | Verify the macOS JavaScriptCore runtime |
+| `pnpm test` | Run renderer, bridge, protocol, and component contract tests |
+| `pnpm typecheck` | Typecheck all workspace projects |
+| `pnpm build` | Build the public `natui` package |
+
+The real-window suites validate native tree state, interactions, controlled
+input behavior, and host-rendered PNG files. They complement the contract
+suite but are not a complete visual or accessibility audit. See
+[verification status](docs/content/docs/status/verification.mdx) for the
+exact coverage and evidence limits.
+
+## Platform status
+
+| Capability | macOS | Windows |
+|---|---|---|
+| Native toolkit | SwiftUI | WinUI 3 |
+| Base demo | Real-window verified | Real-window verified |
+| Kitchen-sink app shell | Real-window verified | Compile-checked |
+| Host build in CI | Yes | Yes |
+| Embedded JavaScript runtime | JavaScriptCore, verified | Not implemented |
+
+Embedded mode is currently macOS-only. The Windows app-shell component set is
+implemented and compiled in CI, but has not yet received the same real-window
+coverage as macOS.
+
+## Package entry points
+
+The workspace exposes:
+
+- `natui` for components, `run`, and advanced protocol exports
+- `natui/components` for component-only bundles without Node.js built-ins
+- `natui/inproc` for the embedded host entry point
 
 ## License
 
