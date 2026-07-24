@@ -41,13 +41,11 @@ jobs:
       # real window session and run locally per README; CI stays headless.
 
   windows-host:
-    # First-ever compile surface for the WinUI host: the C# source has never
-    # been built on Windows, so this job is allowed to fail without blocking
-    # the PR. A green run here is the signal to drop continue-on-error and
-    # the "unverified" label in hosts/windows/NatuiHost/README.md.
-    name: WinUI host compile (experimental)
+    # Compile check only (first green run: PR #3); now blocking like the
+    # other jobs. The app-shell kinds are E2E-verified on macOS; see
+    # hosts/windows/NatuiHost/README.md for the Windows divergences.
+    name: WinUI host compile
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
