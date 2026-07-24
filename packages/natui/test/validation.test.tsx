@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
-import { Text, VStack } from '../src/components.js';
+import { MenuBar, Text, VStack } from '../src/components.js';
 import { settle, setup } from './helpers.js';
 
 function withConsoleErrorCapture(): { messages: () => string[]; restore: () => void } {
@@ -129,6 +129,54 @@ test('recovery: a subsequent valid render updates the previously offending prop'
     const text = host.byKind('Text')[0]!;
     assert.deepEqual(text.props.meta, { ok: true }, 'valid render replaces the omitted prop');
     assert.equal(host.textOf(text.id), 'v2');
+  } finally {
+    capture.restore();
+  }
+});
+
+test('deep spec trees: invalid entries are dropped with exact paths, the rest survives', async () => {
+  const capture = withConsoleErrorCapture();
+  try {
+    const { host, renderer } = setup();
+    // A menu spec tree with a nested function and a Date buried three levels
+    // deep: both must be reported at their exact paths and omitted, while
+    // every sibling (and the whole remaining tree) crosses the wire.
+    const menus = [
+      {
+        id: 'file',
+        label: 'File',
+        items: [
+          { id: 'new', label: 'New', action: () => {} },
+          { divider: true },
+          { id: 'recent', label: 'Recent', children: [{ id: 'r1', label: 'a.txt', when: new Date(0) }] },
+        ],
+      },
+    ];
+    renderer.render(<MenuBar {...({ menus } as unknown as Parameters<typeof MenuBar>[0])} />);
+    await settle();
+    host.drain();
+
+    const bar = host.byKind('MenuBar')[0]!;
+    assert.deepEqual(bar.props.menus, [
+      {
+        id: 'file',
+        label: 'File',
+        items: [
+          { id: 'new', label: 'New' },
+          { divider: true },
+          { id: 'recent', label: 'Recent', children: [{ id: 'r1', label: 'a.txt' }] },
+        ],
+      },
+    ]);
+    const msgs = capture.messages();
+    assert.ok(
+      msgs.some((m) => m.includes('MenuBar.menus[0].items[0].action') && m.includes('function')),
+      `function path reported, got: ${msgs.join(' | ')}`,
+    );
+    assert.ok(
+      msgs.some((m) => m.includes('MenuBar.menus[0].items[2].children[0].when') && m.includes('Date')),
+      `Date path reported, got: ${msgs.join(' | ')}`,
+    );
   } finally {
     capture.restore();
   }
