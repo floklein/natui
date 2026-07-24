@@ -39,6 +39,13 @@ internal sealed class NatuiNode(int id, string kind)
     public string Text { get; set; } = "";
     public List<NatuiNode> Children { get; } = [];
 
+    /// <summary>
+    /// Retained parent node, or null for root children and detached nodes.
+    /// WinUI panels do not inherit foreground, so the mapper walks this model
+    /// relationship when resolving the nearest container color.
+    /// </summary>
+    public NatuiNode? Parent;
+
     /// <summary>Monotonic counter for optimistic local edits (protocol seq/ack).</summary>
     public int LastSentSeq;
 
@@ -61,10 +68,10 @@ internal sealed class NatuiNode(int id, string kind)
     public TextBlock? Label;
 
     /// <summary>
-    /// WinUI object hosted OUTSIDE normal visual flow: ContentDialog (Alert),
-    /// Flyout (Popover), overlay Grid (Sheet), MenuBar/CommandBar controls,
-    /// TabViewItem (Tab). The node's Element stays a collapsed placeholder in
-    /// flow so VisualIndexOf and attach/detach index math are untouched.
+    /// WinUI object hosted OUTSIDE normal visual flow: ContentDialog
+    /// (Sheet/Alert), Flyout (Popover), MenuBar/CommandBar controls, TabViewItem
+    /// (Tab). The node's Element stays a collapsed placeholder in flow so
+    /// VisualIndexOf and attach/detach index math are untouched.
     /// NodeMapper.WillDestroy tears these down.
     /// </summary>
     public object? Hosted;
@@ -148,6 +155,7 @@ internal sealed class NodeStore(NodeMapper mapper)
                     Detach(child);
                     ChildrenOf(parent)?.Add(node);
                     _parentOf[child] = parent;
+                    node.Parent = parent == RootId ? null : _byId.GetValueOrDefault(parent);
                     AttachVisual(parent, node);
                     break;
                 }
@@ -165,6 +173,7 @@ internal sealed class NodeStore(NodeMapper mapper)
                         else siblings.Add(node);
                     }
                     _parentOf[child] = parent;
+                    node.Parent = parent == RootId ? null : _byId.GetValueOrDefault(parent);
                     AttachVisual(parent, node);
                     break;
                 }
@@ -214,6 +223,7 @@ internal sealed class NodeStore(NodeMapper mapper)
                     foreach (var child in removed)
                     {
                         _parentOf.Remove(child.Id);
+                        child.Parent = null;
                         Destroy(child.Id);
                     }
                     break;
@@ -262,6 +272,7 @@ internal sealed class NodeStore(NodeMapper mapper)
         if (_byId.TryGetValue(childId, out var node))
         {
             mapper.DetachVisual(parentId, _byId.GetValueOrDefault(parentId), node);
+            node.Parent = null;
         }
     }
 
@@ -271,6 +282,7 @@ internal sealed class NodeStore(NodeMapper mapper)
         foreach (var child in node.Children)
         {
             _parentOf.Remove(child.Id);
+            child.Parent = null;
             Destroy(child.Id);
         }
         // Hosted objects (dialogs, flyouts, overlays, chrome) live outside

@@ -41,6 +41,8 @@ A `Popover` has two roles among its children:
 
 ## Screenshot limitations
 
-macOS and Windows host screenshots capture their own native window content. Popup layers can be outside that rendered surface. On Windows, the in-tree sheet is captured, while open alerts, popovers, and menus are not.
+macOS and Windows host screenshots capture their own native window content.
+Popup layers such as sheets, alerts, popovers, and open menus can be outside
+that rendered surface.
 
 Use tree dumps and event assertions for popup behavior instead of treating screenshots as complete proof.

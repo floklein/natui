@@ -1,8 +1,8 @@
 /**
  * In-process entry point (Stage 2): the native host embeds a JS engine
- * (JavaScriptCore on macOS) and evaluates the app bundle directly. There is
- * no child process and no stdio; messages cross the boundary as plain
- * function calls:
+ * (JavaScriptCore on macOS, V8 on Windows) and evaluates the app bundle
+ * directly. There is no child process and no stdio; messages cross the
+ * boundary as plain function calls:
  *
  *   JS -> host: the host injects a global `__natui_send(json)` function.
  *   host -> JS: this module registers a global `__natui_recv(json)` function.

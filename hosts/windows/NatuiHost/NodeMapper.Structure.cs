@@ -3,10 +3,143 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
 namespace NatuiHost;
+
+/// <summary>
+/// A list-row presentation shell that keeps arbitrary NatUI content in the
+/// leading column and renders the common badge prop at the trailing edge.
+/// Section rows also use this shell for controlled selection highlighting.
+/// </summary>
+internal sealed class NatuiListRow : ContentControl
+{
+    private readonly Grid _layout = new();
+    private readonly FrameworkElement _content;
+    private readonly Border _badge;
+    private readonly TextBlock _badgeText;
+
+    public NatuiNode Node { get; }
+
+    public NatuiListRow(NatuiNode node, FrameworkElement content)
+    {
+        Node = node;
+        Tag = node;
+        HorizontalAlignment = HorizontalAlignment.Stretch;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        IsTabStop = node.Parent?.Kind == "Section";
+        _layout.ColumnDefinitions.Add(
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _layout.ColumnSpacing = 8;
+        Content = _layout;
+
+        _content = content;
+        _content.HorizontalAlignment = HorizontalAlignment.Stretch;
+        Grid.SetColumn(_content, 0);
+        _layout.Children.Add(_content);
+
+        _badgeText = new TextBlock
+        {
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _badge = new Border
+        {
+            Background = ResourceBrush(
+                "AccentFillColorDefaultBrush",
+                new SolidColorBrush(Microsoft.UI.Colors.DodgerBlue)),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(6, 1, 6, 1),
+            Child = _badgeText,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        Grid.SetColumn(_badge, 1);
+        _layout.Children.Add(_badge);
+    }
+
+    public void UpdateBadge(string? text)
+    {
+        _badgeText.Text = text ?? "";
+        _badge.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    public void SetSectionSelected(bool selected)
+    {
+        Background = selected
+            ? ResourceBrush(
+                "AccentFillColorSecondaryBrush",
+                new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x00, 0x78, 0xD4)))
+            : null;
+    }
+
+    public void ReleaseContent() => _layout.Children.Remove(_content);
+
+    private static Brush ResourceBrush(string key, Brush fallback)
+    {
+        try
+        {
+            if (Application.Current.Resources[key] is Brush brush) return brush;
+        }
+        catch (Exception)
+        {
+            // Missing theme resource, use the stable fallback.
+        }
+        return fallback;
+    }
+}
+
+/// <summary>
+/// WinUI SplitView plus a persistent native sidebar-toggle button. SplitView
+/// deliberately has no built-in toggle, so the wrapper reserves a small
+/// header row in both columns and keeps the affordance in the detail header.
+/// </summary>
+internal sealed class NatuiSplitView : Grid
+{
+    public SplitView NativeSplit { get; } = new()
+    {
+        DisplayMode = SplitViewDisplayMode.Inline,
+        IsPaneOpen = true,
+    };
+
+    public Grid SidebarHost { get; } = new();
+    public Grid DetailHost { get; } = new();
+    public Button ToggleButton { get; } = new()
+    {
+        Width = 36,
+        Height = 36,
+        Padding = new Thickness(0),
+        Margin = new Thickness(4, 2, 4, 2),
+        HorizontalAlignment = HorizontalAlignment.Left,
+        VerticalAlignment = VerticalAlignment.Center,
+        Content = new FontIcon { Glyph = "\uE89F", FontSize = 16 },
+    };
+
+    public NatuiSplitView()
+    {
+        var sidebar = ColumnWithHeader(SidebarHost);
+        var detail = ColumnWithHeader(DetailHost);
+        Grid.SetRow(ToggleButton, 0);
+        detail.Children.Add(ToggleButton);
+        NativeSplit.Pane = sidebar;
+        NativeSplit.Content = detail;
+        Children.Add(NativeSplit);
+    }
+
+    private static Grid ColumnWithHeader(Grid content)
+    {
+        var column = new Grid();
+        column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
+        column.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(content, 1);
+        column.Children.Add(content);
+        return column;
+    }
+}
 
 /// <summary>
 /// Structural kinds: SplitView (+ Sidebar/Detail slots), TabView/Tab, Section,
@@ -16,6 +149,9 @@ internal sealed partial class NodeMapper
 {
     /// <summary>Header grid + row ListView per Table node id.</summary>
     private readonly Dictionary<int, (Grid Header, ListView List)> _tableParts = [];
+
+    /// <summary>Presentation shells for direct List rows and Section rows.</summary>
+    private readonly Dictionary<int, NatuiListRow> _listRows = [];
 
     // -- slot routing -------------------------------------------------------------
 
@@ -31,14 +167,24 @@ internal sealed partial class NodeMapper
         {
             case "SplitView":
             {
-                if (parent.Inner is not SplitView splitView) return false;
+                if (parent.Inner is not NatuiSplitView splitView) return false;
                 switch (child.Kind)
                 {
                     case "Sidebar":
-                        splitView.Pane = EnsureElement(child);
+                        if (splitView.SidebarHost.Children.Count > 0)
+                        {
+                            Ipc.Log($"SplitView {parent.Id}: extra Sidebar {child.Id} ignored");
+                            return true;
+                        }
+                        splitView.SidebarHost.Children.Add(EnsureElement(child));
                         return true;
                     case "Detail":
-                        splitView.Content = EnsureElement(child);
+                        if (splitView.DetailHost.Children.Count > 0)
+                        {
+                            Ipc.Log($"SplitView {parent.Id}: extra Detail {child.Id} ignored");
+                            return true;
+                        }
+                        splitView.DetailHost.Children.Add(EnsureElement(child));
                         return true;
                     default:
                         // Never render stray children inline; macOS ignores
@@ -62,14 +208,22 @@ internal sealed partial class NodeMapper
         {
             case "SplitView":
             {
-                if (parent.Inner is not SplitView splitView) return false;
+                if (parent.Inner is not NatuiSplitView splitView) return false;
                 switch (child.Kind)
                 {
                     case "Sidebar":
-                        if (ReferenceEquals(splitView.Pane, child.Element)) splitView.Pane = null;
+                        if (child.Element is { } sidebar
+                            && splitView.SidebarHost.Children.Contains(sidebar))
+                        {
+                            splitView.SidebarHost.Children.Remove(sidebar);
+                        }
                         return true;
                     case "Detail":
-                        if (ReferenceEquals(splitView.Content, child.Element)) splitView.Content = null;
+                        if (child.Element is { } detail
+                            && splitView.DetailHost.Children.Contains(detail))
+                        {
+                            splitView.DetailHost.Children.Remove(detail);
+                        }
                         return true;
                     default:
                         return true;
@@ -93,19 +247,42 @@ internal sealed partial class NodeMapper
 
     // -- SplitView ----------------------------------------------------------------
 
-    private static SplitView BuildSplitView(NatuiNode node) => new()
+    private NatuiSplitView BuildSplitView(NatuiNode node)
     {
-        // Inline: the pane shares space with the content, like a macOS
-        // sidebar column. Sidebar visibility is JS-driven on Windows (no
-        // native toggle affordance), so there are no events to wire.
-        DisplayMode = SplitViewDisplayMode.Inline,
-        IsPaneOpen = true,
-    };
+        var splitView = new NatuiSplitView();
+        splitView.ToggleButton.Click += (_, _) =>
+            splitView.NativeSplit.IsPaneOpen = !splitView.NativeSplit.IsPaneOpen;
+        splitView.NativeSplit.PaneOpened += (_, _) =>
+            OnSplitViewVisibilityChanged(node, splitView);
+        splitView.NativeSplit.PaneClosed += (_, _) =>
+            OnSplitViewVisibilityChanged(node, splitView);
+        return splitView;
+    }
 
-    private void ApplySplitViewProps(NatuiNode node, SplitView splitView)
+    private void ApplySplitViewProps(NatuiNode node, NatuiSplitView splitView)
     {
-        splitView.IsPaneOpen = node.Str("value") != "detailOnly";
-        splitView.OpenPaneLength = node.Num("sidebarWidth") ?? 220;
+        splitView.NativeSplit.IsPaneOpen = node.Str("value") != "detailOnly";
+        var width = node.Num("sidebarWidth") ?? 220;
+        if (node.Num("minSidebarWidth") is { } minimum) width = Math.Max(width, minimum);
+        if (node.Num("maxSidebarWidth") is { } maximum) width = Math.Min(width, maximum);
+        splitView.NativeSplit.OpenPaneLength = Math.Max(0, width);
+        SetSplitToggleLabel(splitView);
+    }
+
+    private void OnSplitViewVisibilityChanged(NatuiNode node, NatuiSplitView splitView)
+    {
+        if (_applyingRemote > 0) return;
+        SetSplitToggleLabel(splitView);
+        var visibility = splitView.NativeSplit.IsPaneOpen ? "all" : "detailOnly";
+        if (visibility == (node.Str("value") ?? "all")) return;
+        node.UserEdit(JsonValue.Create(visibility));
+    }
+
+    private static void SetSplitToggleLabel(NatuiSplitView splitView)
+    {
+        var label = splitView.NativeSplit.IsPaneOpen ? "Hide sidebar" : "Show sidebar";
+        ToolTipService.SetToolTip(splitView.ToggleButton, label);
+        AutomationProperties.SetName(splitView.ToggleButton, label);
     }
 
     // -- TabView / Tab ------------------------------------------------------------
@@ -227,6 +404,49 @@ internal sealed partial class NodeMapper
         return null;
     }
 
+    private NatuiListRow CreateListRow(NatuiNode node, FrameworkElement content)
+    {
+        var row = new NatuiListRow(node, content);
+        row.UpdateBadge(BadgeText(node));
+        row.Tapped += (_, args) =>
+        {
+            if (!OnSectionListRowTapped(node)) return;
+            args.Handled = true;
+        };
+        row.KeyDown += (_, args) =>
+        {
+            if (args.Key is not (Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)
+                || !OnSectionListRowTapped(node))
+            {
+                return;
+            }
+            args.Handled = true;
+        };
+        _listRows[node.Id] = row;
+        return row;
+    }
+
+    private NatuiListRow? ReleaseListRow(NatuiNode node)
+    {
+        if (!_listRows.Remove(node.Id, out var row)) return null;
+        row.ReleaseContent();
+        return row;
+    }
+
+    private void RefreshListRow(NatuiNode node)
+    {
+        if (_listRows.TryGetValue(node.Id, out var row)) row.UpdateBadge(BadgeText(node));
+    }
+
+    private static void SetSectionRowsInList(NatuiNode section, bool inList)
+    {
+        foreach (var row in section.Children)
+        {
+            row.InList = inList;
+            SyncInnerAlignment(row);
+        }
+    }
+
     // -- Section ------------------------------------------------------------------
 
     private FrameworkElement BuildSection(NatuiNode node)
@@ -319,10 +539,30 @@ internal sealed partial class NodeMapper
             var column = columns[i] as JsonObject;
             header.ColumnDefinitions.Add(TableColumnDefinition(column));
             var key = Json.Str(column, "key") ?? "";
-            var arrow = key == sortKey ? (descending ? " v" : " ^") : "";
+            var label = Json.Str(column, "label") ?? "";
+            var headerContent = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+            };
+            headerContent.Children.Add(new TextBlock
+            {
+                Text = label,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            if (key == sortKey)
+            {
+                headerContent.Children.Add(new FontIcon
+                {
+                    FontFamily = IconFontFamily(),
+                    FontSize = 10,
+                    Glyph = GlyphFor(descending ? "chevron.down" : "chevron.up"),
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
             var button = new Button
             {
-                Content = (Json.Str(column, "label") ?? "") + arrow,
+                Content = headerContent,
                 Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -378,7 +618,7 @@ internal sealed partial class NodeMapper
 
     /// <summary>
     /// Request semantics: never reorder locally; the app re-sorts rows and
-    /// echoes the sort prop, which moves the arrow.
+    /// echoes the sort prop, which moves the native sort glyph.
     /// </summary>
     private void EmitSortChange(NatuiNode node, string key)
     {
@@ -438,6 +678,7 @@ internal sealed partial class NodeMapper
     {
         list.SelectionMode = SelectionModeFor(node);
         ApplySelectionValue(node, list, RowTagOfListRow);
+        ApplySectionSelectionValue(node);
     }
 
     private void OnListSelection(NatuiNode node, ListView list) =>
@@ -445,12 +686,14 @@ internal sealed partial class NodeMapper
 
     /// <summary>
     /// List rows identify themselves by the tag common prop (falling back to
-    /// the node id). Divergence: rows inside Sections are not individually
-    /// selectable on Windows v1 (they are not items of the outer ListView).
+    /// the node id). A Section shell is structural rather than selectable;
+    /// its child row presenters participate in the outer list separately.
     /// </summary>
     private static string RowTagOfListRow(object entry) =>
         (entry as FrameworkElement)?.Tag is NatuiNode node
-            ? node.Str("tag") ?? node.Id.ToString(CultureInfo.InvariantCulture)
+            ? node.Kind == "Section"
+                ? ""
+                : node.Str("tag") ?? node.Id.ToString(CultureInfo.InvariantCulture)
             : "";
 
     /// <summary>Selectable only when props carry a value key (even null).</summary>
@@ -517,17 +760,135 @@ internal sealed partial class NodeMapper
         if (list.SelectionMode == ListViewSelectionMode.Multiple)
         {
             var ids = new List<string>();
-            foreach (var entry in list.SelectedItems) ids.Add(rowId(entry));
+            foreach (var entry in list.SelectedItems)
+            {
+                var id = rowId(entry);
+                if (id.Length > 0) ids.Add(id);
+            }
+            // Section rows live inside the structural Section item rather
+            // than in this ListView's Items collection. Preserve their
+            // controlled selections when a direct row is toggled.
+            var sectionIds = SectionRowIds(node);
+            if (node.Props["value"] is JsonArray current)
+            {
+                foreach (var item in current)
+                {
+                    if (StringOf(item) is { } id && sectionIds.Contains(id)) ids.Add(id);
+                }
+            }
             ids.Sort(StringComparer.Ordinal);
             value = new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
         }
         else
         {
-            value = list.SelectedItem is { } selected
-                ? JsonValue.Create(rowId(selected))
-                : null;
+            var id = list.SelectedItem is { } selected ? rowId(selected) : "";
+            if (id.Length == 0)
+            {
+                // Clicking the structural Section item must not clear or
+                // replace the controlled row selection.
+                ReapplyListSelection(node, list);
+                return;
+            }
+            value = JsonValue.Create(id);
         }
         node.UserEdit(value);
+        ReapplyListSelection(node, list);
+    }
+
+    private bool OnSectionListRowTapped(NatuiNode row)
+    {
+        if (row.Parent is not { Kind: "Section", Parent: { Kind: "List" } listNode }
+            || listNode.Inner is not ListView list
+            || !listNode.Props.ContainsKey("value"))
+        {
+            return false;
+        }
+        var id = row.Str("tag") ?? row.Id.ToString(CultureInfo.InvariantCulture);
+        JsonNode? value;
+        if (SelectionModeFor(listNode) == ListViewSelectionMode.Multiple)
+        {
+            var selected = new HashSet<string>(StringComparer.Ordinal);
+            if (listNode.Props["value"] is JsonArray current)
+            {
+                foreach (var item in current)
+                {
+                    if (StringOf(item) is { } currentId) selected.Add(currentId);
+                }
+            }
+            if (!selected.Add(id)) selected.Remove(id);
+            value = new JsonArray(selected.Order(StringComparer.Ordinal)
+                .Select(selectedId => (JsonNode?)JsonValue.Create(selectedId)).ToArray());
+        }
+        else
+        {
+            value = JsonValue.Create(id);
+        }
+        listNode.UserEdit(value);
+        ReapplyListSelection(listNode, list);
+        return true;
+    }
+
+    private void ReapplyListSelection(NatuiNode node, ListView list)
+    {
+        _applyingRemote++;
+        try
+        {
+            ApplyListProps(node, list);
+        }
+        finally
+        {
+            _applyingRemote--;
+        }
+    }
+
+    private void ApplySectionSelectionValue(NatuiNode listNode)
+    {
+        var selected = SelectedListValues(listNode);
+        foreach (var row in _listRows.Values)
+        {
+            var node = row.Node;
+            if (node.Parent is not { Kind: "Section", Parent: var owner }
+                || !ReferenceEquals(owner, listNode))
+            {
+                continue;
+            }
+            var id = node.Str("tag") ?? node.Id.ToString(CultureInfo.InvariantCulture);
+            row.SetSectionSelected(selected.Contains(id));
+        }
+    }
+
+    private HashSet<string> SectionRowIds(NatuiNode listNode)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var row in _listRows.Values)
+        {
+            var node = row.Node;
+            if (node.Parent is not { Kind: "Section", Parent: var owner }
+                || !ReferenceEquals(owner, listNode))
+            {
+                continue;
+            }
+            result.Add(node.Str("tag") ?? node.Id.ToString(CultureInfo.InvariantCulture));
+        }
+        return result;
+    }
+
+    private static HashSet<string> SelectedListValues(NatuiNode node)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (!node.Props.TryGetPropertyValue("value", out var value)) return result;
+        if (value is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                if (StringOf(item) is { } id) result.Add(id);
+            }
+        }
+        else if (StringOf(value) is { } id)
+        {
+            result.Add(id);
+        }
+        return result;
     }
 
     private static string? StringOf(JsonNode? value) =>

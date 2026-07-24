@@ -11,13 +11,14 @@ pnpm --filter natui build
 pnpm --filter natui-kitchen-sink dev
 ```
 
-Run its automated macOS verification with:
+Run its automated real-window verification on macOS or Windows with:
 
 ```bash
 pnpm verify:kitchen
 ```
 
-The suite drives the real SwiftUI window and writes screenshots under `screenshots/kitchen-sink/`.
+The suite drives the platform's real native window and writes screenshots
+under `screenshots/kitchen-sink/`.
 
 Use this example as a behavior reference, especially for:
 
@@ -26,4 +27,4 @@ Use this example as a behavior reference, especially for:
 - Client-side table sorting and selection
 - Controlled presentation state for sheets, alerts, and popovers
 
-The kitchen-sink real-window verification is macOS-only today. Its Windows app-shell equivalents are compile-checked but not yet covered by the same GUI suite.
+The same assertions run against the SwiftUI and WinUI 3 hosts.

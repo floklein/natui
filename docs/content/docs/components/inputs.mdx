@@ -13,7 +13,10 @@ NatUI inputs are controlled React components. Pass the current `value` and updat
 <Button variant="prominent" onPress={save}>Save</Button>
 ```
 
-Variants are `automatic`, `bordered`, `prominent`, `plain`, and `link`. Roles are `destructive` and `cancel`. Windows currently renders `bordered`, `plain`, and `link` with its default button style.
+Variants are `automatic`, `bordered`, `prominent`, `plain`, and `link`. Roles
+are `destructive` and `cancel`. Windows maps prominent, plain, and link to
+their native WinUI styles, while automatic and bordered use the standard
+button appearance.
 
 ## TextField
 
@@ -28,7 +31,8 @@ Variants are `automatic`, `bordered`, `prominent`, `plain`, and `link`. Roles ar
 />
 ```
 
-Set `secure` for protected entry. On Windows, changing `secure` after creation is not supported.
+Set `secure` for protected entry. Changing it after creation swaps the native
+control while preserving the React node.
 
 ## Toggle
 
@@ -40,7 +44,8 @@ Set `secure` for protected entry. On Windows, changing `secure` after creation i
 </Toggle>
 ```
 
-Styles are `automatic`, `checkbox`, and `switch`. Changing style after creation is not supported on Windows.
+Styles are `automatic`, `checkbox`, and `switch`. Style changes replace the
+native control while preserving the React node.
 
 ## Slider
 
@@ -67,7 +72,8 @@ Styles are `automatic`, `checkbox`, and `switch`. Changing style after creation 
 />
 ```
 
-Styles are `automatic`, `menu`, `segmented`, and `radioGroup`. Changing style after creation is not supported on Windows.
+Styles are `automatic`, `menu`, `segmented`, and `radioGroup`. Style changes
+replace the native control while preserving the React node.
 
 ## SearchField
 
@@ -93,7 +99,9 @@ Uses a local ISO value without a time zone:
 <DatePicker value={due} displayedComponents="date" onChange={setDue} />
 ```
 
-Windows currently uses a date-only control. A `dateTime` value is accepted, displays its date portion, and emits `YYYY-MM-DD`. A `time` value in `HH:mm` form cannot be parsed by that control, so it leaves the current native date unchanged and cannot emit a time-only value.
+Windows uses native date and time controls, pairing them for `dateTime`.
+All three modes parse and emit the canonical local ISO shape documented by
+`DatePickerProps`.
 
 ## Stepper
 
