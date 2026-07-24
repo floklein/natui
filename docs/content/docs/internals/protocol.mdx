@@ -71,7 +71,7 @@ The host always replies to `screenshot`. On failure it includes `error` and does
 | `TextEditor` | `change` | string |
 | `Sheet`, `Alert`, `Popover` | `change` | boolean |
 | `Alert` | `select` | button id |
-| `SplitView` | `change` | `all` or `detailOnly` on macOS; Windows has no native visibility event |
+| `SplitView` | `change` | `all` or `detailOnly` |
 | `DisclosureGroup` | `change` | boolean |
 | `List`, `Table` | `change` | string, string array, or null |
 | `Table` | `sortChange` | `{ key, order }` |
@@ -109,7 +109,7 @@ Each controlled kind has exactly one controlled prop named `value`.
 | `Picker`, `TabView` | string |
 | `DatePicker` | local ISO string |
 | `Sheet`, `Alert`, `Popover` | boolean |
-| `SplitView` | `all` or `detailOnly`; optimistic native changes occur on macOS only |
+| `SplitView` | `all` or `detailOnly`; native visibility changes are optimistic |
 | `List`, `Table` | string, string array, or null |
 | `DisclosureGroup` | boolean |
 

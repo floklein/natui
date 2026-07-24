@@ -32,6 +32,15 @@ Do not use `dotnet run` as the spawn target. Its wrapper process breaks the pare
 
 The base demo and its Node-mode end-to-end suite have passed against a real WinUI 3 window, including tree dumps, interaction events, controlled edits, and screenshots.
 
-The newer app-shell components are compile-checked by the blocking Windows CI job but have not yet received equivalent real-window end-to-end coverage on Windows. Embedded mode is not implemented on Windows.
+The Windows host also supports in-process V8 execution:
+
+```powershell
+pnpm build
+pnpm --filter natui-demo build:embedded
+hosts\windows\NatuiHost\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NatuiHost.exe --bundle examples\demo\dist\embedded.js
+```
+
+Run `pnpm verify:embedded` to exercise the embedded tree, interactions,
+sequence acknowledgements, screenshot path, and closed-input lifecycle.
 
 See [platform support](/docs/status/platform-support) for component-level differences.

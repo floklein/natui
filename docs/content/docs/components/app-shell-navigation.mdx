@@ -42,11 +42,13 @@ Defines native window toolbar items from `ToolbarItemSpec[]`. It must be a direc
 />
 ```
 
-Toolbar search text is host-local and reported through `onSearch`. Windows always places search items in the left region and may rebuild the toolbar after prop changes, which drops active search text and focus.
+Toolbar search text is host-local and reported through `onSearch`. Both hosts
+preserve a surviving search item's text and focus across prop updates.
 
 ## SplitView, Sidebar, and Detail
 
-`SplitView` routes `Sidebar` and `Detail` children into native navigation slots. Use exactly one of each. macOS chooses the first matching child, while Windows assigns each matching child as it is attached, so duplicate slots have platform-dependent results.
+`SplitView` routes `Sidebar` and `Detail` children into native navigation
+slots. Use exactly one of each.
 
 <auto-type-table path="../../../../packages/natui/src/components.ts" name="SplitViewProps" />
 
@@ -61,7 +63,9 @@ Toolbar search text is host-local and reported through `onSearch`. Windows alway
 </SplitView>
 ```
 
-Use `value="all"` or `value="detailOnly"` to control visibility. macOS can report a native visibility change through `onChange`. Windows has no native visibility affordance, does not emit `onChange` for split visibility, and ignores minimum and maximum sidebar widths.
+Use `value="all"` or `value="detailOnly"` to control visibility. Native
+visibility controls report changes through `onChange`. `sidebarWidth`,
+`minSidebarWidth`, and `maxSidebarWidth` constrain the sidebar.
 
 ## TabView and Tab
 
@@ -80,10 +84,11 @@ Use `value="all"` or `value="detailOnly"` to control visibility. macOS can repor
 </TabView>
 ```
 
-`TabView` is controlled by a child `Tab` id. A tab click updates native selection optimistically, then reports the id through `onChange`.
-
-The macOS host currently renders plain tab titles without the provided tab icon or badge. Windows renders native tab items.
+`TabView` is controlled by a child `Tab` id. A tab click updates native
+selection optimistically, then reports the id through `onChange`. Tab titles,
+system images, and badges render on both hosts.
 
 ## Verification note
 
-These seven app-shell kinds are exercised by the macOS kitchen-sink real-window suite. They are compile-checked on Windows but do not yet have equivalent Windows GUI end-to-end coverage.
+These seven app-shell kinds are exercised by the kitchen-sink real-window
+suite on macOS and Windows.

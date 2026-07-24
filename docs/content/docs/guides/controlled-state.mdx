@@ -42,4 +42,7 @@ This behavior also covers controls with no handler. A native edit is visible opt
 
 Input `change` events carry sequence numbers. Request events, such as `Table` sorting, do not. A sort request asks the application to reorder rows and provide a new descriptor; it is not a host-owned value edit.
 
-The sequence protocol applies where a host performs an optimistic native change: text fields, search fields, toggles, sliders, pickers, date pickers, steppers, text editors, list and table selection, tab selection, disclosure state, presentation dismissal, and macOS split visibility. Windows split visibility is React-driven only and does not produce a native `change` event.
+The sequence protocol applies where a host performs an optimistic native
+change: text fields, search fields, toggles, sliders, pickers, date pickers,
+steppers, text editors, list and table selection, tab selection, disclosure
+state, presentation dismissal, and split visibility.

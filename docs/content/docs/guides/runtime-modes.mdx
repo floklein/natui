@@ -1,6 +1,6 @@
 ---
 title: Runtime modes
-description: Choose between the Node development process and embedded JavaScriptCore on macOS.
+description: Choose between the Node development process and an embedded JavaScript runtime.
 ---
 
 ## Node process
@@ -15,9 +15,10 @@ await run(<App />, { title: 'NatUI app' });
 
 This mode provides the simplest development loop and works with the macOS and Windows hosts.
 
-## Embedded JavaScriptCore
+## Embedded JavaScript
 
-The macOS host can evaluate a browser-targeted bundle inside system JavaScriptCore:
+Both hosts can evaluate a browser-targeted bundle in-process. macOS uses
+system JavaScriptCore and Windows uses V8:
 
 ```tsx
 import { VStack, Text } from 'natui/components';
@@ -25,7 +26,7 @@ import { runEmbedded } from 'natui/inproc';
 
 await runEmbedded(
   <VStack padding={20}>
-    <Text>Hello from JavaScriptCore</Text>
+    <Text>Hello from embedded JavaScript</Text>
   </VStack>,
   { title: 'embedded app' },
 );
@@ -40,10 +41,22 @@ pnpm --filter natui-demo build:embedded
 hosts/macos/.build/release/natui-host --bundle examples/demo/dist/embedded.js
 ```
 
+On Windows, build the WinUI host and launch the same bundle:
+
+```powershell
+dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
+pnpm build
+pnpm --filter natui-demo build:embedded
+hosts\windows\NatuiHost\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NatuiHost.exe --bundle examples\demo\dist\embedded.js
+```
+
 Component imports come from `natui/components` so the bundle does not include Node built-ins. `natui/inproc` exchanges the same protocol messages through host-injected functions rather than standard streams.
 
-Embedded mode is implemented and verified on macOS only. A Windows Hermes path is a researched direction, not a shipped capability.
+Embedded mode is implemented and locally verified on both platforms through
+the same lifecycle and bridge contract.
 
 ## Packaging status
 
-NatUI does not yet provide a CLI or application bundler. The current source checkout proves both a Node-driven development mode and a macOS single-process runtime, but application packaging remains future work.
+NatUI does not yet provide a CLI or application bundler. The current source
+checkout proves both a Node-driven development mode and single-process
+runtimes on macOS and Windows, but application packaging remains future work.

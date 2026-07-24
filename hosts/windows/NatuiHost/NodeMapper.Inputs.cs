@@ -6,10 +6,31 @@ using Microsoft.UI.Xaml.Controls;
 namespace NatuiHost;
 
 /// <summary>
-/// Input kinds: SearchField (AutoSuggestBox), DatePicker (CalendarDatePicker,
-/// date part only), Stepper (NumberBox), TextEditor (multiline TextBox), Link
-/// (HyperlinkButton + Launcher), Label (icon + text), and the segmented
-/// (SelectorBar) and radioGroup (RadioButtons) Picker styles.
+/// WinUI has separate date and time controls. This stable pair represents the
+/// protocol's combined dateTime mode while still using native pickers.
+/// </summary>
+internal sealed class NatuiDateTimePicker : Grid
+{
+    public CalendarDatePicker DatePicker { get; } = new();
+    public TimePicker TimePicker { get; } = new() { MinuteIncrement = 1 };
+
+    public NatuiDateTimePicker()
+    {
+        ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        ColumnSpacing = 8;
+        SetColumn(DatePicker, 0);
+        SetColumn(TimePicker, 1);
+        Children.Add(DatePicker);
+        Children.Add(TimePicker);
+    }
+}
+
+/// <summary>
+/// Input kinds: SearchField (AutoSuggestBox), DatePicker (native date, time, or
+/// paired date/time controls), Stepper (NumberBox), TextEditor (multiline
+/// TextBox), Link (HyperlinkButton + Launcher), Label (icon + text), and the
+/// segmented (SelectorBar) and radioGroup (RadioButtons) Picker styles.
 /// </summary>
 internal sealed partial class NodeMapper
 {
@@ -38,63 +59,147 @@ internal sealed partial class NodeMapper
 
     // -- DatePicker ---------------------------------------------------------------
 
-    // Only the date part is supported on Windows: displayedComponents time /
-    // dateTime degrade to date (documented divergence). Fixed-format
-    // invariant parsing keeps unchanged round-trips byte-identical, so the
-    // props-equality guard settles.
-    private static readonly string[] DateFormats = ["yyyy-MM-dd", "yyyy-MM-ddTHH:mm"];
-
-    private CalendarDatePicker BuildDatePicker(NatuiNode node)
+    private FrameworkElement BuildDatePicker(NatuiNode node)
     {
-        var picker = new CalendarDatePicker();
-        picker.DateChanged += (_, _) =>
+        switch (node.Str("displayedComponents"))
         {
-            if (_applyingRemote > 0) return;
-            if (picker.Date is not { } date)
+            case "time":
             {
-                // The protocol has no null DatePicker value from the user
-                // side (macOS parity: SwiftUI's date is non-optional), so a
-                // user clear snaps back to the prop value instead of
-                // desyncing the control from JS.
-                _applyingRemote++;
-                try
-                {
-                    ApplyDatePickerProps(node, picker);
-                }
-                finally
-                {
-                    _applyingRemote--;
-                }
-                return;
+                var picker = new TimePicker { MinuteIncrement = 1 };
+                picker.SelectedTimeChanged += (_, _) => OnDatePickerChanged(node, picker);
+                return picker;
             }
-            var iso = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            if (iso == (node.Str("value") ?? "")) return;
-            node.UserEdit(JsonValue.Create(iso));
-        };
-        return picker;
+            case "dateTime":
+            {
+                var picker = new NatuiDateTimePicker();
+                picker.DatePicker.DateChanged += (_, _) => OnDatePickerChanged(node, picker);
+                picker.TimePicker.SelectedTimeChanged += (_, _) => OnDatePickerChanged(node, picker);
+                return picker;
+            }
+            default:
+            {
+                var picker = new CalendarDatePicker();
+                picker.DateChanged += (_, _) => OnDatePickerChanged(node, picker);
+                return picker;
+            }
+        }
     }
 
-    private void ApplyDatePickerProps(NatuiNode node, CalendarDatePicker picker)
+    private void OnDatePickerChanged(NatuiNode node, FrameworkElement picker)
+    {
+        if (_applyingRemote > 0) return;
+        if (DatePickerValue(picker) is not { } value)
+        {
+            // The wire contract has no user-generated null DatePicker value,
+            // matching SwiftUI's non-optional binding. A cleared native value
+            // therefore snaps back to the controlled prop.
+            _applyingRemote++;
+            try
+            {
+                ApplyDatePickerProps(node, picker);
+            }
+            finally
+            {
+                _applyingRemote--;
+            }
+            return;
+        }
+        if (value == (node.Str("value") ?? "")) return;
+        node.UserEdit(JsonValue.Create(value));
+    }
+
+    private static string? DatePickerValue(FrameworkElement picker) => picker switch
+    {
+        CalendarDatePicker date when date.Date is { } value =>
+            value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        TimePicker time when time.SelectedTime is { } value =>
+            string.Create(
+                CultureInfo.InvariantCulture, $"{value.Hours:00}:{value.Minutes:00}"),
+        NatuiDateTimePicker pair
+            when pair.DatePicker.Date is { } date && pair.TimePicker.SelectedTime is { } time =>
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{date:yyyy-MM-dd}T{time.Hours:00}:{time.Minutes:00}"),
+        _ => null,
+    };
+
+    private static void ApplyDatePickerProps(NatuiNode node, FrameworkElement picker)
     {
         var value = node.Str("value");
+        switch (picker)
+        {
+            case CalendarDatePicker date:
+                ApplyDateValue(value, date);
+                date.IsEnabled = !node.Flag("disabled");
+                break;
+            case TimePicker time:
+                ApplyTimeValue(value, time);
+                time.IsEnabled = !node.Flag("disabled");
+                break;
+            case NatuiDateTimePicker pair:
+                ApplyDateTimeValue(value, pair);
+                pair.DatePicker.IsEnabled = !node.Flag("disabled");
+                pair.TimePicker.IsEnabled = !node.Flag("disabled");
+                break;
+        }
+    }
+
+    private static void ApplyDateValue(string? value, CalendarDatePicker picker)
+    {
         if (value is null)
         {
             picker.Date = null;
             return;
         }
         if (!DateTime.TryParseExact(
-                value, DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None,
+                value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None,
                 out var parsed))
         {
-            return; // unparseable: keep the current native state
+            return;
         }
-        // Compare as ISO before writing so an echo of our own change event
-        // does not reset an equal date (and re-fire DateChanged).
-        var current = picker.Date is { } date
-            ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-            : null;
         var incoming = parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        if (current != incoming) picker.Date = new DateTimeOffset(parsed);
+        if (DatePickerValue(picker) != incoming) picker.Date = new DateTimeOffset(parsed);
+    }
+
+    private static void ApplyTimeValue(string? value, TimePicker picker)
+    {
+        if (value is null)
+        {
+            picker.SelectedTime = null;
+            return;
+        }
+        if (!DateTime.TryParseExact(
+                value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None,
+                out var parsed))
+        {
+            return;
+        }
+        var incoming = new TimeSpan(parsed.Hour, parsed.Minute, 0);
+        if (picker.SelectedTime != incoming) picker.SelectedTime = incoming;
+    }
+
+    private static void ApplyDateTimeValue(string? value, NatuiDateTimePicker picker)
+    {
+        if (value is null)
+        {
+            picker.DatePicker.Date = null;
+            picker.TimePicker.SelectedTime = null;
+            return;
+        }
+        if (!DateTime.TryParseExact(
+                value, "yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var parsed))
+        {
+            return;
+        }
+        var date = parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        if (picker.DatePicker.Date is not { } current
+            || current.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) != date)
+        {
+            picker.DatePicker.Date = new DateTimeOffset(parsed.Date);
+        }
+        var time = new TimeSpan(parsed.Hour, parsed.Minute, 0);
+        if (picker.TimePicker.SelectedTime != time) picker.TimePicker.SelectedTime = time;
     }
 
     // -- Stepper ------------------------------------------------------------------

@@ -32,7 +32,8 @@ Arranges children horizontally. `alignment` accepts `top`, `center`, or `bottom`
 
 ## ZStack
 
-Overlays children in the same native layout region. On Windows it maps to a `Grid`. A `Spacer` inside a Windows `ZStack` has no track to fill and collapses.
+Overlays children in the same native layout region. On Windows it maps to a
+grid that propagates flexible-space proposals through nested stacks.
 
 <auto-type-table path="../../../../packages/natui/src/components.ts" name="ZStackProps" />
 
@@ -98,4 +99,5 @@ Renders native list rows and optionally controls selection through child `tag` p
 
 The presence of `value`, including `value={null}`, makes the list selectable. Use `selectionMode="multiple"` with a string array. The `sidebar` style uses platform source-list treatment where available.
 
-On Windows, rows nested inside `Section` are not individually selectable and list row badges are not rendered.
+Direct rows and rows nested inside `Section` participate in controlled
+selection and render their `badge` values on both hosts.

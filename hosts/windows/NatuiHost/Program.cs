@@ -48,6 +48,7 @@ public static class Program
 
 public sealed class App : Application, IXamlMetadataProvider
 {
+    private EmbeddedJsHost? _embeddedHost;
     private Window? _window;
     private Router? _router;
     private bool _quitting;
@@ -86,14 +87,14 @@ public sealed class App : Application, IXamlMetadataProvider
         DispatcherShutdownMode = DispatcherShutdownMode.OnExplicitShutdown;
 
         // Root container (node id 0): a vertical stack in a ScrollViewer.
-        // Horizontally stretched so children see the window width, the way
-        // SwiftUI proposes the full width down the tree; vertically top-hung.
+        // Stretch into the content row so greedy descendants receive the full
+        // window proposal. Auto rows still keep ordinary content top-hung.
         // Leading cross-alignment mirrors the macOS host's RootView
         // (VStack(alignment: .leading, spacing: 0)).
         var rootStack = new NatuiStack
         {
             Orientation = Orientation.Vertical,
-            VerticalAlignment = VerticalAlignment.Top,
+            VerticalAlignment = VerticalAlignment.Stretch,
             CrossAlignment = "leading",
         };
         // Window chrome row (MenuBar above CommandBar) and the Sheet overlay
@@ -137,8 +138,9 @@ public sealed class App : Application, IXamlMetadataProvider
         };
 
         _router = new Router(this, _window, store);
+        var bundlePath = EmbeddedBundlePath();
 
-        if (!Console.IsInputRedirected)
+        if (bundlePath is null && !Console.IsInputRedirected)
         {
             // Double-clicked, no protocol channel: show a hint instead of
             // sitting invisible or exiting silently.
@@ -152,18 +154,57 @@ public sealed class App : Application, IXamlMetadataProvider
             return;
         }
 
-        StartStdinReader(_window.DispatcherQueue);
+        if (Console.IsInputRedirected)
+        {
+            StartStdinReader(
+                _window.DispatcherQueue,
+                terminateOnEof: bundlePath is null);
+        }
+        if (bundlePath is not null)
+        {
+            _embeddedHost = new EmbeddedJsHost(_window.DispatcherQueue, _router);
+            if (!_embeddedHost.Start(bundlePath))
+            {
+                Quit();
+                return;
+            }
+        }
         // Only now can messages be processed; JS waits for this.
         Ipc.Ready();
     }
 
     internal void Quit()
     {
+        if (_quitting) return;
         _quitting = true;
+        var embeddedHost = _embeddedHost;
+        _embeddedHost = null;
+        // A bundle can send quit from inside a V8 callback. Dispose on the
+        // next dispatcher turn so ClearScript is never torn down while one of
+        // its own host calls is still on the stack.
+        if (embeddedHost is not null && _window?.DispatcherQueue is { } dispatcher)
+        {
+            if (dispatcher.TryEnqueue(() =>
+                {
+                    embeddedHost.Dispose();
+                    Exit();
+                }))
+            {
+                return;
+            }
+            embeddedHost.Dispose();
+        }
         Exit();
     }
 
-    private void StartStdinReader(DispatcherQueue dispatcher)
+    private static string? EmbeddedBundlePath()
+    {
+        var args = Environment.GetCommandLineArgs();
+        var index = Array.IndexOf(args, "--bundle");
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+    }
+
+    private void StartStdinReader(DispatcherQueue dispatcher, bool terminateOnEof)
     {
         // Blocking NDJSON reader on a dedicated thread. One protocol message
         // becomes exactly one dispatcher hop, so a whole commit batch is
@@ -198,8 +239,15 @@ public sealed class App : Application, IXamlMetadataProvider
             {
                 Ipc.Log($"stdin reader: {ex.Message}");
             }
-            // EOF: the JS process died or closed the pipe. Exit cleanly.
-            dispatcher.TryEnqueue(Quit);
+            if (terminateOnEof)
+            {
+                // Sidecar mode: stdin is the parent-process lifeline.
+                dispatcher.TryEnqueue(Quit);
+            }
+            else
+            {
+                Ipc.Log("stdin closed; embedded app keeps running without the debug channel");
+            }
         })
         {
             IsBackground = true,

@@ -20,7 +20,8 @@ All presentation state is controlled by React. Native dismissal reports `false` 
 
 Children materialize even while the sheet is closed. Gate expensive content with `{open && <Content />}` when necessary.
 
-On macOS a sheet uses native sheet presentation. Windows renders an in-tree scrim and card, so it appears in host-rendered screenshots.
+Both hosts use native popup presentation for sheets. Popup content is outside
+the host-rendered window screenshot surface.
 
 ## Alert
 
@@ -42,7 +43,9 @@ Alerts are data-driven rather than child-based:
 />
 ```
 
-Button selection fires before the dismissal change. Windows supports at most one cancel button and two other buttons, drops additional buttons with a warning, and does not render destructive styling.
+Button selection fires before the dismissal change. All button specs are
+preserved. A cancel-role button handles the platform cancel action, and
+destructive actions receive critical styling.
 
 ## Popover and PopoverContent
 
@@ -61,4 +64,5 @@ Ordinary `Popover` children form the anchor. A single `PopoverContent` child for
 </Popover>
 ```
 
-Open alerts, popovers, and menus use popup layers on Windows and are not included in `RenderTargetBitmap` screenshots.
+Open sheets, alerts, popovers, and menus use popup layers on Windows and are
+not included in `RenderTargetBitmap` screenshots.

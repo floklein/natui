@@ -11,6 +11,12 @@ internal static class Ipc
 {
     private static readonly object Gate = new();
 
+    /// <summary>
+    /// Optional in-process delivery path. Embedded mode keeps stdout as a
+    /// debug channel and mirrors every outbound message into the JS engine.
+    /// </summary>
+    public static Action<string>? JsSink { get; set; }
+
     // UTF-8 without BOM: a BOM would corrupt the first NDJSON line on the JS
     // side. AutoFlush because .NET buffers redirected (pipe) stdout otherwise
     // and the JS renderer would never see the handshake. "\n" line endings
@@ -36,9 +42,10 @@ internal static class Ipc
         catch (Exception ex)
         {
             // Broken pipe: the JS process is gone. The stdin reader will see
-            // EOF and exit the app; just note it.
+            // EOF and exit a sidecar app; embedded delivery can continue.
             Log($"stdout write failed: {ex.Message}");
         }
+        JsSink?.Invoke(line);
     }
 
     public static void Ready() => Send(new JsonObject

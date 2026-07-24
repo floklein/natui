@@ -159,15 +159,21 @@ platform notes.
 The default development mode runs React in Node.js and communicates with the
 native host over standard input and output.
 
-On macOS, the host can also evaluate a bundled React application in-process
-with JavaScriptCore. The shipped application is then one native process with
-no Node.js runtime:
+Both hosts can also evaluate a bundled React application in-process. macOS
+uses JavaScriptCore and Windows uses V8. The application is then one native
+process with no Node.js runtime:
 
 ```bash
 pnpm build
 cd examples/demo
 pnpm build:embedded
+# macOS
 ../../hosts/macos/.build/release/natui-host --bundle dist/embedded.js
+```
+
+```powershell
+# Windows
+..\..\hosts\windows\NatuiHost\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NatuiHost.exe --bundle dist\embedded.js
 ```
 
 Read the [runtime modes guide](docs/content/docs/guides/runtime-modes.mdx) for
@@ -184,7 +190,7 @@ shell and most component kinds.
 | `pnpm demo` | Build the package and open the base native demo |
 | `pnpm verify` | Drive the base demo through native tree dumps, edits, and screenshots |
 | `pnpm verify:kitchen` | Verify app-shell and multi-component workflows |
-| `pnpm verify:embedded` | Verify the macOS JavaScriptCore runtime |
+| `pnpm verify:embedded` | Verify the platform's in-process JavaScript runtime |
 | `pnpm test` | Run renderer, bridge, protocol, and component contract tests |
 | `pnpm typecheck` | Typecheck all workspace projects |
 | `pnpm build` | Build the public `natui` package |
@@ -201,13 +207,14 @@ exact coverage and evidence limits.
 |---|---|---|
 | Native toolkit | SwiftUI | WinUI 3 |
 | Base demo | Real-window verified | Real-window verified |
-| Kitchen-sink app shell | Real-window verified | Compile-checked |
+| Kitchen-sink app shell | Real-window verified | Real-window verified |
 | Host build in CI | Yes | Yes |
-| Embedded JavaScript runtime | JavaScriptCore, verified | Not implemented |
+| Embedded JavaScript runtime | JavaScriptCore, verified | V8, verified |
 
-Embedded mode is currently macOS-only. The Windows app-shell component set is
-implemented and compiled in CI, but has not yet received the same real-window
-coverage as macOS.
+Both embedded runtimes use the same `natui/inproc` entry point and `--bundle`
+host argument. Both hosts implement all 37 public components. Component docs
+define the shared contract and call out platform-native conventions. GUI suites
+remain local because CI has no normal window session.
 
 ## Package entry points
 
