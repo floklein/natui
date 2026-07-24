@@ -64,7 +64,7 @@ body {
 .pipeline-section,
 .closing-section,
 .home-footer {
-  width: min(1180px, calc(100% - 40px));
+  width: min(1180px, calc(100% - 80px));
   margin-inline: auto;
 }
 
@@ -236,22 +236,25 @@ body {
 }
 
 .hero-showcase {
+  isolation: isolate;
   position: relative;
-  min-height: 610px;
+  min-height: 620px;
 }
 
 .code-card {
   position: absolute;
-  z-index: 2;
-  top: 0;
-  left: 0;
-  width: min(500px, 88%);
+  z-index: 3;
+  bottom: clamp(82px, calc(12vw - 44px), 110px);
+  left: 50%;
+  width: min(440px, 74%);
   overflow: hidden;
   border: 1px solid #343438;
   border-radius: 15px;
   background: var(--natui-code);
   color: #f4f4f5;
   box-shadow: 0 28px 70px rgb(0 0 0 / 25%);
+  transform: translateX(-50%) rotate(-0.5deg);
+  transform-origin: 50% 100%;
 }
 
 .code-card-top {
@@ -283,15 +286,30 @@ body {
 
 .native-card {
   position: absolute;
-  right: -10px;
-  bottom: 0;
-  width: min(320px, 64%);
+  z-index: 1;
+  bottom: clamp(82px, calc(12vw - 44px), 110px);
+  width: min(270px, 45%);
   overflow: hidden;
   border: 1px solid #454548;
   border-radius: 12px;
   background: #050505;
   box-shadow: 0 30px 80px rgb(0 0 0 / 28%);
-  transform: rotate(1deg);
+}
+
+.native-card-macos {
+  left: 10%;
+  transform: rotate(-7deg);
+  transform-origin: 100% 100%;
+}
+
+.native-card-macos .native-card-label {
+  flex-direction: row-reverse;
+}
+
+.native-card-windows {
+  right: 10%;
+  transform: rotate(7deg);
+  transform-origin: 0 100%;
 }
 
 .native-card img {
@@ -314,16 +332,12 @@ body {
 }
 
 .component-rail {
-  display: flex;
-  align-items: center;
-  gap: 28px;
   padding-block: 20px;
   border-top: 1px solid var(--natui-line);
   border-bottom: 1px solid var(--natui-line);
 }
 
 .component-count {
-  flex: none;
   color: var(--natui-ink);
   font-size: 12px;
   font-weight: 780;
@@ -331,8 +345,9 @@ body {
 
 .component-list {
   display: flex;
+  width: 100%;
   min-width: 0;
-  flex: 1;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
   overflow: auto;
@@ -623,8 +638,9 @@ body {
     margin-inline: auto;
   }
 
+  .code-card,
   .native-card {
-    right: 0;
+    bottom: 32px;
   }
 
   .capability-grid {
@@ -666,11 +682,12 @@ body {
   }
 
   .hero-showcase {
-    min-height: 590px;
+    min-height: 650px;
   }
 
   .code-card {
-    width: 100%;
+    bottom: 140px;
+    width: 88%;
   }
 
   .code-card pre {
@@ -678,17 +695,19 @@ body {
   }
 
   .native-card {
-    width: min(300px, 72%);
+    bottom: 14px;
+    width: min(220px, 58%);
   }
 
-  .component-rail {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 14px;
+  .native-card-macos {
+    transform: rotate(-7deg);
+  }
+
+  .native-card-windows {
+    transform: rotate(7deg);
   }
 
   .component-list {
-    width: 100%;
     justify-content: flex-start;
     padding-bottom: 3px;
   }
