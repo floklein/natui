@@ -105,6 +105,9 @@ final class Store {
                 Emitter.log("unknown op: \(op.op)")
             }
         }
+        // Window chrome (MenuBar/Toolbar) diffs against the fresh root state
+        // once per commit, after all ops applied (atomic like the UI pass).
+        ChromeSync.shared.sync(rootChildren: rootChildren)
     }
 
     private func withChildren(of parentId: Int, _ body: (inout [Node]) -> Void) {

@@ -42,8 +42,12 @@ internal sealed class NatuiStack : Grid
     // Kinds that expand to fill an axis in SwiftUI without an explicit frame.
     // Internal: NodeMapper.SyncInnerAlignment shares them.
     internal static readonly HashSet<string> GreedyHorizontalKinds =
-        ["TextField", "Slider", "ProgressView", "List", "ScrollView"];
-    internal static readonly HashSet<string> GreedyVerticalKinds = ["List", "ScrollView"];
+    [
+        "TextField", "Slider", "ProgressView", "List", "ScrollView",
+        "SplitView", "TabView", "Table", "SearchField", "TextEditor",
+    ];
+    internal static readonly HashSet<string> GreedyVerticalKinds =
+        ["List", "ScrollView", "SplitView", "TabView", "Table", "TextEditor"];
 
     public void RebuildLayout()
     {
@@ -168,11 +172,27 @@ internal sealed class NatuiStack : Grid
 
 /// <summary>
 /// Builds WinUI elements for nodes, applies props, refreshes labels, and wires
-/// user events back to the protocol channel. UI thread only.
+/// user events back to the protocol channel. UI thread only. The app-shell
+/// kinds live in the NodeMapper.*.cs partials (Menus, Overlays, Structure,
+/// Inputs).
 /// </summary>
-internal sealed class NodeMapper(NatuiStack rootStack)
+internal sealed partial class NodeMapper(
+    NatuiStack rootStack, StackPanel chromePanel, Grid overlayLayer)
 {
     public NatuiStack RootStack { get; } = rootStack;
+
+    /// <summary>Chrome row above the root content: MenuBar, then CommandBar.</summary>
+    public StackPanel ChromePanel { get; } = chromePanel;
+
+    /// <summary>Full-window layer the Sheet overlay (scrim + card) mounts into.</summary>
+    public Grid OverlayLayer { get; } = overlayLayer;
+
+    /// <summary>
+    /// Content surfaces for kinds whose children mount somewhere other than
+    /// their Inner element (Sheet card, Section body, Expander content,
+    /// Popover anchor is Inner itself). Cleaned up in WillDestroy.
+    /// </summary>
+    private readonly Dictionary<int, NatuiStack> _contentSurface = [];
 
     /// <summary>
     /// Depth counter, positive while remote ops mutate controls. WinUI raises
@@ -183,10 +203,15 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     /// </summary>
     private int _applyingRemote;
 
-    private static readonly HashSet<string> LabelKinds = ["Text", "Button", "Toggle"];
+    private static readonly HashSet<string> LabelKinds =
+        ["Text", "Button", "Toggle", "Link", "Label"];
 
     private static readonly HashSet<string> ContainerKinds =
-        ["VStack", "HStack", "ZStack", "ScrollView", "List"];
+    [
+        "VStack", "HStack", "ZStack", "ScrollView", "List",
+        "SplitView", "TabView", "Tab", "Sheet", "Popover", "ContextMenu",
+        "Section", "DisclosureGroup", "Sidebar", "Detail", "PopoverContent",
+    ];
 
     /// <summary>
     /// #text nodes are consumed by their parent's label in label kinds; in
@@ -234,7 +259,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         "Slider" => BuildSlider(node),
         "Picker" => BuildPicker(node),
         "ScrollView" => BuildScrollView(node),
-        "List" => BuildList(),
+        "List" => BuildList(node),
         "Image" => new FontIcon { FontFamily = IconFontFamily() },
         "Spacer" => new Border(),
         "Divider" => new Border
@@ -244,6 +269,26 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         // ProgressView swaps between ProgressBar and ProgressRing depending on
         // whether "value" is present; the Grid shell keeps that swap local.
         "ProgressView" => new Grid(),
+        // App-shell kinds (NodeMapper.*.cs partials).
+        "MenuBar" => BuildMenuBar(node),
+        "Toolbar" => BuildToolbar(node),
+        "Menu" => BuildMenu(node),
+        "ContextMenu" => BuildContextMenu(node),
+        "SplitView" => BuildSplitView(node),
+        "Sidebar" or "Detail" or "PopoverContent" or "Tab" => BuildSlotStack(),
+        "TabView" => BuildTabView(node),
+        "Sheet" => BuildSheet(node),
+        "Alert" => BuildAlert(node),
+        "Popover" => BuildPopover(node),
+        "Section" => BuildSection(node),
+        "Table" => BuildTable(node),
+        "DisclosureGroup" => BuildDisclosureGroup(node),
+        "SearchField" => BuildSearchField(node),
+        "DatePicker" => BuildDatePicker(node),
+        "Stepper" => BuildStepper(node),
+        "TextEditor" => BuildTextEditor(node),
+        "Link" => BuildLink(node),
+        "Label" => BuildLabel(node),
         _ => new TextBlock
         {
             Text = $"unknown kind: {node.Kind}",
@@ -303,8 +348,17 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     private static void EmitSubmit(NatuiNode node) =>
         Ipc.Event(node.Id, "submit", new JsonObject { ["value"] = node.Str("value") ?? "" });
 
-    private CheckBox BuildToggle(NatuiNode node)
+    private FrameworkElement BuildToggle(NatuiNode node)
     {
+        // The style is fixed at creation (like TextField's secure flag):
+        // flipping it later would need an element swap.
+        if (node.Str("style") == "switch")
+        {
+            // Empty On/Off content: the label rides Header (see RefreshLabel).
+            var toggle = new ToggleSwitch { OnContent = "", OffContent = "" };
+            toggle.Toggled += (_, _) => OnToggle(node, toggle.IsOn);
+            return toggle;
+        }
         // CheckBox is the closest native analogue of SwiftUI's macOS checkbox
         // Toggle (label on the trailing side, compact).
         var box = new CheckBox { MinWidth = 0 };
@@ -332,7 +386,15 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         return slider;
     }
 
-    private ComboBox BuildPicker(NatuiNode node)
+    private FrameworkElement BuildPicker(NatuiNode node) => node.Str("style") switch
+    {
+        // Style is fixed at creation, like Toggle's.
+        "segmented" => BuildSegmentedPicker(node),
+        "radioGroup" => BuildRadioPicker(node),
+        _ => BuildComboPicker(node),
+    };
+
+    private ComboBox BuildComboPicker(NatuiNode node)
     {
         var combo = new ComboBox();
         combo.SelectionChanged += (_, _) =>
@@ -383,7 +445,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         viewer.VerticalScrollMode = horizontal ? ScrollMode.Disabled : ScrollMode.Enabled;
     }
 
-    private static ListView BuildList()
+    private ListView BuildList(NatuiNode node)
     {
         var list = new ListView { SelectionMode = ListViewSelectionMode.None };
         // Rows must span the full list width or Spacer children collapse
@@ -392,6 +454,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         itemStyle.Setters.Add(new Setter(
             Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
         list.ItemContainerStyle = itemStyle;
+        list.SelectionChanged += (_, _) => OnListSelection(node, list);
         return list;
     }
 
@@ -421,6 +484,9 @@ internal sealed class NodeMapper(NatuiStack rootStack)
             return;
         }
         if (!IsAttachable(parentId, parent, child)) return;
+        // Slot-routed parents (SplitView/TabView/Popover) place children by
+        // KIND, not index; see NodeMapper.Structure.cs / Overlays.cs.
+        if (parent is not null && AttachToSlottedParent(parent, child)) return;
         var element = EnsureElement(child);
         switch (ParentSurface(parentId, parent))
         {
@@ -451,6 +517,7 @@ internal sealed class NodeMapper(NatuiStack rootStack)
             RefreshLabel(parent);
             return;
         }
+        if (parent is not null && DetachFromSlottedParent(parent, child)) return;
         if (child.Element is not { } element) return;
         switch (ParentSurface(parentId, parent))
         {
@@ -473,6 +540,11 @@ internal sealed class NodeMapper(NatuiStack rootStack)
     private object? ParentSurface(int parentId, NatuiNode? parent)
     {
         if (parentId == NodeStore.RootId) return RootStack;
+        if (parent is not null && _contentSurface.TryGetValue(parent.Id, out var surface))
+        {
+            // Sheet card, Section body, DisclosureGroup (Expander) content.
+            return surface;
+        }
         return parent?.Inner switch
         {
             NatuiStack stack => stack,
@@ -508,12 +580,19 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         _applyingRemote++;
         try
         {
+            // node.Label first: covers Text-in-Border AND the Label kind
+            // (whose Inner is a NatuiStack around icon + TextBlock).
+            if (node.Label is { } label)
+            {
+                label.Text = node.JoinedText();
+                return;
+            }
             switch (node.Inner)
             {
-                case Border when node.Label is { } label:
-                    label.Text = node.JoinedText();
+                case ToggleSwitch toggle: // Toggle style="switch"
+                    toggle.Header = node.JoinedText();
                     break;
-                case ContentControl control: // Button, CheckBox
+                case ContentControl control: // Button, CheckBox, HyperlinkButton, DropDownButton
                     RefreshContent(control, node);
                     break;
             }
@@ -603,7 +682,15 @@ internal sealed class NodeMapper(NatuiStack rootStack)
                 }
                 break;
             case "Toggle":
-                ((CheckBox)element).IsChecked = Json.Bool(node.Props, "value") ?? false;
+                switch (element)
+                {
+                    case ToggleSwitch toggle:
+                        toggle.IsOn = Json.Bool(node.Props, "value") ?? false;
+                        break;
+                    case CheckBox box:
+                        box.IsChecked = Json.Bool(node.Props, "value") ?? false;
+                        break;
+                }
                 break;
             case "Slider":
             {
@@ -621,7 +708,10 @@ internal sealed class NodeMapper(NatuiStack rootStack)
                 break;
             }
             case "Picker":
-                ApplyPickerProps(node, (ComboBox)element);
+                ApplyPickerProps(node, element);
+                break;
+            case "List":
+                ApplyListProps(node, (ListView)element);
                 break;
             case "ScrollView":
                 ConfigureScrollAxis((ScrollViewer)element, node);
@@ -635,6 +725,64 @@ internal sealed class NodeMapper(NatuiStack rootStack)
             }
             case "ProgressView":
                 ApplyProgressProps(node, (Grid)element);
+                break;
+            // App-shell kinds (NodeMapper.*.cs partials).
+            case "MenuBar":
+                ApplyMenuBarProps(node);
+                break;
+            case "Toolbar":
+                ApplyToolbarProps(node);
+                break;
+            case "Menu":
+                ApplyMenuProps(node, (DropDownButton)element);
+                break;
+            case "ContextMenu":
+                ApplyContextMenuProps(node, element);
+                break;
+            case "SplitView":
+                ApplySplitViewProps(node, (SplitView)element);
+                break;
+            case "TabView":
+                ApplyTabViewProps(node, (TabView)element);
+                break;
+            case "Tab":
+                ApplyTabProps(node);
+                break;
+            case "Sheet":
+                ApplySheetProps(node);
+                break;
+            case "Alert":
+                ApplyAlertProps(node);
+                break;
+            case "Popover":
+                ApplyPopoverProps(node);
+                break;
+            case "Section":
+                ApplySectionProps(node);
+                break;
+            case "Table":
+                ApplyTableProps(node);
+                break;
+            case "DisclosureGroup":
+                ApplyDisclosureGroupProps(node, (Expander)element);
+                break;
+            case "SearchField":
+                ApplySearchFieldProps(node, (AutoSuggestBox)element);
+                break;
+            case "DatePicker":
+                ApplyDatePickerProps(node, (CalendarDatePicker)element);
+                break;
+            case "Stepper":
+                ApplyStepperProps(node, (NumberBox)element);
+                break;
+            case "TextEditor":
+                ApplyTextEditorProps(node, (TextBox)element);
+                break;
+            case "Link":
+                // Label content refreshes via RefreshLabel; nothing kind-specific.
+                break;
+            case "Label":
+                ApplyLabelProps(node);
                 break;
         }
     }
@@ -706,7 +854,24 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         }
     }
 
-    private static void ApplyPickerProps(NatuiNode node, ComboBox combo)
+    private void ApplyPickerProps(NatuiNode node, FrameworkElement element)
+    {
+        switch (element)
+        {
+            case ComboBox combo:
+                ApplyComboPickerProps(node, combo);
+                break;
+            case RadioButtons radios:
+                ApplyRadioPickerProps(node, radios);
+                break;
+            default:
+                // SelectorBar (segmented), isolated in NodeMapper.Inputs.cs.
+                ApplySegmentedPickerProps(node, element);
+                break;
+        }
+    }
+
+    private static void ApplyComboPickerProps(NatuiNode node, ComboBox combo)
     {
         combo.Header = node.Str("label");
         // Rebuilding fires SelectionChanged; the _applyingRemote guard active
@@ -753,6 +918,43 @@ internal sealed class NodeMapper(NatuiStack rootStack)
             }
             ring.IsActive = true;
         }
+    }
+
+    // -- teardown ----------------------------------------------------------------
+
+    /// <summary>
+    /// Called by NodeStore right before a node is destroyed: tears down
+    /// Hosted objects that live outside the visual tree (an open dialog in a
+    /// removed subtree would otherwise stay visible forever).
+    /// </summary>
+    public void WillDestroy(NatuiNode node)
+    {
+        switch (node.Kind)
+        {
+            case "MenuBar" or "Toolbar":
+                if (node.Hosted is UIElement chrome) ChromePanel.Children.Remove(chrome);
+                break;
+            case "Sheet":
+                if (node.Hosted is UIElement overlay) OverlayLayer.Children.Remove(overlay);
+                break;
+            case "Alert":
+                if (node.Hosted is ContentDialog dialog)
+                {
+                    _alertClosingRemote.Add(node.Id);
+                    dialog.Hide();
+                }
+                break;
+            case "Popover":
+                if (node.Hosted is Microsoft.UI.Xaml.Controls.Flyout flyout)
+                {
+                    _popoverClosingRemote.Add(node.Id);
+                    flyout.Hide();
+                }
+                break;
+        }
+        node.Hosted = null;
+        _contentSurface.Remove(node.Id);
+        _tableParts.Remove(node.Id);
     }
 
     // -- common props ----------------------------------------------------------------
@@ -1004,6 +1206,31 @@ internal sealed class NodeMapper(NatuiStack rootStack)
         ["magnifyingglass"] = "\uE721",
         ["star"] = "\uE734",
         ["heart"] = "\uEB51",
+        // App-shell set (kitchen-sink + common chrome), strings only.
+        ["chevron.left"] = "\uE76B",
+        ["chevron.right"] = "\uE76C",
+        ["chevron.up"] = "\uE70E",
+        ["chevron.down"] = "\uE70D",
+        ["sidebar.left"] = "\uE89F", // DockLeft
+        ["calendar"] = "\uE787",
+        ["folder"] = "\uE8B7",
+        ["archivebox"] = "\uE7B8", // Package
+        ["info.circle"] = "\uE946",
+        ["pencil"] = "\uE70F",
+        ["square.and.arrow.up"] = "\uE72D", // Share
+        ["arrow.clockwise"] = "\uE72C", // Refresh
+        ["list.bullet"] = "\uE8FD",
+        ["person"] = "\uE77B",
+        ["bell"] = "\uEA8F",
+        ["paperplane"] = "\uE724", // Send
+        ["wrench.and.screwdriver"] = "\uE90F", // Repair
+        ["plus.square.on.square"] = "\uE8C8", // Copy
+        ["doc.on.doc"] = "\uE8C8",
+        ["ellipsis"] = "\uE712",
+        ["link"] = "\uE71B",
+        ["clock"] = "\uE823",
+        ["flag"] = "\uE7C1",
+        ["tag"] = "\uE8EC",
     };
 
     private static string GlyphFor(string? systemName) =>

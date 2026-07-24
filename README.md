@@ -86,12 +86,23 @@ pnpm verify   # same E2E suite as macOS, against the real WinUI 3 window
 
 ## Components (POC set)
 
-`VStack` `HStack` `ZStack` `Spacer` `Divider` `ScrollView` `List` `Text` `Image`
-`ProgressView` `Button` `TextField` `Toggle` `Slider` `Picker`, typed props,
-shared across platforms (see [docs/protocol.md](docs/protocol.md) for the mapping
-table). Common props include accessibility basics (`accessibilityLabel`,
-`accessibilityHint`, `accessibilityIdentifier`), mapped to the platform's AX
-attributes.
+Layout and content: `VStack` `HStack` `ZStack` `Spacer` `Divider` `ScrollView`
+`List` `Section` `Text` `Label` `Image` `ProgressView` `Link`.
+Inputs: `Button` `TextField` `TextEditor` `SearchField` `Toggle` `Slider`
+`Stepper` `Picker` `DatePicker` `DisclosureGroup`.
+App shell and navigation: `SplitView` (`Sidebar`/`Detail`) `TabView`/`Tab`
+`MenuBar` `Toolbar` `Menu` `ContextMenu` `Table` (sortable, selectable).
+Presentation: `Sheet` `Alert` `Popover` (`PopoverContent`).
+
+All typed props, shared across platforms (see
+[docs/protocol.md](docs/protocol.md) for the full mapping and event tables).
+Common props include selection tags, badges, and accessibility basics
+(`accessibilityLabel`, `accessibilityHint`, `accessibilityIdentifier`), mapped
+to the platform's AX attributes.
+
+The kitchen-sink example (`examples/kitchen-sink`, a small project/task
+manager) exercises every kind; `pnpm verify:kitchen` drives it end to end
+against the real native window (screenshots in `screenshots/kitchen-sink/`).
 
 ## Single-process mode (no Node at runtime)
 
@@ -115,17 +126,20 @@ pnpm verify:embedded
 ## Status
 
 Experimental proof of concept. What the automated checks demonstrate today, on
-macOS: 34 contract/unit tests cover the reconciler-host op semantics (keyed
+macOS: 77 contract/unit tests cover the reconciler-host op semantics (keyed
 moves, seq/ack echo suppression, controlled-value enforcement for every input
-kind including Slider, prop validation, startup handshake, screenshot
-failure/timeout handling), and two end-to-end suites drive the real SwiftUI
-window, one in Node dev mode and one in embedded-JSC single-process mode, both
-asserting against native tree dumps and validating the PNGs they capture; the
-embedded suite additionally pins the native seq/ack contract deterministically
-by injecting stale and current acks over the wire. On Windows, the contract
-tests and the Node-mode E2E suite pass against the real WinUI 3 window
-(screenshots in `screenshots/windows/`); embedded single-process mode remains
-macOS-only for now. See
+kind including Slider, prop validation, menu/toolbar item trees, presentation
+and selection semantics, startup handshake, screenshot failure/timeout
+handling), and three end-to-end suites drive the real SwiftUI window: the demo
+in Node dev mode, the kitchen-sink app (`pnpm verify:kitchen`, every component
+kind), and the demo in embedded-JSC single-process mode, all asserting against
+native tree dumps and validating the PNGs they capture; the embedded suite
+additionally pins the native seq/ack contract deterministically by injecting
+stale and current acks over the wire. On Windows, the contract tests and the
+Node-mode E2E suite pass against the real WinUI 3 window (screenshots in
+`screenshots/windows/`); the app-shell kinds are compile-checked by CI and not
+yet E2E-verified there, and embedded single-process mode remains macOS-only
+for now. See
 [docs/architecture.md](docs/architecture.md) for the staged packaging path
 (bun sidecar, then in-process JavaScriptCore / Hermes).
 

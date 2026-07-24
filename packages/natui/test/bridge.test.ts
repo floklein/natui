@@ -95,6 +95,55 @@ test('enforcement keeps a Suspense-hidden control hidden', () => {
   assert.equal(op.ack, 1, 'corrective carries the event seq as ack');
 });
 
+test('enforcement applies to change events only: sortChange with seq must not flush a corrective', () => {
+  const transport = new FakeTransport();
+  const bridge = new Bridge(transport);
+  // A Table whose committed selection differs from the event payload value.
+  const target = {
+    id: 9,
+    kind: 'Table',
+    handlers: {},
+    props: { value: null },
+    created: true,
+  };
+  bridge.register(target);
+  // Only change events may carry seq (docs/protocol.md); a host bug that
+  // attaches one to a request-semantics event (sortChange) must not trick
+  // the bridge into "correcting" the value prop with a sort descriptor.
+  transport.emit({
+    t: 'event',
+    id: 9,
+    name: 'sortChange',
+    payload: { value: { key: 'qty', order: 'desc' } },
+    seq: 1,
+  });
+  assert.equal(transport.sent.length, 0, 'no corrective commit for a non-change event');
+});
+
+test('enforcement corrects boolean values: a refused dismissal snaps back to presented', () => {
+  const transport = new FakeTransport();
+  const bridge = new Bridge(transport);
+  // A presented Sheet with no change handler: host-side dismissal arrives as
+  // an optimistic change {value:false}; the corrective must re-assert true.
+  const target = {
+    id: 4,
+    kind: 'Sheet',
+    handlers: {},
+    props: { value: true },
+    created: true,
+  };
+  bridge.register(target);
+  transport.emit({ t: 'event', id: 4, name: 'change', payload: { value: false }, seq: 1 });
+  const commit = transport.sent.at(-1) as {
+    t: 'commit';
+    ops: Array<{ op: string; props?: Record<string, unknown>; ack?: number }>;
+  };
+  assert.ok(commit && commit.t === 'commit', 'corrective update was flushed');
+  const op = commit.ops.at(-1)!;
+  assert.equal(op.props!.value, true, 'corrective re-presents the sheet');
+  assert.equal(op.ack, 1, 'corrective carries the event seq as ack');
+});
+
 test('dispose rejects pending waiters and later requests fail fast', async () => {
   const transport = new FakeTransport();
   const bridge = new Bridge(transport);

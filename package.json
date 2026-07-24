@@ -10,6 +10,7 @@
     "build:host:macos": "swift build -c release --package-path hosts/macos",
     "demo": "pnpm --filter natui build && pnpm --filter natui-demo dev",
     "verify": "pnpm --filter natui build && pnpm --filter natui-demo verify",
+    "verify:kitchen": "pnpm --filter natui build && pnpm --filter natui-kitchen-sink verify",
     "verify:embedded": "pnpm --filter natui build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs"
   },
   "devDependencies": {

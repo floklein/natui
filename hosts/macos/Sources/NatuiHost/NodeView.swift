@@ -1,22 +1,6 @@
 import SwiftUI
 
-// MARK: - Typed prop accessors
-
-extension Node {
-    fileprivate func str(_ key: String) -> String? { props[key]?.stringValue }
-    fileprivate func num(_ key: String) -> CGFloat? { props[key]?.cgFloatValue }
-    fileprivate func dbl(_ key: String) -> Double? { props[key]?.doubleValue }
-    fileprivate func flag(_ key: String) -> Bool { props[key]?.boolValue ?? false }
-
-    /// Concatenated `#text` children, the label of Text/Button/Toggle nodes.
-    fileprivate var joinedText: String {
-        children.compactMap { $0.kind == "#text" ? $0.text : nil }.joined()
-    }
-
-    fileprivate var nonTextChildren: [Node] {
-        children.filter { $0.kind != "#text" }
-    }
-}
+// Typed prop accessors and binding factories live in NodeProps.swift.
 
 // MARK: - Small mapping helpers
 
@@ -159,7 +143,7 @@ struct NodeView: View {
         case "TextField":
             textFieldView
         case "Toggle":
-            Toggle(isOn: toggleBinding) { labelContent }
+            toggleView
         case "Slider":
             sliderView
         case "Picker":
@@ -171,15 +155,7 @@ struct NodeView: View {
                 ScrollView { VStack(alignment: .leading, spacing: 0) { childViews } }
             }
         case "List":
-            List {
-                ForEach(node.children, id: \.id) { child in
-                    if child.kind == "#text" {
-                        Text(child.text)
-                    } else {
-                        NodeView(node: child)
-                    }
-                }
-            }
+            ListNodeView(node: node)
         case "Image":
             Image(systemName: node.str("systemName") ?? "questionmark.circle")
                 .font(.system(size: node.num("size") ?? 15))
@@ -194,7 +170,10 @@ struct NodeView: View {
                 ProgressView()
             }
         default:
-            Text("⚠️ \(node.kind)").foregroundStyle(.red)
+            // Second-tier switch for the app-shell kinds (SwiftUI's
+            // ViewBuilder has a hard branch limit per builder; the unknown-
+            // kind fallback lives there too).
+            ExtendedNodeView(node: node)
         }
     }
 
@@ -265,11 +244,14 @@ struct NodeView: View {
 
     // -- Toggle / Slider / Picker ------------------------------------------------
 
-    private var toggleBinding: Binding<Bool> {
-        Binding(
-            get: { node.props["value"]?.boolValue ?? false },
-            set: { node.userEdit(.bool($0)) }
-        )
+    @ViewBuilder
+    private var toggleView: some View {
+        let base = Toggle(isOn: node.boolBinding) { labelContent }
+        switch node.str("style") {
+        case "switch": base.toggleStyle(.switch)
+        case "checkbox": base.toggleStyle(.checkbox)
+        default: base // automatic: the platform default (checkbox on macOS)
+        }
     }
 
     private var sliderBinding: Binding<Double> {
@@ -299,14 +281,18 @@ struct NodeView: View {
     @ViewBuilder
     private var pickerView: some View {
         let options = node.props["options"]?.arrayValue ?? []
-        Picker(node.str("label") ?? "", selection: pickerBinding) {
+        let base = Picker(node.str("label") ?? "", selection: pickerBinding) {
             ForEach(options.indices, id: \.self) { i in
                 let opt = options[i].objectValue
                 Text(opt?["label"]?.stringValue ?? "")
                     .tag(opt?["value"]?.stringValue ?? "")
             }
         }
-        .pickerStyle(.menu)
+        switch node.str("style") {
+        case "segmented": base.pickerStyle(.segmented)
+        case "radioGroup": base.pickerStyle(.radioGroup)
+        default: base.pickerStyle(.menu) // automatic/menu: previous behavior
+        }
     }
 }
 
