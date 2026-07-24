@@ -1,0 +1,101 @@
+---
+title: Layout components
+description: Arrange native controls with stacks, scrolling, lists, spacing, and dividers.
+---
+
+## VStack
+
+Arranges children vertically. `spacing` controls the gap, and `alignment` accepts `leading`, `center`, or `trailing`.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="VStackProps" />
+
+```tsx
+<VStack spacing={12} padding={20} alignment="leading">
+  <Text font="headline">Account</Text>
+  <TextField value={name} onChange={setName} />
+</VStack>
+```
+
+## HStack
+
+Arranges children horizontally. `alignment` accepts `top`, `center`, or `bottom`.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="HStackProps" />
+
+```tsx
+<HStack spacing={8} alignment="center">
+  <Label systemImage="person">Profile</Label>
+  <Spacer />
+  <Button onPress={save}>Save</Button>
+</HStack>
+```
+
+## ZStack
+
+Overlays children in the same native layout region. On Windows it maps to a `Grid`. A `Spacer` inside a Windows `ZStack` has no track to fill and collapses.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ZStackProps" />
+
+```tsx
+<ZStack frame={{ width: 240, height: 140 }}>
+  <Image systemName="rectangle.fill" size={120} />
+  <Text weight="bold">Overlay</Text>
+</ZStack>
+```
+
+## Spacer
+
+Consumes available space along a stack's main axis. Set `minLength` to preserve a minimum gap.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="SpacerProps" />
+
+```tsx
+<HStack>
+  <Text>Leading</Text>
+  <Spacer minLength={16} />
+  <Text>Trailing</Text>
+</HStack>
+```
+
+## Divider
+
+Renders the platform divider. It has no component-specific props beyond common props.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="DividerProps" />
+
+```tsx
+<VStack spacing={8}>
+  <Text>Above</Text>
+  <Divider />
+  <Text>Below</Text>
+</VStack>
+```
+
+## ScrollView
+
+Scrolls children on the `vertical` axis by default, or on the `horizontal` axis.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ScrollViewProps" />
+
+```tsx
+<ScrollView axis="vertical" frame={{ maxHeight: 'infinity' }}>
+  <VStack spacing={8}>{rows}</VStack>
+</ScrollView>
+```
+
+## List
+
+Renders native list rows and optionally controls selection through child `tag` props.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ListProps" />
+
+```tsx
+<List value={selected} onChange={setSelected} selectionMode="single">
+  <Text tag="one">First</Text>
+  <Text tag="two">Second</Text>
+</List>
+```
+
+The presence of `value`, including `value={null}`, makes the list selectable. Use `selectionMode="multiple"` with a string array. The `sidebar` style uses platform source-list treatment where available.
+
+On Windows, rows nested inside `Section` are not individually selectable and list row badges are not rendered.

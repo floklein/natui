@@ -1,5 +1,5 @@
 /**
- * Stage 2 verification: launches the natui host with the React app bundle
+ * Stage 2 verification: launches the NatUI host with the React app bundle
  * evaluated IN-PROCESS by JavaScriptCore (no Node running the app), then
  * drives it over the stdio debug channel: tree dumps, synthesized events,
  * and a host-rendered screenshot. Exits non-zero on failure.
@@ -13,7 +13,7 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-// Same lookup order as the natui renderer: env override, then the release
+// Same lookup order as the NatUI renderer: env override, then the release
 // build the README documents, then a local debug build.
 const hostBin =
   process.env.NATUI_HOST ??
@@ -34,7 +34,7 @@ mkdirSync(outDir, { recursive: true });
 try {
   const existing = execFileSync('pgrep', ['-lf', 'natui-host'], { encoding: 'utf8' }).trim();
   if (existing) {
-    console.error(`[probe] another natui host is already running; close it first:\n${existing}`);
+    console.error(`[probe] another NatUI host is already running; close it first:\n${existing}`);
     process.exit(1);
   }
 } catch {

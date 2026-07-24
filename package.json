@@ -11,7 +11,12 @@
     "demo": "pnpm --filter natui build && pnpm --filter natui-demo dev",
     "verify": "pnpm --filter natui build && pnpm --filter natui-demo verify",
     "verify:kitchen": "pnpm --filter natui build && pnpm --filter natui-kitchen-sink verify",
-    "verify:embedded": "pnpm --filter natui build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs"
+    "verify:embedded": "pnpm --filter natui build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs",
+    "docs:dev": "pnpm --filter natui-docs dev",
+    "docs:check": "pnpm --filter natui-docs check",
+    "docs:build": "pnpm --filter natui-docs build",
+    "docs:start": "pnpm --filter natui-docs start",
+    "docs:smoke": "pnpm --filter natui-docs smoke"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

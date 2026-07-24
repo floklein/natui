@@ -37,7 +37,7 @@ function runningHosts(): string {
 }
 const existing = runningHosts();
 if (existing) {
-  console.error(`[verify] another natui host is already running; close it first:\n${existing}`);
+  console.error(`[verify] another NatUI host is already running; close it first:\n${existing}`);
   process.exit(1);
 }
 
@@ -82,7 +82,7 @@ function assertValidPng(path: string): void {
 // === Boot ====================================================================
 
 const app = await run(<App />, {
-  title: 'natui kitchen sink',
+  title: 'NatUI kitchen sink',
   width: 900,
   height: 640,
   minWidth: 760,

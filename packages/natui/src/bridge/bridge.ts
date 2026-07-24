@@ -126,7 +126,7 @@ export class Bridge {
     this.createdThisFlush = [];
     const msg = { t: 'commit', ops } as const;
     // Prop validation (instances.ts) deep-copies every prop into documented
-    // JSON, so serialization cannot throw for app data; this guards natui
+    // JSON, so serialization cannot throw for app data; this guards NatUI
     // bugs. Transports serialize the whole message before writing a single
     // byte, so a throw here means nothing reached the host: a commit is
     // all-or-nothing, and the created flags are rolled back to match.

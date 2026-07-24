@@ -1,0 +1,13 @@
+{
+  "title": "API",
+  "pages": [
+    "index",
+    "natui",
+    "components",
+    "inproc",
+    "bridge",
+    "renderer",
+    "transport",
+    "protocol"
+  ]
+}

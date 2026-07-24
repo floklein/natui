@@ -1,0 +1,64 @@
+---
+title: Content components
+description: Present native text, symbols, progress, links, and icon-label pairs.
+---
+
+## Text
+
+Renders native text with semantic font styles, optional point size, weight, emphasis, monospacing, color, and line limits.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="TextProps" />
+
+```tsx
+<Text font="title2" weight="semibold" lineLimit={2}>
+  Native text
+</Text>
+```
+
+`font` accepts `largeTitle`, `title`, `title2`, `title3`, `headline`, `body`, `callout`, or `caption`. Setting `size` replaces the semantic font size while preserving `weight`.
+
+## Image
+
+Renders a system symbol with `systemName` and optional `size`.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ImageProps" />
+
+```tsx
+<Image systemName="star" size={18} accessibilityLabel="Favorite" />
+```
+
+Names are SF Symbols on macOS. Windows maps a supported subset to Segoe Fluent glyphs, so symbols may differ or fall back.
+
+## ProgressView
+
+Pass a value from `0` to `1` for determinate progress. Omit `value` for an indeterminate indicator.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="ProgressViewProps" />
+
+```tsx
+<ProgressView value={completed / total} frame={{ width: 240 }} />
+```
+
+## Link
+
+Opens `url` in the system browser. Children form the visible label, and `onPress` can observe activation.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="LinkProps" />
+
+```tsx
+<Link url="https://github.com/floklein/natui">
+  Project repository
+</Link>
+```
+
+## Label
+
+Combines a system symbol with child text.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="LabelProps" />
+
+```tsx
+<Label systemImage="calendar" badge={3}>Upcoming</Label>
+```
+
+Symbol mapping follows the same platform rules as `Image`.

@@ -1,0 +1,64 @@
+---
+title: Presentation components
+description: Present controlled native sheets, alerts, and anchored popovers.
+---
+
+All presentation state is controlled by React. Native dismissal reports `false` through `onChange`.
+
+## Sheet
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="SheetProps" />
+
+```tsx
+<Sheet value={open} onChange={setOpen}>
+  <VStack spacing={12} padding={20}>
+    <Text font="headline">New item</Text>
+    <Button onPress={() => setOpen(false)}>Done</Button>
+  </VStack>
+</Sheet>
+```
+
+Children materialize even while the sheet is closed. Gate expensive content with `{open && <Content />}` when necessary.
+
+On macOS a sheet uses native sheet presentation. Windows renders an in-tree scrim and card, so it appears in host-rendered screenshots.
+
+## Alert
+
+Alerts are data-driven rather than child-based:
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="AlertProps" />
+
+```tsx
+<Alert
+  value={confirming}
+  title="Delete item?"
+  message="This cannot be undone."
+  buttons={[
+    { id: 'cancel', label: 'Cancel', role: 'cancel' },
+    { id: 'delete', label: 'Delete', role: 'destructive' },
+  ]}
+  onSelect={handleAlertButton}
+  onChange={setConfirming}
+/>
+```
+
+Button selection fires before the dismissal change. Windows supports at most one cancel button and two other buttons, drops additional buttons with a warning, and does not render destructive styling.
+
+## Popover and PopoverContent
+
+Ordinary `Popover` children form the anchor. A single `PopoverContent` child forms the presented body.
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="PopoverProps" />
+
+<auto-type-table path="../../../../packages/natui/src/components.ts" name="PopoverContentProps" />
+
+```tsx
+<Popover value={open} arrowEdge="bottom" onChange={setOpen}>
+  <Button onPress={() => setOpen(true)}>Help</Button>
+  <PopoverContent padding={12}>
+    <Text>This is native UI.</Text>
+  </PopoverContent>
+</Popover>
+```
+
+Open alerts, popovers, and menus use popup layers on Windows and are not included in `RenderTargetBitmap` screenshots.

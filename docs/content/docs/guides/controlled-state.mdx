@@ -1,0 +1,45 @@
+---
+title: Controlled state
+description: Keep native inputs responsive and authoritative with React state and sequence acknowledgements.
+---
+
+NatUI inputs are React-controlled even though interaction begins in another process. The host applies an optimistic local value immediately, then reports the edit to JavaScript.
+
+```tsx
+const [query, setQuery] = useState('');
+
+<SearchField value={query} onChange={setQuery} />
+```
+
+## Sequence acknowledgements
+
+Each controlled native edit increments a monotonic sequence number for that node:
+
+1. The host applies the user's edit locally.
+2. It emits a `change` event carrying `seq`.
+3. React runs the handler at discrete priority and commits the new props.
+4. The bridge adds the highest processed sequence as `ack` to the update.
+5. The host accepts the value when the acknowledgement catches up.
+
+If another native edit occurs first, an older acknowledgement cannot overwrite the newer local value. Other props in that update still apply.
+
+## React remains authoritative
+
+If a handler rejects or transforms an edit, NatUI sends a corrective update after the synchronous event flush:
+
+```tsx
+const [code, setCode] = useState('');
+
+<TextField
+  value={code}
+  onChange={(next) => setCode(next.toUpperCase().slice(0, 8))}
+/>
+```
+
+This behavior also covers controls with no handler. A native edit is visible optimistically, then settles back to the current React value.
+
+## Controlled and request semantics
+
+Input `change` events carry sequence numbers. Request events, such as `Table` sorting, do not. A sort request asks the application to reorder rows and provide a new descriptor; it is not a host-owned value edit.
+
+The sequence protocol applies where a host performs an optimistic native change: text fields, search fields, toggles, sliders, pickers, date pickers, steppers, text editors, list and table selection, tab selection, disclosure state, presentation dismissal, and macOS split visibility. Windows split visibility is React-driven only and does not produce a native `change` event.

@@ -1,6 +1,6 @@
-# natui Windows host (WinUI 3)
+# NatUI Windows host (WinUI 3)
 
-Native Windows host for the natui wire protocol v1 (see `docs/protocol.md`).
+Native Windows host for the NatUI wire protocol v1 (see `docs/protocol.md`).
 It is the WinUI 3 counterpart of `hosts/macos`: the JS renderer spawns this
 exe, writes NDJSON ops to its stdin, and reads events from its stdout.
 
@@ -79,7 +79,7 @@ pnpm install
 pnpm demo
 ```
 
-(`pnpm demo` is the root script; it builds the natui package and runs the
+(`pnpm demo` is the root script; it builds the `natui` package and runs the
 `natui-demo` example via `pnpm --filter natui-demo dev`.)
 
 Launching the exe by double-click shows a hint window and does nothing else
@@ -164,9 +164,10 @@ reference.
   after the first `flexibleSpace` become right-aligned PrimaryCommands.
   A toolbar props change rebuilds the CommandBar wholesale, which drops
   in-progress search text and focus (the macOS host patches in place).
-- DatePicker is date-only: `displayedComponents` `time`/`dateTime` degrade to
-  the date part (CalendarDatePicker has no time UI), and change events always
-  carry `YYYY-MM-DD`.
+- DatePicker is date-only. A `dateTime` value displays its date portion and
+  change events carry `YYYY-MM-DD`. A `time` value in `HH:mm` form is not
+  parseable by CalendarDatePicker, leaves the current native value unchanged,
+  and cannot emit a time-only value.
 - List rows inside `Section` children are not individually selectable (they
   are not items of the outer ListView); `badge` is not rendered on List rows.
 - Toggle/Picker `style` and TextField `secure` are fixed at creation

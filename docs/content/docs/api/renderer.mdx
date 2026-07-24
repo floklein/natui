@@ -1,0 +1,24 @@
+---
+title: Renderer API
+description: Reference createNatuiRenderer and the custom React renderer interface.
+---
+
+<auto-type-table path="../../../../packages/natui/src/reconciler/renderer.ts" name="NatuiRenderer" />
+
+```ts
+function createNatuiRenderer(bridge: Bridge): NatuiRenderer
+```
+
+Creates a React 19 concurrent root backed by a NatUI bridge.
+
+`NatuiRenderer` provides:
+
+| Member | Purpose |
+|---|---|
+| `render(element, onCommitted?)` | Update the React root |
+| `unmount()` | Synchronously unmount and flush native removal operations |
+| `container` | Internal root container and node-id allocator |
+
+Native events run at React's discrete event priority and synchronously flush work. That allows the bridge to determine immediately whether React adopted a controlled value.
+
+Most applications should use `run`, which creates and coordinates the renderer, bridge, transport, handshake, window, and shutdown behavior.

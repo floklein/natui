@@ -1,5 +1,5 @@
 /**
- * TypeScript types for the natui wire protocol v1 (see docs/protocol.md).
+ * TypeScript types for the NatUI wire protocol v1 (see docs/protocol.md).
  * One JSON object per line (NDJSON) in both directions.
  */
 
