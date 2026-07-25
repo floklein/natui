@@ -16,6 +16,7 @@ final class ChromeSync {
     private let toolbar = ToolbarController()
     private var lastMenuBar: (id: Int, props: [String: JSONValue])?
     private var lastToolbar: (id: Int, props: [String: JSONValue])?
+    private var hasSyncedMenuBar = false
 
     /// Called by WindowManager once the window exists; toolbar specs that
     /// arrived earlier are applied now.
@@ -23,10 +24,11 @@ final class ChromeSync {
         toolbar.attach(window)
     }
 
-    /// Called at the end of every Store.apply.
+    /// Called once during app bootstrap, then at the end of every Store.apply.
     func sync(rootChildren: [Node]) {
         let menuNode = rootChildren.first { $0.kind == "MenuBar" }
-        if changed(menuNode, since: lastMenuBar) {
+        if !hasSyncedMenuBar || changed(menuNode, since: lastMenuBar) {
+            hasSyncedMenuBar = true
             lastMenuBar = menuNode.map { ($0.id, $0.props) }
             menuBar.update(node: menuNode)
         }

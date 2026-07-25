@@ -42,7 +42,7 @@ jobs:
       - run: pnpm docs:smoke
 
   macos-host:
-    name: Swift host build + JS suite (macOS)
+    name: Swift host, JS suite, and package (macOS)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -55,18 +55,49 @@ jobs:
       - run: pnpm build:host:macos
       - run: pnpm test
       - run: pnpm build
-      # The GUI end-to-end suites (pnpm verify / pnpm verify:embedded) need a
-      # real window session and run locally per README; CI stays headless.
+      - run: node --test examples/demo/src/verify-macos-package-static.test.mjs
+      - run: pnpm package:demo
+      - run: node examples/demo/src/verify-macos-package-static.mjs
+      - name: Archive application bundle
+        id: mac-package
+        shell: bash
+        run: |
+          package_arch="$(node -p 'process.arch')"
+          archive="examples/demo/dist/package/NatUIDemo-0.1.0-macos-${package_arch}.tar.gz"
+          tar -czf "$archive" -C examples/demo/dist/package NatUIDemo.app
+          echo "architecture=${package_arch}" >> "$GITHUB_OUTPUT"
+          echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NatUIDemo-0.1.0-macos-${{ steps.mac-package.outputs.architecture }}
+          path: ${{ steps.mac-package.outputs.archive }}
+          if-no-files-found: error
+      # The GUI end-to-end suites, including verify:package, need a real
+      # window session and run locally per README; CI stays headless.
 
   windows-host:
-    # Compile check only (first green run: PR #3); now blocking like the
-    # other jobs. The app-shell kinds are E2E-verified on macOS; see
-    # hosts/windows/NatuiHost/README.md for the Windows divergences.
-    name: WinUI host compile
+    # GUI suites still need a real desktop session. This job compile-checks the
+    # development host, then builds and inspects the shippable single-file EXE
+    # without starting a window.
+    name: WinUI host compile and package
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
+      - run: pnpm install --frozen-lockfile
+      - run: node --test tools/package-app.test.mjs
       - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
+      - run: pnpm package:demo
+      - run: node examples/demo/src/verify-windows-package-static.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NatUIDemo-0.1.0-windows-x64
+          path: examples/demo/dist/package/NatUIDemo-0.1.0-windows-x64.exe
+          if-no-files-found: error

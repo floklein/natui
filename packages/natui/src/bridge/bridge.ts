@@ -28,6 +28,7 @@ export interface CreatedRef {
 export interface ReadyInfo {
   platform: string;
   protocol: number;
+  hostApi: number;
 }
 
 /** Wraps host-event handler invocation, e.g. to set React update priority. */
@@ -331,7 +332,11 @@ export class Bridge {
         break;
       }
       case 'ready': {
-        this.readyInfo = { platform: msg.platform, protocol: msg.protocol };
+        this.readyInfo = {
+          platform: msg.platform,
+          protocol: msg.protocol,
+          hostApi: msg.hostApi,
+        };
         if (this.readyWaiter) {
           clearTimeout(this.readyWaiter.timer);
           this.readyWaiter.resolve(this.readyInfo);

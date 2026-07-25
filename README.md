@@ -10,8 +10,9 @@ and accessibility.
 
 > [!IMPORTANT]
 > NatUI is still in Alpha and is not a published registry package.
-> Use it from a source checkout while packaging and compatibility policies are
-> still being designed.
+> Use it from a source checkout. Native application packaging is implemented
+> as a repository-local reference workflow, while release signing and stable
+> compatibility policy are still evolving.
 
 ```tsx
 import { useState } from 'react';
@@ -96,6 +97,7 @@ troubleshooting, and current platform differences.
 - [Get started](docs/content/docs/start/index.mdx)
 - [Browse all 37 components](docs/content/docs/components/index.mdx)
 - [Read the guides](docs/content/docs/guides/index.mdx)
+- [Package an application](docs/content/docs/guides/application-bundles.mdx)
 - [Explore the API](docs/content/docs/api/index.mdx)
 - [Review platform support](docs/content/docs/status/platform-support.mdx)
 - [See the roadmap](docs/content/docs/status/roadmap.mdx)
@@ -180,6 +182,37 @@ pnpm build:embedded
 Read the [runtime modes guide](docs/content/docs/guides/runtime-modes.mdx) for
 the lifecycle and packaging tradeoffs.
 
+### Package a native application
+
+The demo package configuration lives at
+`examples/demo/natui.app.json`. Build an artifact for the current platform and
+architecture from the repository root:
+
+```bash
+pnpm package:demo
+pnpm verify:package
+```
+
+macOS produces `examples/demo/dist/package/NatUIDemo.app`. Windows produces
+one portable, architecture-specific, self-contained EXE such as
+`NatUIDemo-0.1.0-windows-x64.exe`. The Windows EXE extracts its runtime
+dependencies to a per-user temporary cache at launch.
+
+Both artifacts include the minified React entry and a generated manifest with
+its SHA-256 digest. The native loader validates bundle schema, protocol,
+minimum host API, platform, architecture, and integrity before evaluating the
+application.
+
+`runEmbedded` resolves to an application controller. Its idempotent `quit()`
+path synchronously unmounts React, runs effect cleanup, sends one native quit
+request, and detaches the in-process receive hook. Native window close uses
+the same cleanup path.
+
+See [application bundles](docs/content/docs/guides/application-bundles.mdx)
+for configuration and artifact details. The current workflow does not provide
+code signing, macOS notarization, installers, automatic updates,
+single-instance orchestration, or multi-window APIs.
+
 ## Examples and verification
 
 `examples/demo` is the smallest end-to-end application.
@@ -192,6 +225,8 @@ shell and most component kinds.
 | `pnpm verify` | Drive the base demo through native tree dumps, edits, and screenshots |
 | `pnpm verify:kitchen` | Verify app-shell and multi-component workflows |
 | `pnpm verify:embedded` | Verify the platform's in-process JavaScript runtime |
+| `pnpm package:demo` | Build the demo as a native `.app` or self-contained EXE |
+| `pnpm verify:package` | Verify the packaged manifest, tree, and close lifecycle |
 | `pnpm test` | Run renderer, bridge, protocol, and component contract tests |
 | `pnpm typecheck` | Typecheck all workspace projects |
 | `pnpm build` | Build the public `natui` package |
@@ -211,11 +246,14 @@ exact coverage and evidence limits.
 | Kitchen-sink app shell | Real-window verified | Real-window verified |
 | Host build in CI | Yes | Yes |
 | Embedded JavaScript runtime | JavaScriptCore, verified | V8, verified |
+| Native application packaging | `.app` | One self-contained EXE |
 
-Both embedded runtimes use the same `natui/inproc` entry point and `--bundle`
-host argument. Both hosts implement all 37 public components. Component docs
-define the shared contract and call out platform-native conventions. GUI suites
-remain local because CI has no normal window session.
+Both embedded runtimes use the same `natui/inproc` entry point. Raw development
+bundles use the `--bundle` host argument. Packaged artifacts discover and
+validate their embedded application manifest automatically. Both hosts
+implement all 37 public components. Component docs define the shared contract
+and call out platform-native conventions. GUI suites remain local because CI
+has no normal window session.
 
 ## Package entry points
 

@@ -11,29 +11,60 @@ description: Reference the in-process runtime for a native host that embeds Java
 function runEmbedded(
   element: ReactNode,
   options?: RunEmbeddedOptions,
-): Promise<void>
+): Promise<EmbeddedApp>
 ```
 
-Mounts a React element inside an embedding native host. `RunEmbeddedOptions` is the same window property shape used by the protocol.
+Mounts a React element inside an embedding native host and resolves after the
+first React commit. `RunEmbeddedOptions` includes the window property shape
+used by the protocol, plus `onClose` and a startup timeout override.
 
 The host must provide:
 
 - `globalThis.__natui_send(json)` for JavaScript-to-host messages
-- A ready handshake after evaluating the bundle
+- A ready handshake with compatible protocol and host API levels after evaluating the bundle
 
 The module installs `globalThis.__natui_recv(json)` for host-to-JavaScript messages.
+One embedded application may be active in a JavaScript runtime at a time. A
+second `runEmbedded` call rejects instead of replacing the active receive hook.
 
 ```tsx
 import { Text } from 'natui/components';
 import { runEmbedded } from 'natui/inproc';
 
-await runEmbedded(<Text>Hello</Text>, {
+const app = await runEmbedded(<Text>Hello</Text>, {
   title: 'embedded NatUI',
   width: 400,
   height: 240,
+  onClose() {
+    console.log('Window close requested');
+  },
 });
+
+app.update(<Text>Hello again</Text>);
+app.quit();
 ```
+
+## EmbeddedApp
+
+<auto-type-table path="../../../../packages/natui/src/inproc.ts" name="EmbeddedApp" />
+
+| Member | Purpose |
+|---|---|
+| `platform` | Ready-handshake platform, `macos` or `windows` |
+| `state` | Current lifecycle state: `running`, `stopping`, or `stopped` |
+| `update(element)` | Re-render while the application is running |
+| `quit()` | Unmount and stop the embedded application |
+
+`quit()` is synchronous and idempotent. Its first call unmounts React, runs
+effect cleanup, sends one host quit message, rejects pending bridge work, and
+removes `globalThis.__natui_recv`. Calls after shutdown begins do nothing.
+`update()` throws after shutdown begins.
+
+A native window close invokes `onClose` once and then uses the same shutdown
+path. A startup compatibility failure also requests host shutdown and detaches
+the receive hook.
 
 The entrypoint contains no Node built-ins and is intended for browser-platform
 bundling. The repository implements this embedding contract with JavaScriptCore
-on macOS and V8 on Windows.
+on macOS and V8 on Windows. Packaged applications use this same API. See
+[application bundles](/docs/guides/application-bundles).

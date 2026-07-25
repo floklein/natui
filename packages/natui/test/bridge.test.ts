@@ -156,9 +156,9 @@ test('dispose rejects pending waiters and later requests fail fast', async () =>
 test('ready arriving before waitForReady still resolves (no dropped handshake)', async () => {
   const transport = new FakeTransport();
   const bridge = new Bridge(transport);
-  transport.emit({ t: 'ready', platform: 'macos', protocol: 1 });
+  transport.emit({ t: 'ready', platform: 'macos', protocol: 1, hostApi: 1 });
   const ready = await bridge.waitForReady(50);
-  assert.deepEqual(ready, { platform: 'macos', protocol: 1 });
+  assert.deepEqual(ready, { platform: 'macos', protocol: 1, hostApi: 1 });
 });
 
 // ---------------------------------------------------------------------------

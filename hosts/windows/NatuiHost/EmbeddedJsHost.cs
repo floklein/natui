@@ -14,11 +14,14 @@ namespace NatuiHost;
 /// </summary>
 internal sealed class EmbeddedJsHost(
     DispatcherQueue dispatcher,
-    Router router) : IDisposable
+    Router router,
+    Action<string> runtimeFailed) : IDisposable
 {
     private readonly Dictionary<int, DispatcherQueueTimer> _timers = [];
     private V8ScriptEngine? _engine;
     private int _nextTimerId = 1;
+    private bool _disposed;
+    private bool _runtimeFailureQueued;
 
     public bool Start(string bundlePath)
     {
@@ -32,7 +35,11 @@ internal sealed class EmbeddedJsHost(
             Ipc.Log($"embedded: cannot read bundle at {bundlePath}: {ex.Message}");
             return false;
         }
+        return StartSource(bundlePath, source);
+    }
 
+    public bool StartSource(string sourceName, string source)
+    {
         try
         {
             var engine = new V8ScriptEngine();
@@ -78,7 +85,7 @@ internal sealed class EmbeddedJsHost(
                   };
                 })();
                 """);
-            engine.Execute(bundlePath, source);
+            engine.Execute(sourceName, source);
 
             if (engine.Evaluate("typeof globalThis.__natui_recv === 'function'") is not true)
             {
@@ -154,22 +161,43 @@ internal sealed class EmbeddedJsHost(
 
     private void Invoke(string function, object argument)
     {
+        if (_disposed || _runtimeFailureQueued) return;
         try
         {
             _engine?.Invoke(function, argument);
         }
         catch (ScriptEngineException ex)
         {
-            Ipc.Log($"embedded: JS exception: {ex.ErrorDetails}");
+            QueueRuntimeFailure(ex.ErrorDetails);
         }
         catch (Exception ex)
         {
-            Ipc.Log($"embedded: callback failed: {ex}");
+            QueueRuntimeFailure(ex.ToString());
+        }
+    }
+
+    private void QueueRuntimeFailure(string message)
+    {
+        if (_disposed || _runtimeFailureQueued) return;
+        _runtimeFailureQueued = true;
+        Ipc.Log($"embedded: JS exception: {message}");
+
+        // Never release ClearScript while its Invoke call is still unwinding.
+        // The application performs the terminal failure path on the next
+        // dispatcher turn, after this callback has returned.
+        if (!dispatcher.TryEnqueue(() =>
+            {
+                if (!_disposed) runtimeFailed(message);
+            }))
+        {
+            Ipc.Log("embedded: cannot dispatch runtime failure shutdown");
         }
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         Ipc.JsSink = null;
         foreach (var timer in _timers.Values) timer.Stop();
         _timers.Clear();

@@ -14,7 +14,8 @@ function run(
 ): Promise<NatuiApp>
 ```
 
-Starts the host, validates its platform and protocol handshake, sends window properties, and mounts the React element.
+Starts the host, validates its platform, protocol, and host API handshake,
+sends window properties, and mounts the React element.
 
 ## RunOptions
 
@@ -45,4 +46,7 @@ Without `onClose`, closing the native window unmounts React, sends `quit`, and e
 
 ## Other exports
 
-The entrypoint re-exports all components, protocol types, `PROTOCOL_VERSION`, `ROOT_ID`, `Bridge`, `createNatuiRenderer`, `spawnStdioTransport`, `Transport`, `HostCommand`, and `defaultHostCommand`.
+The entrypoint re-exports all components, protocol types,
+`PROTOCOL_VERSION`, `HOST_API_VERSION`, `ROOT_ID`, `Bridge`,
+`createNatuiRenderer`, `spawnStdioTransport`, `Transport`, `HostCommand`, and
+`defaultHostCommand`.

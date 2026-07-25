@@ -230,7 +230,10 @@ internal sealed class NatuiZStack : Grid
 /// Inputs).
 /// </summary>
 internal sealed partial class NodeMapper(
-    NatuiStack rootStack, StackPanel chromePanel, Grid overlayLayer)
+    NatuiStack rootStack,
+    StackPanel chromePanel,
+    Grid overlayLayer,
+    Action requestQuit)
 {
     public NatuiStack RootStack { get; } = rootStack;
 
