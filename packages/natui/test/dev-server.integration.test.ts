@@ -1,18 +1,43 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import {
-  createDevServer,
-  type NatuiDevServer,
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import type {
+  DevServerOptions,
+  NatuiDevServer,
 } from '../src/dev/server.js';
 import type { TreeNode } from '../src/protocol.js';
 import type { NatuiApp } from '../src/run.js';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const FAKE_HOST_ENV = 'NATUI_DEV_INTEGRATION_FAKE_HOST';
+const STATIC_CONDITION_EXPECTED_ENV =
+  'NATUI_DEV_INTEGRATION_STATIC_CONDITION';
+const STATIC_CONDITION_COMPLETION_ENV =
+  'NATUI_DEV_INTEGRATION_STATIC_CONDITION_COMPLETION';
+const MAIN_INTEGRATION_TEST_NAME =
+  'createDevServer preserves store identity and component state across leaf refreshes';
+const SYMLINK_IDENTITY_PROBE_ENV =
+  'NATUI_DEV_INTEGRATION_SYMLINK_IDENTITY_PROBE';
+const SYMLINK_IDENTITY_TEST_NAME =
+  'development matches Node module identity across real and junction imports';
 const WAIT_TIMEOUT_MS = 15_000;
+
+async function createDevServer(
+  options: DevServerOptions,
+): Promise<NatuiDevServer> {
+  const serverModule = await import('../src/dev/server.js');
+  return serverModule.createDevServer(options);
+}
 
 const FAKE_HOST_SOURCE = `
 const readline = require('node:readline');
@@ -151,15 +176,60 @@ interface FixtureKeys {
   moduleIdentity: string;
   showUnvisited: string;
   storeIdentity: string;
+  transientValueFailure: string;
   unvisitedEvaluations: string;
 }
 
-function entrySource(keys: FixtureKeys): string {
+function entrySource(
+  keys: FixtureKeys,
+  fileValueUrl: string,
+  expectedCondition: string,
+): string {
   return `
 import { createElement } from 'react';
+import { sep as nodePathSeparator } from 'node:path';
 import { run } from 'natui';
 import { App } from './app.js';
 import { moduleIdentity } from './store.js';
+import packageCondition from 'natui-import-meta-conditional-fixture';
+import importCondition from '#conditional';
+import cjsValue from '#external-cjs';
+import dataValue from 'data:text/javascript,export default "data"';
+import fileUrlValue from ${JSON.stringify(fileValueUrl)};
+
+const sourceMeta = import.meta;
+if (packageCondition !== ${JSON.stringify(expectedCondition)}) {
+  throw new Error('static package import did not use Node ESM conditions');
+}
+if (importCondition !== ${JSON.stringify(expectedCondition)}) {
+  throw new Error('static package imports mapping did not use Node ESM conditions');
+}
+if (cjsValue !== 'external-cjs') {
+  throw new Error('workspace-local CJS imports mapping was not loaded by Node');
+}
+if (dataValue !== 'data') throw new Error('static data URL import failed');
+if (fileUrlValue !== 'file-url') throw new Error('static file URL import failed');
+if (nodePathSeparator !== (process.platform === 'win32' ? '\\\\' : '/')) {
+  throw new Error('static node builtin import failed');
+}
+if (!sourceMeta.main) throw new Error('development entry import.meta.main is false');
+if (!sourceMeta.url.endsWith('/main.ts')) throw new Error('development entry URL is not source-relative');
+if (!sourceMeta.filename.replaceAll('\\\\', '/').endsWith('/main.ts')) {
+  throw new Error('development entry filename is not source-relative');
+}
+if (!sourceMeta.resolve('./leaf.js').endsWith('/leaf.js')) {
+  throw new Error('development entry resolve is not source-relative');
+}
+if (!sourceMeta.resolve('natui-import-meta-conditional-fixture').endsWith(
+  '/' + ${JSON.stringify(expectedCondition)} + '.js'
+)) {
+  throw new Error('development entry resolve did not use ESM package conditions');
+}
+if (!sourceMeta.resolve('#conditional').endsWith(
+  '/' + ${JSON.stringify(expectedCondition)} + '-condition.js'
+)) {
+  throw new Error('development entry resolve did not use ESM package import conditions');
+}
 
 const fakeHost = process.env.${FAKE_HOST_ENV};
 if (!fakeHost) throw new Error('${FAKE_HOST_ENV} is not set');
@@ -214,6 +284,65 @@ export default function Unvisited() {
 `;
 }
 
+function valueSource(
+  suffix: string,
+  transientFailureKey?: string,
+  expectedCondition =
+    process.env[STATIC_CONDITION_EXPECTED_ENV] ?? 'import',
+): string {
+  return `
+const sourceMeta = import.meta;
+if (sourceMeta.main) throw new Error('dependency import.meta.main is true');
+if (!sourceMeta.url.endsWith('/value.ts')) throw new Error('dependency URL is not source-relative');
+if (!sourceMeta.filename.replaceAll('\\\\', '/').endsWith('/value.ts')) {
+  throw new Error('dependency filename is not source-relative');
+}
+if (!sourceMeta.resolve('./leaf.js').endsWith('/leaf.js')) {
+  throw new Error('dependency resolve is not source-relative');
+}
+if (!sourceMeta.resolve('natui-import-meta-conditional-fixture').endsWith(
+  '/' + ${JSON.stringify(expectedCondition)} + '.js'
+)) {
+  throw new Error('dependency resolve did not use ESM package conditions');
+}
+
+${
+  transientFailureKey
+    ? `if ((globalThis as Record<string, unknown>)[${JSON.stringify(transientFailureKey)}]) {
+  throw new Error('value transient evaluation exploded');
+}`
+    : ''
+}
+
+export const sourceSuffix = ${JSON.stringify(suffix)} satisfies string;
+`;
+}
+
+function gatedValueSource(
+  suffix: string,
+  gateKey: string,
+  startedKey: string,
+): string {
+  return `
+${valueSource(suffix)}
+
+const pendingValueGlobals = globalThis as Record<string, unknown>;
+const pendingValueGate = pendingValueGlobals[${JSON.stringify(gateKey)}];
+if (pendingValueGate instanceof Promise) {
+  pendingValueGlobals[${JSON.stringify(startedKey)}] = true;
+  await pendingValueGate;
+}
+`;
+}
+
+function missingDependencySource(): string {
+  return `
+import { createdSuffix } from './generated/deep/created.js';
+
+export const sourceSuffix = createdSuffix;
+`;
+}
+
 function storeSource(storeIdentityKey: string): string {
   return `
 import {
@@ -259,6 +388,7 @@ function leafSource(
   return `
 import { createElement, useEffect, useState } from 'react';
 import { useStore } from './store.js';
+import { sourceSuffix } from './value.js';
 
 const evaluationGlobal = globalThis as Record<string, unknown>;
 evaluationGlobal[${JSON.stringify(evaluationKey)}] =
@@ -282,7 +412,7 @@ export function Leaf() {
     createElement(
       'Text',
       { accessibilityIdentifier: 'refresh-status' },
-      ${JSON.stringify(label)} + ':' + String(count),
+      ${JSON.stringify(label)} + ':' + String(count) + sourceSuffix,
     ),
     createElement(
       'Button',
@@ -429,20 +559,688 @@ async function waitForLog(
   }
 }
 
+interface SymlinkIdentityProbe {
+  completionMarker: string;
+  execArguments: string[];
+}
+
+interface SymlinkIdentityResult {
+  count: number;
+  copyMain: boolean;
+  same: boolean;
+  urls: string[];
+}
+
+async function runSymlinkIdentityProbe(
+  probe: SymlinkIdentityProbe,
+): Promise<void> {
+  const fixture = await mkdtemp(
+    join(PACKAGE_ROOT, 'natui-dev-symlink-identity-'),
+  );
+  const unique = `${process.pid}-${Date.now()}`;
+  const appKey = `__natuiSymlinkIdentityApp_${unique}`;
+  const countKey = `__natuiSymlinkIdentityCount_${unique}`;
+  const resultKey = `__natuiSymlinkIdentityResult_${unique}`;
+  const globals = globalThis as Record<string, unknown>;
+  const previousFakeHost = process.env[FAKE_HOST_ENV];
+  const realAppRoot = join(fixture, 'app-real');
+  const aliasAppRoot = join(fixture, 'app-alias');
+  const realDependencyRoot = join(fixture, 'dependency-real');
+  const aliasDependencyRoot = join(fixture, 'dependency-alias');
+  const realMainPath = join(realAppRoot, 'main.ts');
+  const aliasMainPath = join(aliasAppRoot, 'main.ts');
+  const nativeProbePath = join(aliasAppRoot, 'native-probe.mjs');
+  const dependencyPath = join(realDependencyRoot, 'source.js');
+  const fakeHostPath = join(fixture, 'fake-host.cjs');
+  const logs: string[] = [];
+  let server: NatuiDevServer | undefined;
+
+  const dependencySource = `
+const globals = globalThis;
+globals[${JSON.stringify(countKey)}] =
+  Number(globals[${JSON.stringify(countKey)}] ?? 0) + 1;
+export default {
+  token: {},
+  url: import.meta.url,
+};
+`;
+const resultExpression = `({
+  count: Number((globalThis as Record<string, unknown>)[${JSON.stringify(countKey)}] ?? 0),
+  copyMain: queriedMain,
+  same: realDependency === aliasDependency,
+  urls: [realDependency.url, aliasDependency.url],
+})`;
+
+  try {
+    await Promise.all([
+      mkdir(realAppRoot, { recursive: true }),
+      mkdir(realDependencyRoot, { recursive: true }),
+      writeFile(fakeHostPath, FAKE_HOST_SOURCE),
+    ]);
+    await Promise.all([
+      writeFile(dependencyPath, dependencySource),
+      writeFile(
+        join(realAppRoot, 'main-copy.mjs'),
+        'export const sourceMain = import.meta.main;\n',
+      ),
+      writeFile(
+        join(realAppRoot, 'native-probe.mjs'),
+        `
+import realDependency from '../dependency-real/source.js';
+import aliasDependency from '../dependency-alias/source.js';
+import { sourceMain as copyMain } from './main-copy.mjs?copy';
+const result = {
+  count: Number(globalThis[${JSON.stringify(countKey)}] ?? 0),
+  copyMain,
+  same: realDependency === aliasDependency,
+  urls: [realDependency.url, aliasDependency.url],
+};
+process.stdout.write(JSON.stringify(result));
+`,
+      ),
+      writeFile(
+        realMainPath,
+        `
+import { createElement } from 'react';
+import { run } from 'natui';
+import realDependency from '../dependency-real/source.js';
+import aliasDependency from '../dependency-alias/source.js';
+import { sourceMain as queriedMain } from './main.js?copy';
+
+export const sourceMain = import.meta.main;
+const result = ${resultExpression};
+if (sourceMain) {
+  (globalThis as Record<string, unknown>)[${JSON.stringify(resultKey)}] = result;
+  const fakeHost = process.env.${FAKE_HOST_ENV};
+  if (!fakeHost) throw new Error('${FAKE_HOST_ENV} is not set');
+  const app = await run(
+    createElement('Text', null, result.same ? 'same' : 'distinct'),
+    {
+      host: { cmd: process.execPath, args: [fakeHost] },
+      onClose() {},
+    },
+  );
+  (globalThis as Record<string, unknown>)[${JSON.stringify(appKey)}] = app;
+}
+`,
+      ),
+    ]);
+    await symlink(
+      realDependencyRoot,
+      aliasDependencyRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    await symlink(
+      realAppRoot,
+      aliasAppRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const native = await new Promise<SymlinkIdentityResult>(
+      (resolve, reject) => {
+        execFile(
+          process.execPath,
+          [...probe.execArguments, nativeProbePath],
+          {
+            cwd: fixture,
+            maxBuffer: 1024 * 1024,
+            timeout: 10_000,
+            windowsHide: true,
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              error.message += `\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+              reject(error);
+              return;
+            }
+            resolve(JSON.parse(stdout) as SymlinkIdentityResult);
+          },
+        );
+      },
+    );
+
+    delete globals[countKey];
+    process.env[FAKE_HOST_ENV] = fakeHostPath;
+    server = await createDevServer({
+      entry: aliasMainPath,
+      root: PACKAGE_ROOT,
+      log(message) {
+        logs.push(message);
+      },
+    });
+    await waitForLog(logs, 0, /\[natui\] mounted /);
+    await waitFor('symlink identity app handle', () =>
+      globals[appKey] as NatuiApp | undefined,
+    );
+    const transformed = await waitFor(
+      'transformed symlink identities',
+      () => globals[resultKey] as SymlinkIdentityResult | undefined,
+    );
+    assert.deepEqual(transformed, native);
+  } finally {
+    await server?.close();
+    if (previousFakeHost === undefined) delete process.env[FAKE_HOST_ENV];
+    else process.env[FAKE_HOST_ENV] = previousFakeHost;
+    delete globals[appKey];
+    delete globals[countKey];
+    delete globals[resultKey];
+    await rm(fixture, { recursive: true, force: true });
+  }
+}
+
 test(
-  'createDevServer preserves store identity and component state across leaf refreshes',
+  'setup failures release runtime sessions and partial cache resources',
+  { timeout: 20_000 },
+  async () => {
+    const fixture = await mkdtemp(join(PACKAGE_ROOT, 'natui-dev-setup-'));
+    const cacheBase = join(fixture, '.natui');
+    const entryPath = join(fixture, 'main.ts');
+    const originalDateNow = Date.now;
+    const originalMathRandom = Math.random;
+    let server: NatuiDevServer | undefined;
+
+    try {
+      await writeFile(entryPath, 'export {};\n');
+      await writeFile(cacheBase, 'block cache directory creation');
+      Date.now = () => 1_700_000_000_000;
+      Math.random = () => 0.25;
+
+      await assert.rejects(
+        createDevServer({
+          entry: entryPath,
+          root: fixture,
+          log() {},
+        }),
+        (error: unknown) =>
+          (error as NodeJS.ErrnoException).code === 'EEXIST',
+      );
+
+      await rm(cacheBase, { force: true });
+      server = await createDevServer({
+        entry: entryPath,
+        root: fixture,
+        log() {},
+      });
+
+      await assert.rejects(
+        createDevServer({
+          entry: entryPath,
+          root: fixture,
+          log() {},
+        }),
+        /duplicate development session/,
+      );
+      const cacheEntries = await readdir(cacheBase, { withFileTypes: true });
+      assert.equal(
+        cacheEntries.length,
+        1,
+        'a duplicate-session setup removed only its own cache directory',
+      );
+      assert.equal(cacheEntries[0]?.isDirectory(), true);
+    } finally {
+      Date.now = originalDateNow;
+      Math.random = originalMathRandom;
+      await server?.close();
+      if (server) {
+        await assert.rejects(
+          readdir(cacheBase),
+          (error: unknown) =>
+            (error as NodeJS.ErrnoException).code === 'ENOENT',
+        );
+      }
+      await rm(fixture, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'development JSON imports preserve data semantics and reject executable source text',
+  { timeout: 20_000 },
+  async () => {
+    const fixture = await mkdtemp(join(PACKAGE_ROOT, 'natui-dev-json-'));
+    const unique = `${process.pid}-${Date.now()}`;
+    const observedKey = `__natuiJsonObserved_${unique}`;
+    const compromisedKey = `__natuiJsonCompromised_${unique}`;
+    const globals = globalThis as Record<string, unknown>;
+    const logs: string[] = [];
+    const entryPath = join(fixture, 'main.ts');
+    const payloadPath = join(fixture, 'payload.json');
+    let server: NatuiDevServer | undefined;
+
+    try {
+      await writeFile(
+        entryPath,
+        `
+import payload from './payload.json';
+
+(globalThis as Record<string, unknown>)[${JSON.stringify(observedKey)}] = {
+  keys: Object.keys(payload),
+  ownPrototypeKey: Object.hasOwn(payload, '__proto__'),
+  polluted: (payload as Record<string, unknown>).polluted,
+};
+`,
+      );
+      await writeFile(
+        payloadPath,
+        `\uFEFF{"__proto__":{"polluted":"yes"},"safe":1}`,
+      );
+
+      server = await createDevServer({
+        entry: entryPath,
+        root: PACKAGE_ROOT,
+        log(message) {
+          logs.push(message);
+        },
+      });
+
+      const observed = await waitFor('parsed JSON data', () =>
+        globals[observedKey] as
+          | {
+              keys: string[];
+              ownPrototypeKey: boolean;
+              polluted?: unknown;
+            }
+          | undefined,
+      );
+      assert.deepEqual(observed, {
+        keys: ['__proto__', 'safe'],
+        ownPrototypeKey: true,
+        polluted: undefined,
+      });
+
+      const invalidJsonLog = logs.length;
+      await writeFile(
+        payloadPath,
+        `(() => { globalThis[${JSON.stringify(compromisedKey)}] = true; return {}; })()`,
+      );
+      await waitForLog(logs, invalidJsonLog, /natui: invalid JSON/);
+      await delay(100);
+      assert.strictEqual(globals[compromisedKey], undefined);
+    } finally {
+      await server?.close();
+      delete globals[observedKey];
+      delete globals[compromisedKey];
+      await rm(fixture, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'development preserves Node URL identity for local query and fragment imports',
+  { timeout: 30_000 },
+  async () => {
+    const fixture = await mkdtemp(join(PACKAGE_ROOT, 'natui-dev-suffix-'));
+    const unique = `${process.pid}-${Date.now()}`;
+    const appKey = `__natuiSuffixApp_${unique}`;
+    const resultKey = `__natuiSuffixResult_${unique}`;
+    const globals = globalThis as Record<string, unknown>;
+    const previousFakeHost = process.env[FAKE_HOST_ENV];
+    const logs: string[] = [];
+    const entryPath = join(fixture, 'main.ts');
+    const fakeHostPath = join(fixture, 'fake-host.cjs');
+    const sourcePath = join(fixture, 'source.js');
+    const valuePath = join(fixture, 'value.js');
+    const sourceUrl = pathToFileURL(sourcePath);
+    const variantUrls = [
+      new URL(sourceUrl.href),
+      new URL(`${sourceUrl.href}?`),
+      new URL(`${sourceUrl.href}#`),
+      new URL(`${sourceUrl.href}?one`),
+      new URL(`${sourceUrl.href}?two`),
+      new URL(`${sourceUrl.href}#one`),
+      new URL(`${sourceUrl.href}#two`),
+    ];
+    let server: NatuiDevServer | undefined;
+
+    const source = (version: string) => `
+export default {
+  dirname: import.meta.dirname,
+  filename: import.meta.filename,
+  resolved: import.meta.resolve('./value.js'),
+  token: {},
+  url: import.meta.url,
+  version: ${JSON.stringify(version)},
+};
+`;
+
+    try {
+      await Promise.all([
+        writeFile(fakeHostPath, FAKE_HOST_SOURCE),
+        writeFile(sourcePath, source('one')),
+        writeFile(valuePath, 'export const value = true;\n'),
+        writeFile(
+          entryPath,
+          `
+import { createElement } from 'react';
+import { run } from 'natui';
+import plain from './source.js';
+import emptyQuery from './source.js?';
+import emptyFragment from './source.js#';
+import queryOne from './source.js?one';
+import queryTwo from ${JSON.stringify(variantUrls[4]!.href)};
+import fragmentOne from './source.js#one';
+import fragmentTwo from ${JSON.stringify(variantUrls[6]!.href)};
+
+const variants = [
+  plain,
+  emptyQuery,
+  emptyFragment,
+  queryOne,
+  queryTwo,
+  fragmentOne,
+  fragmentTwo,
+];
+(globalThis as Record<string, unknown>)[${JSON.stringify(resultKey)}] = variants;
+const fakeHost = process.env.${FAKE_HOST_ENV};
+if (!fakeHost) throw new Error('${FAKE_HOST_ENV} is not set');
+const app = await run(
+  createElement('Text', null, variants.map((variant) => variant.version).join(',')),
+  {
+    host: { cmd: process.execPath, args: [fakeHost] },
+    onClose() {},
+  },
+);
+(globalThis as Record<string, unknown>)[${JSON.stringify(appKey)}] = app;
+`,
+        ),
+      ]);
+
+      const nativeResult = await new Promise<{
+        identityCount: number;
+        variants: Array<{
+          dirname: string;
+          filename: string;
+          resolved: string;
+          url: string;
+          version: string;
+        }>;
+      }>((resolve, reject) => {
+        const script = `
+const modules = await Promise.all(
+  ${JSON.stringify(variantUrls.map((url) => url.href))}.map((url) => import(url)),
+);
+const variants = modules.map((module) => module.default);
+process.stdout.write(JSON.stringify({
+  identityCount: new Set(variants.map((variant) => variant.token)).size,
+  variants: variants.map(({ token, ...variant }) => variant),
+}));
+`;
+        execFile(
+          process.execPath,
+          ['--input-type=module', '--eval', script],
+          {
+            cwd: fixture,
+            timeout: 10_000,
+            windowsHide: true,
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              error.message += `\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+              reject(error);
+              return;
+            }
+            resolve(JSON.parse(stdout) as {
+              identityCount: number;
+              variants: Array<{
+                dirname: string;
+                filename: string;
+                resolved: string;
+                url: string;
+                version: string;
+              }>;
+            });
+          },
+        );
+      });
+      assert.equal(
+        nativeResult.identityCount,
+        5,
+        'Node collapses bare query and fragment delimiters into the plain module identity',
+      );
+
+      process.env[FAKE_HOST_ENV] = fakeHostPath;
+      server = await createDevServer({
+        entry: entryPath,
+        root: PACKAGE_ROOT,
+        log(message) {
+          logs.push(message);
+        },
+      });
+      await waitForLog(logs, 0, /\[natui\] mounted /);
+      const app = await waitFor('query and fragment app handle', () =>
+        globals[appKey] as NatuiApp | undefined,
+      );
+      const transformedVariants = await waitFor(
+        'transformed query and fragment modules',
+        () =>
+          globals[resultKey] as
+            | Array<{
+                dirname: string;
+                filename: string;
+                resolved: string;
+                token: object;
+                url: string;
+                version: string;
+              }>
+            | undefined,
+      );
+      assert.deepEqual(
+        transformedVariants.map(({ token: _token, ...variant }) => variant),
+        nativeResult.variants,
+      );
+      assert.equal(
+        new Set(transformedVariants.map((variant) => variant.token)).size,
+        nativeResult.identityCount,
+      );
+
+      const refreshLog = logs.length;
+      await writeFile(sourcePath, source('two'));
+      await waitForLog(logs, refreshLog, /\[natui\] refreshed #1 /);
+      const refreshedVariants = await waitFor(
+        'all suffixed module identities to refresh',
+        () => {
+          const variants = globals[resultKey] as
+            | Array<{ token: object; version: string }>
+            | undefined;
+          return variants?.every((variant) => variant.version === 'two')
+            ? variants
+            : undefined;
+        },
+      );
+      assert.equal(
+        new Set(refreshedVariants.map((variant) => variant.token)).size,
+        nativeResult.identityCount,
+      );
+      await waitFor('refreshed query and fragment tree', async () =>
+        textOf(await app.dump()) === 'two,two,two,two,two,two,two'
+          ? true
+          : undefined,
+      );
+    } finally {
+      await server?.close();
+      if (previousFakeHost === undefined) delete process.env[FAKE_HOST_ENV];
+      else process.env[FAKE_HOST_ENV] = previousFakeHost;
+      delete globals[appKey];
+      delete globals[resultKey];
+      await rm(fixture, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  SYMLINK_IDENTITY_TEST_NAME,
+  { timeout: 90_000 },
+  async () => {
+    const serializedProbe = process.env[SYMLINK_IDENTITY_PROBE_ENV];
+    if (serializedProbe) {
+      const probe = JSON.parse(serializedProbe) as SymlinkIdentityProbe;
+      const originalExecArgv = process.execArgv;
+      process.execArgv = [...probe.execArguments, ...originalExecArgv];
+      try {
+        await runSymlinkIdentityProbe(probe);
+        process.stdout.write(`${probe.completionMarker}\n`);
+      } finally {
+        process.execArgv = originalExecArgv;
+      }
+      return;
+    }
+
+    const scenarios = [
+      { name: 'default', execArguments: [] },
+      {
+        name: 'dependency preservation',
+        execArguments: ['--preserve-symlinks'],
+      },
+      {
+        name: 'main preservation',
+        execArguments: ['--preserve-symlinks-main'],
+      },
+      {
+        name: 'dependency and main preservation',
+        execArguments: [
+          '--preserve-symlinks',
+          '--preserve-symlinks-main',
+        ],
+      },
+      {
+        name: 'main preservation from environment',
+        execArguments: [],
+        preserveSymlinksMainEnvironment: '1',
+      },
+      {
+        name: 'command line disables main preservation from environment',
+        execArguments: ['--no-preserve-symlinks-main'],
+        preserveSymlinksMainEnvironment: '1',
+      },
+    ];
+    await Promise.all(
+      scenarios.map(
+        (scenario) =>
+          new Promise<void>((resolve, reject) => {
+            const completionMarker =
+              `natui-symlink-identity-complete:${scenario.name}:${process.pid}:${Date.now()}`;
+            const environment: NodeJS.ProcessEnv = {
+              ...process.env,
+              NODE_OPTIONS: '',
+              [SYMLINK_IDENTITY_PROBE_ENV]: JSON.stringify({
+                completionMarker,
+                execArguments: scenario.execArguments,
+              } satisfies SymlinkIdentityProbe),
+            };
+            delete environment.NODE_PRESERVE_SYMLINKS;
+            delete environment.NODE_PRESERVE_SYMLINKS_MAIN;
+            if (scenario.preserveSymlinksMainEnvironment !== undefined) {
+              environment.NODE_PRESERVE_SYMLINKS_MAIN =
+                scenario.preserveSymlinksMainEnvironment;
+            }
+            delete environment.NODE_TEST_CONTEXT;
+
+            execFile(
+              process.execPath,
+              [
+                '--import',
+                'tsx',
+                '--test',
+                '--test-concurrency=1',
+                `--test-name-pattern=^${SYMLINK_IDENTITY_TEST_NAME}$`,
+                fileURLToPath(import.meta.url),
+              ],
+              {
+                cwd: PACKAGE_ROOT,
+                env: environment,
+                maxBuffer: 2 * 1024 * 1024,
+                timeout: 70_000,
+                windowsHide: true,
+              },
+              (error, stdout, stderr) => {
+                if (!error && stdout.includes(completionMarker)) {
+                  resolve();
+                  return;
+                }
+                reject(
+                  new Error(
+                    `${scenario.name} symlink identity child failed or did not complete\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+                    { cause: error },
+                  ),
+                );
+              },
+            );
+          }),
+      ),
+    );
+  },
+);
+
+test(
+  'static resolution honors custom Node ESM conditions',
+  { timeout: 90_000 },
+  async () => {
+    const completionMarker =
+      `natui-static-condition-complete:${process.pid}:${Date.now()}`;
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      [STATIC_CONDITION_EXPECTED_ENV]: 'custom',
+      [STATIC_CONDITION_COMPLETION_ENV]: completionMarker,
+    };
+    delete environment.NODE_TEST_CONTEXT;
+
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        [
+          '--conditions=natui-custom',
+          '--import',
+          'tsx',
+          '--test',
+          '--test-concurrency=1',
+          `--test-name-pattern=^${MAIN_INTEGRATION_TEST_NAME}$`,
+          fileURLToPath(import.meta.url),
+        ],
+        {
+          cwd: PACKAGE_ROOT,
+          env: environment,
+          maxBuffer: 2 * 1024 * 1024,
+          timeout: 70_000,
+          windowsHide: true,
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            error.message += `\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+            reject(error);
+          } else if (!stdout.includes(completionMarker)) {
+            reject(
+              new Error(
+                `custom-condition child did not run the integration test\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+              ),
+            );
+          } else {
+            resolve();
+          }
+        },
+      );
+    });
+  },
+);
+
+test(
+  MAIN_INTEGRATION_TEST_NAME,
   { timeout: 60_000 },
   async () => {
     const fixture = await mkdtemp(
       join(PACKAGE_ROOT, 'natui-dev-integration-'),
     );
     const unique = `${process.pid}-${Date.now()}`;
+    const pendingDependencyGateKey =
+      `__natuiDevIntegrationPendingDependencyGate_${unique}`;
+    const pendingDependencyStartedKey =
+      `__natuiDevIntegrationPendingDependencyStarted_${unique}`;
     const keys: FixtureKeys = {
       app: `__natuiDevIntegrationApp_${unique}`,
       leafEvaluations: `__natuiDevIntegrationLeafEvaluations_${unique}`,
       moduleIdentity: `__natuiDevIntegrationModule_${unique}`,
       showUnvisited: `__natuiDevIntegrationShowUnvisited_${unique}`,
       storeIdentity: `__natuiDevIntegrationStore_${unique}`,
+      transientValueFailure: `__natuiDevIntegrationTransientValueFailure_${unique}`,
       unvisitedEvaluations: `__natuiDevIntegrationUnvisitedEvaluations_${unique}`,
     };
     const leaf = (
@@ -469,12 +1267,19 @@ test(
     const expectedReactErrors: Error[] = [];
     const logs: string[] = [];
     const entryPath = join(fixture, 'main.ts');
+    const fileValuePath = join(fixture, 'file-value.js');
     const leafPath = join(fixture, 'leaf.ts');
     const unvisitedPath = join(fixture, 'unvisited.ts');
     const fakeHostPath = join(fixture, 'fake-host.cjs');
     let server: NatuiDevServer | undefined;
 
     try {
+      const conditionalPackageRoot = join(
+        fixture,
+        'node_modules',
+        'natui-import-meta-conditional-fixture',
+      );
+      await mkdir(conditionalPackageRoot, { recursive: true });
       console.error = (...args: unknown[]) => {
         const error = args.find((value): value is Error => value instanceof Error);
         if (error?.message.startsWith('leaf ')) {
@@ -485,10 +1290,83 @@ test(
       };
 
       await Promise.all([
+        writeFile(
+          join(fixture, 'package.json'),
+          JSON.stringify({
+            imports: {
+              '#conditional': {
+                'natui-custom': './custom-condition.js',
+                module: './module-condition.js',
+                import: './import-condition.js',
+                require: './require-condition.cjs',
+              },
+              '#external-cjs': './external.cjs',
+            },
+            type: 'module',
+          }),
+        ),
+        writeFile(
+          join(fixture, 'custom-condition.js'),
+          `export default 'custom';\n`,
+        ),
+        writeFile(
+          join(fixture, 'module-condition.js'),
+          `export default 'module';\n`,
+        ),
+        writeFile(
+          join(fixture, 'import-condition.js'),
+          `export default 'import';\n`,
+        ),
+        writeFile(
+          join(fixture, 'require-condition.cjs'),
+          'module.exports = true;\n',
+        ),
+        writeFile(
+          join(fixture, 'external.cjs'),
+          `module.exports = 'external-cjs';\n`,
+        ),
+        writeFile(
+          join(conditionalPackageRoot, 'package.json'),
+          JSON.stringify({
+            exports: {
+              'natui-custom': './custom.js',
+              module: './module.js',
+              import: './import.js',
+              require: './require.cjs',
+            },
+            name: 'natui-import-meta-conditional-fixture',
+            type: 'module',
+          }),
+        ),
+        writeFile(
+          join(conditionalPackageRoot, 'custom.js'),
+          `export default 'custom';\n`,
+        ),
+        writeFile(
+          join(conditionalPackageRoot, 'module.js'),
+          `export default 'module';\n`,
+        ),
+        writeFile(
+          join(conditionalPackageRoot, 'import.js'),
+          `export default 'import';\n`,
+        ),
+        writeFile(
+          join(conditionalPackageRoot, 'require.cjs'),
+          'module.exports = true;\n',
+        ),
         writeFile(fakeHostPath, FAKE_HOST_SOURCE),
-        writeFile(entryPath, entrySource(keys)),
+        writeFile(
+          entryPath,
+          entrySource(
+            keys,
+            pathToFileURL(fileValuePath).href,
+            process.env[STATIC_CONDITION_EXPECTED_ENV] ?? 'import',
+          ),
+        ),
+        writeFile(fileValuePath, `export default 'file-url';\n`),
         writeFile(join(fixture, 'app.ts'), appSource(keys)),
         writeFile(join(fixture, 'store.ts'), storeSource(keys.storeIdentity)),
+        writeFile(join(fixture, 'value.ts'), valueSource('')),
         writeFile(leafPath, leaf('old', 1)),
         writeFile(
           unvisitedPath,
@@ -729,13 +1607,52 @@ test(
         'each emitted leaf revision evaluated exactly once',
       );
 
+      const dependencyRefreshLog = logs.length;
+      await writeFile(join(fixture, 'value.ts'), valueSource(':dependency'));
+      await waitForLog(logs, dependencyRefreshLog, /\[natui\] refreshed #5 /);
+      const afterDependencyEdit = await waitForTreeText(
+        app,
+        'recovered:4:dependency',
+      );
+      assert.deepEqual(
+        nativeIds(afterDependencyEdit),
+        idsAfterDeepFollowupRecovery,
+        'refreshing a non-component dependency preserved native instances',
+      );
+      assert.strictEqual(globals[keys.moduleIdentity], moduleBeforeRefresh);
+      assert.strictEqual(
+        globals[keys.storeIdentity],
+        storeAfterDeepFollowupRecovery,
+      );
+
+      globals[keys.transientValueFailure] = true;
+      const transientDependencyFailureLog = logs.length;
+      await writeFile(
+        join(fixture, 'value.ts'),
+        valueSource(':cache-recovered', keys.transientValueFailure),
+      );
+      const transientDependencyFailure = await waitForLog(
+        logs,
+        transientDependencyFailureLog,
+        /refresh failed; keeping the previous UI/,
+      );
+      assert.match(
+        transientDependencyFailure,
+        /value transient evaluation exploded/,
+      );
+      await waitForTreeText(app, 'recovered:4:dependency');
+      delete globals[keys.transientValueFailure];
+
       const unvisitedRefreshLog = logs.length;
       await writeFile(
         unvisitedPath,
         unvisitedSource(keys.unvisitedEvaluations, 'unvisited-v2'),
       );
-      await waitForLog(logs, unvisitedRefreshLog, /\[natui\] refreshed #5 /);
-      const afterUnvisitedEdit = await waitForTreeText(app, 'recovered:4');
+      await waitForLog(logs, unvisitedRefreshLog, /\[natui\] refreshed #6 /);
+      const afterUnvisitedEdit = await waitForTreeText(
+        app,
+        'recovered:4:cache-recovered',
+      );
       assert.deepEqual(
         nativeIds(afterUnvisitedEdit),
         idsAfterDeepFollowupRecovery,
@@ -744,6 +1661,71 @@ test(
         globals[keys.unvisitedEvaluations],
         undefined,
         'editing an unloaded lazy module did not execute it eagerly',
+      );
+
+      globals[pendingDependencyGateKey] = new Promise<never>(() => undefined);
+      await writeFile(
+        join(fixture, 'value.ts'),
+        gatedValueSource(
+          ':pending-cache-recovered',
+          pendingDependencyGateKey,
+          pendingDependencyStartedKey,
+        ),
+      );
+      await waitFor('pending dependency evaluation to start', () =>
+        globals[pendingDependencyStartedKey] === true ? true : undefined,
+      );
+      delete globals[pendingDependencyGateKey];
+
+      const pendingDependencyRecoveryLog = logs.length;
+      await writeFile(
+        unvisitedPath,
+        unvisitedSource(keys.unvisitedEvaluations, 'unvisited-v3'),
+      );
+      await waitForLog(
+        logs,
+        pendingDependencyRecoveryLog,
+        /\[natui\] refreshed #7 /,
+      );
+      const afterPendingDependencyRecovery = await waitForTreeText(
+        app,
+        'recovered:4:pending-cache-recovered',
+      );
+      assert.deepEqual(
+        nativeIds(afterPendingDependencyRecovery),
+        idsAfterDeepFollowupRecovery,
+        'a superseding build did not reuse a pending module job',
+      );
+      assert.strictEqual(
+        globals[keys.unvisitedEvaluations],
+        undefined,
+        'retrying through an unloaded lazy edit did not execute it eagerly',
+      );
+
+      const missingDependencyLog = logs.length;
+      await writeFile(
+        join(fixture, 'value.ts'),
+        missingDependencySource(),
+      );
+      await waitForLog(
+        logs,
+        missingDependencyLog,
+        /\[natui\] build failed; keeping the previous UI/,
+      );
+      await mkdir(join(fixture, 'generated', 'deep'), { recursive: true });
+      await writeFile(
+        join(fixture, 'generated', 'deep', 'created.ts'),
+        `export const createdSuffix = ':created' satisfies string;\n`,
+      );
+      await waitForLog(logs, missingDependencyLog, /\[natui\] refreshed #8 /);
+      const afterMissingDependencyAppeared = await waitForTreeText(
+        app,
+        'recovered:4:created',
+      );
+      assert.deepEqual(
+        nativeIds(afterMissingDependencyAppeared),
+        idsAfterDeepFollowupRecovery,
+        'creating a previously missing dependency resumed refresh',
       );
     } finally {
       console.error = originalConsoleError;
@@ -755,8 +1737,14 @@ test(
       delete globals[keys.moduleIdentity];
       delete globals[keys.showUnvisited];
       delete globals[keys.storeIdentity];
+      delete globals[keys.transientValueFailure];
       delete globals[keys.unvisitedEvaluations];
+      delete globals[pendingDependencyGateKey];
+      delete globals[pendingDependencyStartedKey];
       await rm(fixture, { recursive: true, force: true });
     }
+    const completionMarker =
+      process.env[STATIC_CONDITION_COMPLETION_ENV];
+    if (completionMarker) process.stdout.write(`${completionMarker}\n`);
   },
 );

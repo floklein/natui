@@ -16,7 +16,6 @@ function loaderFor(filename: string): Loader {
       return 'tsx';
     case '.ts':
     case '.mts':
-    case '.cts':
       return 'ts';
     case '.jsx':
       return 'jsx';
@@ -28,7 +27,7 @@ function loaderFor(filename: string): Loader {
 function parserPlugins(filename: string): ('jsx' | 'typescript')[] {
   const extension = extname(filename).toLowerCase();
   const plugins: ('jsx' | 'typescript')[] = [];
-  if (['.ts', '.tsx', '.mts', '.cts'].includes(extension)) plugins.push('typescript');
+  if (['.ts', '.tsx', '.mts'].includes(extension)) plugins.push('typescript');
   if (['.jsx', '.tsx'].includes(extension)) plugins.push('jsx');
   return plugins;
 }
@@ -38,12 +37,113 @@ function normalizedModuleId(root: string, filename: string): string {
   return path.startsWith('.') ? path : `./${path}`;
 }
 
-function bindDynamicImportsPlugin(state: { helperName: string }): PluginObj {
+function sourceIdentitySuffix(sourceIdentity: string): string {
+  if (!sourceIdentity.startsWith('file:')) return '';
+  const url = new URL(sourceIdentity);
+  return `${url.search}${url.hash}`;
+}
+
+interface InstrumentationNames {
+  importHelper: string;
+  importMeta: string;
+  moduleRuntime: string;
+  refreshReg: string;
+  refreshRuntime: string;
+  refreshSig: string;
+}
+
+function collectIdentifierNamesPlugin(
+  onNames: (names: Set<string>) => void,
+): PluginObj {
   return {
     visitor: {
       Program(path) {
-        state.helperName = path.scope.generateUidIdentifier('natuiImport').name;
+        const names = new Set<string>();
+        path.traverse({
+          Identifier(identifierPath) {
+            names.add(identifierPath.node.name);
+          },
+          JSXIdentifier(identifierPath) {
+            names.add(identifierPath.node.name);
+          },
+        });
+        onNames(names);
       },
+    },
+  };
+}
+
+async function instrumentationNames(
+  source: string,
+  filename: string,
+): Promise<InstrumentationNames> {
+  let sourceNames: Set<string> | undefined;
+  await transformAsync(source, {
+    ast: false,
+    babelrc: false,
+    code: false,
+    configFile: false,
+    filename,
+    parserOpts: {
+      createImportExpressions: false,
+      sourceType: 'module',
+      plugins: parserPlugins(filename),
+    },
+    plugins: [
+      collectIdentifierNamesPlugin((names) => {
+        sourceNames = names;
+      }),
+    ],
+  });
+  if (!sourceNames) {
+    throw new Error(`natui: could not inspect identifiers in ${filename}`);
+  }
+
+  const occupiedNames = sourceNames;
+  const reserved = new Set<string>();
+  const allocate = (base: string) => {
+    let candidate = base;
+    let suffix = 2;
+    while (
+      source.includes(candidate) ||
+      occupiedNames.has(candidate) ||
+      reserved.has(candidate)
+    ) {
+      candidate = `${base}${suffix}`;
+      suffix += 1;
+    }
+    reserved.add(candidate);
+    return candidate;
+  };
+
+  return {
+    importHelper: allocate('__natuiImport'),
+    importMeta: allocate('__natuiImportMeta'),
+    moduleRuntime: allocate('__natuiModuleRuntime'),
+    refreshReg: allocate('__natuiRefreshReg'),
+    refreshRuntime: allocate('__natuiRefreshRuntime'),
+    refreshSig: allocate('__natuiRefreshSig'),
+  };
+}
+
+function bindImportMetaPlugin(importMetaName: string): PluginObj {
+  return {
+    visitor: {
+      MetaProperty(path) {
+        if (
+          path.node.meta.name === 'import' &&
+          path.node.property.name === 'meta'
+        ) {
+          path.replaceWith(babelTypes.identifier(importMetaName));
+        }
+      },
+    },
+  };
+}
+
+function bindDynamicImportsPlugin(helperName: string): PluginObj {
+  return {
+    visitor: {
       CallExpression: {
         exit(path) {
           if (path.node.callee.type !== 'Import') return;
@@ -75,8 +175,7 @@ function bindDynamicImportsPlugin(state: { helperName: string }): PluginObj {
           const dynamicArguments = path.node.arguments.map((argument, index) => {
             const argumentPath = argumentPaths[index];
             const mustPreserveOuterEvaluation =
-              sensitiveArguments[index] ||
-              (index < lastSensitiveArgument && !argumentPath.isPure());
+              index <= lastSensitiveArgument;
             if (!mustPreserveOuterEvaluation || !argumentPath.isExpression()) {
               return babelTypes.cloneNode(argument);
             }
@@ -97,7 +196,7 @@ function bindDynamicImportsPlugin(state: { helperName: string }): PluginObj {
             dynamicArguments,
           );
           const wrappedImport = babelTypes.callExpression(
-            babelTypes.identifier(state.helperName),
+            babelTypes.identifier(helperName),
             [babelTypes.arrowFunctionExpression([], dynamicImport)],
           );
           path.replaceWith(
@@ -120,9 +219,12 @@ export async function instrumentForRefresh(
   filename: string,
   root: string,
   familyPrefix: string,
+  sourceIdentity = filename,
 ): Promise<{ contents: string; loader: Loader }> {
-  const moduleId = `${familyPrefix}:${normalizedModuleId(root, filename)}`;
-  const dynamicImportState = { helperName: '' };
+  const moduleId =
+    `${familyPrefix}:${normalizedModuleId(root, filename)}` +
+    sourceIdentitySuffix(sourceIdentity);
+  const names = await instrumentationNames(source, filename);
   const result = await transformAsync(source, {
     babelrc: false,
     configFile: false,
@@ -134,13 +236,14 @@ export async function instrumentForRefresh(
       plugins: parserPlugins(filename),
     },
     plugins: [
-      bindDynamicImportsPlugin(dynamicImportState),
+      bindImportMetaPlugin(names.importMeta),
+      bindDynamicImportsPlugin(names.importHelper),
       [
         refreshBabelPlugin,
         {
           skipEnvCheck: true,
-          refreshReg: '__natuiRefreshReg',
-          refreshSig: '__natuiRefreshSig',
+          refreshReg: names.refreshReg,
+          refreshSig: names.refreshSig,
         },
       ],
     ],
@@ -150,17 +253,15 @@ export async function instrumentForRefresh(
   if (result?.code === undefined || result.code === null) {
     throw new Error(`natui: React Refresh transform returned no code for ${filename}`);
   }
-  if (!dynamicImportState.helperName) {
-    throw new Error(`natui: dynamic import transform did not initialize for ${filename}`);
-  }
 
   const preamble = [
-    `const __natuiModuleRuntime = globalThis[${JSON.stringify(REFRESH_MODULE_RUNTIME_GLOBAL)}]?.(${JSON.stringify(familyPrefix)}, ${JSON.stringify(filename)}, ${JSON.stringify(EMITTED_MODULE_URL_PLACEHOLDER)});`,
-    'if (!__natuiModuleRuntime) throw new Error("natui: React Refresh runtime is not installed");',
-    'const __natuiRefreshRuntime = __natuiModuleRuntime.refreshRuntime;',
-    `const ${dynamicImportState.helperName} = __natuiModuleRuntime.importModule;`,
-    `const __natuiRefreshReg = (type, id) => __natuiRefreshRuntime.register(type, ${JSON.stringify(`${moduleId} `)} + id);`,
-    'const __natuiRefreshSig = __natuiRefreshRuntime.createSignatureFunctionForTransform;',
+    `const ${names.moduleRuntime} = globalThis[${JSON.stringify(REFRESH_MODULE_RUNTIME_GLOBAL)}]?.(${JSON.stringify(familyPrefix)}, ${JSON.stringify(sourceIdentity)}, ${JSON.stringify(EMITTED_MODULE_URL_PLACEHOLDER)});`,
+    `if (!${names.moduleRuntime}) throw new Error("natui: React Refresh runtime is not installed");`,
+    `const ${names.importMeta} = ${names.moduleRuntime}.importMeta;`,
+    `const ${names.refreshRuntime} = ${names.moduleRuntime}.refreshRuntime;`,
+    `const ${names.importHelper} = ${names.moduleRuntime}.importModule;`,
+    `const ${names.refreshReg} = (type, id) => ${names.refreshRuntime}.register(type, ${JSON.stringify(`${moduleId} `)} + id);`,
+    `const ${names.refreshSig} = ${names.refreshRuntime}.createSignatureFunctionForTransform;`,
     '',
   ].join('\n');
 
@@ -179,6 +280,13 @@ export async function loadAndInstrumentForRefresh(
   filename: string,
   root: string,
   familyPrefix: string,
+  sourceIdentity = filename,
 ): Promise<{ contents: string; loader: Loader }> {
-  return instrumentForRefresh(await readFile(filename, 'utf8'), filename, root, familyPrefix);
+  return instrumentForRefresh(
+    await readFile(filename, 'utf8'),
+    filename,
+    root,
+    familyPrefix,
+    sourceIdentity,
+  );
 }

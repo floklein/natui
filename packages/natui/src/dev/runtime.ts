@@ -1,10 +1,16 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   captureRefreshRuntime,
   captureRefreshWorkRunner,
   REFRESH_MODULE_RUNTIME_GLOBAL,
   type ReactRefreshRuntime,
 } from './refresh.js';
+import {
+  canonicalSourceUrl,
+  resolveSourceSpecifier,
+} from './resolution.js';
 import type { ReactNode } from 'react';
 import {
   runWithController,
@@ -45,11 +51,40 @@ interface ModuleOwner {
 }
 
 interface DevModuleRuntime {
+  importMeta: ImportMeta;
   importModule<T>(load: () => Promise<T>): Promise<T>;
   refreshRuntime: ReactRefreshRuntime;
 }
 
 const generationStorage = new AsyncLocalStorage<GenerationContext>();
+
+function sourceIdentityUrl(sourceIdentity: string): URL {
+  return sourceIdentity.startsWith('file:')
+    ? new URL(sourceIdentity)
+    : pathToFileURL(sourceIdentity);
+}
+
+function sourceImportMeta(
+  sourceIdentity: string,
+  main: boolean,
+): ImportMeta {
+  const sourceUrl = canonicalSourceUrl(
+    sourceIdentityUrl(sourceIdentity),
+    main,
+  );
+  const filename = fileURLToPath(sourceUrl);
+  const importMeta = Object.create(null) as ImportMeta;
+  Object.assign(importMeta, {
+    dirname: dirname(filename),
+    filename,
+    main,
+    resolve(specifier: string) {
+      return resolveSourceSpecifier(specifier, sourceUrl, main);
+    },
+    url: sourceUrl.href,
+  });
+  return importMeta;
+}
 
 function supersededGenerationError(): Error {
   const error = new Error('natui: development generation was superseded');
@@ -82,6 +117,12 @@ class DevRuntimeSession {
   private hadAppAtGenerationStart = false;
   private pendingRun: PendingRun | undefined;
   private reactErrors: Error[] = [];
+
+  private readonly entryUrl: string;
+
+  constructor(entry: string) {
+    this.entryUrl = canonicalSourceUrl(pathToFileURL(entry), true).href;
+  }
 
   beginGeneration(
     artifacts: Iterable<string>,
@@ -152,6 +193,7 @@ class DevRuntimeSession {
           this.markModuleEvaluated(fallbackOwner.token, moduleId);
           return this.createModuleRuntime(
             this.combineOwners(activeOwner, fallbackOwner),
+            moduleId,
           );
         }
 
@@ -181,16 +223,17 @@ class DevRuntimeSession {
         ) {
           return this.runCommittedWork(() => {
             const token = this.committedGenerationToken;
-            if (!token) return this.createModuleRuntime(inheritedOwner);
+            if (!token) return this.createModuleRuntime(inheritedOwner, moduleId);
             this.markModuleEvaluated(token, moduleId);
             return this.createModuleRuntime(
               this.captureOwner(token, artifactId),
+              moduleId,
             );
           });
         }
 
-        this.markModuleEvaluated(inheritedOwner.token, moduleId);
-        return this.createModuleRuntime(inheritedOwner);
+        this.markOwnerEvaluated(inheritedOwner, moduleId);
+        return this.createModuleRuntime(inheritedOwner, moduleId);
       }
 
       const active = this.activeGeneration;
@@ -201,6 +244,7 @@ class DevRuntimeSession {
         this.markModuleEvaluated(context.token, moduleId);
         return this.createModuleRuntime(
           this.captureOwner(context.token, artifactId),
+          moduleId,
         );
       }
     }
@@ -213,12 +257,19 @@ class DevRuntimeSession {
       const token = this.committedGenerationToken;
       if (!token) {
         return {
+          importMeta: sourceImportMeta(
+            moduleId,
+            this.isEntryModule(moduleId),
+          ),
           importModule: (load) => load(),
           refreshRuntime: captureRefreshRuntime(),
         };
       }
       this.markModuleEvaluated(token, moduleId);
-      return this.createModuleRuntime(this.captureOwner(token, artifactId));
+      return this.createModuleRuntime(
+        this.captureOwner(token, artifactId),
+        moduleId,
+      );
     });
   }
 
@@ -394,6 +445,13 @@ class DevRuntimeSession {
     return generation;
   }
 
+  private isEntryModule(moduleId: string): boolean {
+    return (
+      canonicalSourceUrl(sourceIdentityUrl(moduleId), true).href ===
+      this.entryUrl
+    );
+  }
+
   private runCommittedWork<T>(work: () => T): T {
     const token = this.committedGenerationToken;
     const runner = this.committedWorkRunner;
@@ -412,6 +470,23 @@ class DevRuntimeSession {
       refreshWorkRunner: captureRefreshWorkRunner(),
       token,
     };
+  }
+
+  private committedOwnerFor(owner: ModuleOwner): ModuleOwner | undefined {
+    const token = this.committedGenerationToken;
+    if (!token) return undefined;
+    if (owner.token === token) return owner;
+    if (owner.pinned || !this.committedArtifacts.has(owner.artifactId)) {
+      return undefined;
+    }
+    return this.runCommittedWork(() =>
+      this.captureOwner(token, owner.artifactId),
+    );
+  }
+
+  private markOwnerEvaluated(owner: ModuleOwner, moduleId: string): void {
+    this.markModuleEvaluated(owner.token, moduleId);
+    if (owner.fallback) this.markOwnerEvaluated(owner.fallback, moduleId);
   }
 
   private combineOwners(
@@ -468,8 +543,15 @@ class DevRuntimeSession {
     return owner;
   }
 
-  private createModuleRuntime(owner: ModuleOwner): DevModuleRuntime {
+  private createModuleRuntime(
+    owner: ModuleOwner,
+    moduleId: string,
+  ): DevModuleRuntime {
     return {
+      importMeta: sourceImportMeta(
+        moduleId,
+        this.isEntryModule(moduleId),
+      ),
       importModule: (load) => {
         const liveOwner = this.resolveLiveOwner(owner);
         const active = this.activeGeneration;
@@ -484,10 +566,10 @@ class DevRuntimeSession {
             active.token,
             liveOwner.artifactId,
           );
-          const currentOwner =
-            liveOwner.token === this.committedGenerationToken
-              ? this.combineOwners(activeOwner, liveOwner)
-              : activeOwner;
+          const committedOwner = this.committedOwnerFor(liveOwner);
+          const currentOwner = committedOwner
+            ? this.combineOwners(activeOwner, committedOwner)
+            : activeOwner;
           return generationStorage.run(
             {
               moduleOwner: currentOwner,
@@ -555,9 +637,12 @@ type DevRuntimeGlobal = typeof globalThis & {
   return sessions.get(sessionId)?.captureModuleRuntime(moduleId, moduleUrl);
 };
 
-export function registerDevRuntimeSession(id: string): DevRuntimeSession {
+export function registerDevRuntimeSession(
+  id: string,
+  entry: string,
+): DevRuntimeSession {
   if (sessions.has(id)) throw new Error(`natui: duplicate development session "${id}"`);
-  const session = new DevRuntimeSession();
+  const session = new DevRuntimeSession(entry);
   sessions.set(id, session);
   return session;
 }

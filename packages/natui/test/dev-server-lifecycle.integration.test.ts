@@ -1,16 +1,20 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import {
   access,
+  mkdir,
   mkdtemp,
+  realpath,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
-import {
-  createDevServer,
-  type NatuiDevServer,
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import type {
+  DevServerOptions,
+  NatuiDevServer,
 } from '../src/dev/server.js';
 import type { TreeNode } from '../src/protocol.js';
 import type { NatuiApp } from '../src/run.js';
@@ -18,6 +22,18 @@ import type { NatuiApp } from '../src/run.js';
 const PACKAGE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WAIT_TIMEOUT_MS = 10_000;
 const CLOSE_TIMEOUT_MS = 2_000;
+const SOURCE_RESOLUTION_PROBE_ENV = 'NATUI_SOURCE_RESOLUTION_PROBE';
+const SOURCE_RESOLUTION_PROBE_COMPLETE =
+  'natui: source resolution probe complete';
+const SOURCE_RESOLUTION_TEST_NAME =
+  'source import.meta.resolve mirrors active Node resolution flags';
+
+async function createDevServer(
+  options: DevServerOptions,
+): Promise<NatuiDevServer> {
+  const serverModule = await import('../src/dev/server.js');
+  return serverModule.createDevServer(options);
+}
 
 const FAKE_HOST_SOURCE = `
 const fs = require('node:fs');
@@ -326,6 +342,410 @@ async function waitForLog(
     }
     throw error;
   }
+}
+
+interface SourceResolutionProbe {
+  addonFile: 'addons.js' | 'default.js';
+  commaFile: 'condition.js' | 'default.js';
+  conditionFile: 'condition.js' | 'default.js';
+  preserveSymlinks: boolean;
+  preserveSymlinksMain: boolean;
+  resolverOnly?: boolean;
+}
+
+interface SourceResolutionResult {
+  addon: string;
+  comma: string;
+  linked: string;
+  long: string;
+  moduleSync: string;
+  short: string;
+  symbolError: {
+    message: string;
+    name: string;
+  } | null;
+}
+
+interface SourceResolutionScenario extends SourceResolutionProbe {
+  execArguments?: string[];
+  name: string;
+  nodeOptions?: string;
+}
+
+async function writeResolutionPackage(
+  nodeModules: string,
+  name: string,
+  exports: Record<string, string>,
+): Promise<void> {
+  const packageRoot = join(nodeModules, name);
+  await mkdir(packageRoot, { recursive: true });
+  await Promise.all([
+    writeFile(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({
+        exports,
+        name,
+        type: 'module',
+      }),
+    ),
+    ...Array.from(new Set(Object.values(exports)), (target) =>
+      writeFile(
+        join(packageRoot, target.slice(2)),
+        `export default ${JSON.stringify(target)};\n`,
+      ),
+    ),
+  ]);
+}
+
+async function runSourceResolutionProbe(
+  expected: SourceResolutionProbe,
+): Promise<void> {
+  const fixture = await mkdtemp(
+    join(PACKAGE_ROOT, 'natui-dev-resolution-'),
+  );
+  const unique = `${process.pid}-${Date.now()}`;
+  const appKey = `__natuiResolutionApp_${unique}`;
+  const resultKey = `__natuiResolutionResult_${unique}`;
+  const globals = globalThis as Record<string, unknown>;
+  const nodeModules = join(fixture, 'node_modules');
+  const linkedTarget = join(fixture, 'linked-target');
+  const linkedPackage = join(nodeModules, 'natui-resolution-linked');
+  const realParentRoot = join(fixture, 'parent-real');
+  const realMainRoot = join(realParentRoot, 'app');
+  const aliasParentRoot = join(fixture, 'parent-alias');
+  const aliasMainRoot = join(aliasParentRoot, 'app');
+  const linkedMainPath = join(aliasMainRoot, 'main.mjs');
+  const deletedParentPath = join(fixture, 'deleted-parent.mjs');
+  const mainPath = join(fixture, 'main.ts');
+  const nativeProbePath = join(fixture, 'native-probe.mjs');
+  const fakeHostPath = join(fixture, 'fake-host.cjs');
+  const quitMarkerPath = join(fixture, 'host-quit');
+  const logs: string[] = [];
+  let server: NatuiDevServer | undefined;
+
+  const resolutionExpression = `{
+  short: import.meta.resolve('natui-resolution-short'),
+  long: import.meta.resolve('natui-resolution-long'),
+  comma: import.meta.resolve('natui-resolution-comma'),
+  addon: import.meta.resolve('natui-resolution-addon'),
+  moduleSync: import.meta.resolve('natui-resolution-module-sync'),
+  linked: import.meta.resolve('natui-resolution-linked'),
+  symbolError: (() => {
+    try {
+      import.meta.resolve(Symbol('natui-resolution-symbol'));
+      return null;
+    } catch (error) {
+      return {
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : typeof error,
+      };
+    }
+  })(),
+}`;
+
+  try {
+    await mkdir(nodeModules, { recursive: true });
+    await Promise.all([
+      writeResolutionPackage(
+        nodeModules,
+        'natui-resolution-short',
+        {
+          'natui-short-condition': './condition.js',
+          default: './default.js',
+        },
+      ),
+      writeResolutionPackage(
+        nodeModules,
+        'natui-resolution-long',
+        {
+          'natui-long-condition': './condition.js',
+          default: './default.js',
+        },
+      ),
+      writeResolutionPackage(
+        nodeModules,
+        'natui-resolution-comma',
+        {
+          'natui-short-condition,natui-long-condition': './condition.js',
+          default: './default.js',
+        },
+      ),
+      writeResolutionPackage(
+        nodeModules,
+        'natui-resolution-addon',
+        {
+          'node-addons': './addons.js',
+          default: './default.js',
+        },
+      ),
+      writeResolutionPackage(
+        nodeModules,
+        'natui-resolution-module-sync',
+        {
+          'module-sync': './module-sync.js',
+          default: './default.js',
+        },
+      ),
+      writeResolutionPackage(
+        join(realParentRoot, 'node_modules'),
+        'natui-resolution-parent',
+        { default: './index.js' },
+      ),
+      writeResolutionPackage(
+        join(aliasParentRoot, 'node_modules'),
+        'natui-resolution-parent',
+        { default: './index.js' },
+      ),
+      mkdir(realMainRoot, { recursive: true }),
+      mkdir(aliasParentRoot, { recursive: true }),
+      mkdir(linkedTarget, { recursive: true }),
+      writeFile(fakeHostPath, FAKE_HOST_SOURCE),
+    ]);
+    await Promise.all([
+      writeFile(
+        join(linkedTarget, 'package.json'),
+        JSON.stringify({
+          exports: './index.js',
+          name: 'natui-resolution-linked',
+          type: 'module',
+        }),
+      ),
+      writeFile(
+        join(linkedTarget, 'index.js'),
+        'export default true;\n',
+      ),
+      writeFile(join(realMainRoot, 'main.mjs'), 'export {};\n'),
+      writeFile(
+        deletedParentPath,
+        'export const resolveFromDeletedParent = (specifier) => import.meta.resolve(specifier);\n',
+      ),
+      writeFile(
+        nativeProbePath,
+        `export default ${resolutionExpression};\n`,
+      ),
+      writeFile(
+        mainPath,
+        `
+import { createElement } from 'react';
+import { run } from 'natui';
+
+(globalThis as Record<string, unknown>)[${JSON.stringify(resultKey)}] =
+  ${resolutionExpression};
+
+const app = await run(createElement('Text', null, 'ready'), {
+  host: {
+    cmd: process.execPath,
+    args: [${JSON.stringify(fakeHostPath)}, ${JSON.stringify(quitMarkerPath)}],
+  },
+  onClose() {},
+});
+
+(globalThis as Record<string, unknown>)[${JSON.stringify(appKey)}] = app;
+`,
+      ),
+    ]);
+    await symlink(
+      linkedTarget,
+      linkedPackage,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    await symlink(
+      realMainRoot,
+      aliasMainRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const native = (
+      await import(
+        `${pathToFileURL(nativeProbePath).href}?probe=${encodeURIComponent(unique)}`
+      )
+    ).default as SourceResolutionResult;
+
+    const resolution = await import('../src/dev/resolution.js');
+    const canonicalMainUrl = resolution.canonicalSourceUrl(
+      pathToFileURL(linkedMainPath),
+      true,
+    );
+    const selectedParentRoot = expected.preserveSymlinksMain
+      ? aliasParentRoot
+      : realParentRoot;
+    const selectedPackagePath = join(
+      selectedParentRoot,
+      'node_modules',
+      'natui-resolution-parent',
+      'index.js',
+    );
+    const expectedMainPath = expected.preserveSymlinksMain
+      ? linkedMainPath
+      : await realpath(linkedMainPath);
+    const expectedPackagePath = expected.preserveSymlinks
+      ? selectedPackagePath
+      : await realpath(selectedPackagePath);
+    assert.equal(
+      canonicalMainUrl.href,
+      pathToFileURL(expectedMainPath).href,
+    );
+    assert.equal(
+      resolution.resolveSourceSpecifier(
+        'natui-resolution-parent',
+        pathToFileURL(linkedMainPath),
+        true,
+      ),
+      pathToFileURL(expectedPackagePath).href,
+    );
+    const deletedParentModule = await import(
+      `${pathToFileURL(deletedParentPath).href}?probe=${encodeURIComponent(unique)}`
+    ) as {
+      resolveFromDeletedParent(specifier: string): string;
+    };
+    const canonicalDeletedParentUrl = resolution.canonicalSourceUrl(
+      pathToFileURL(deletedParentPath),
+    );
+    await rm(deletedParentPath);
+    assert.equal(
+      resolution.resolveSourceSpecifier(
+        './deleted-target.js',
+        canonicalDeletedParentUrl,
+      ),
+      deletedParentModule.resolveFromDeletedParent('./deleted-target.js'),
+    );
+
+    let transformed: SourceResolutionResult;
+    if (expected.resolverOnly) {
+      const parentUrl = pathToFileURL(nativeProbePath);
+      const resolve = (specifier: unknown) =>
+        resolution.resolveSourceSpecifier(specifier as string, parentUrl);
+      let symbolError: SourceResolutionResult['symbolError'] = null;
+      try {
+        resolve(Symbol('natui-resolution-symbol'));
+      } catch (error) {
+        symbolError = {
+          message: error instanceof Error ? error.message : String(error),
+          name: error instanceof Error ? error.name : typeof error,
+        };
+      }
+      transformed = {
+        addon: resolve('natui-resolution-addon'),
+        comma: resolve('natui-resolution-comma'),
+        linked: resolve('natui-resolution-linked'),
+        long: resolve('natui-resolution-long'),
+        moduleSync: resolve('natui-resolution-module-sync'),
+        short: resolve('natui-resolution-short'),
+        symbolError,
+      };
+    } else {
+      server = await createDevServer({
+        entry: mainPath,
+        root: PACKAGE_ROOT,
+        log(message) {
+          logs.push(message);
+        },
+      });
+      await waitForLog(logs, 0, /\[natui\] mounted /);
+      await waitFor('source resolution app handle', () =>
+        globals[appKey] as NatuiApp | undefined,
+      );
+      transformed = await waitFor(
+        'transformed source resolutions',
+        () => globals[resultKey] as SourceResolutionResult | undefined,
+      );
+    }
+
+    assert.deepEqual(transformed, native);
+    assert.ok(native.short.endsWith(`/${expected.conditionFile}`));
+    assert.ok(native.long.endsWith(`/${expected.conditionFile}`));
+    assert.ok(native.comma.endsWith(`/${expected.commaFile}`));
+    assert.ok(native.addon.endsWith(`/${expected.addonFile}`));
+    assert.ok(
+      native.moduleSync.endsWith(
+        process.features.require_module === true
+          ? '/module-sync.js'
+          : '/default.js',
+      ),
+    );
+    assert.equal(native.symbolError?.name, 'TypeError');
+    assert.match(native.symbolError?.message ?? '', /Symbol/);
+    assert.ok(
+      native.linked.includes(
+        expected.preserveSymlinks
+          ? '/node_modules/natui-resolution-linked/index.js'
+          : '/linked-target/index.js',
+      ),
+    );
+
+    if (server) {
+      await settleWithin(
+        server.close(),
+        CLOSE_TIMEOUT_MS,
+        'source resolution probe server close',
+      );
+      server = undefined;
+    }
+  } finally {
+    if (server) {
+      await settleWithin(
+        server.close(),
+        WAIT_TIMEOUT_MS,
+        'source resolution probe cleanup',
+      ).catch(() => undefined);
+    }
+    delete globals[appKey];
+    delete globals[resultKey];
+    await rm(fixture, { recursive: true, force: true });
+  }
+}
+
+async function runSourceResolutionScenario(
+  scenario: SourceResolutionScenario,
+): Promise<void> {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    [SOURCE_RESOLUTION_PROBE_ENV]: JSON.stringify({
+      addonFile: scenario.addonFile,
+      commaFile: scenario.commaFile,
+      conditionFile: scenario.conditionFile,
+      preserveSymlinks: scenario.preserveSymlinks,
+      preserveSymlinksMain: scenario.preserveSymlinksMain,
+      resolverOnly: scenario.resolverOnly,
+    } satisfies SourceResolutionProbe),
+    NODE_OPTIONS: scenario.nodeOptions ?? '',
+  };
+  delete environment.NODE_PRESERVE_SYMLINKS;
+  delete environment.NODE_TEST_CONTEXT;
+
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [
+        ...(scenario.execArguments ?? []),
+        '--import',
+        'tsx',
+        '--test',
+        '--test-concurrency=1',
+        `--test-name-pattern=${SOURCE_RESOLUTION_TEST_NAME}`,
+        fileURLToPath(import.meta.url),
+      ],
+      {
+        cwd: PACKAGE_ROOT,
+        env: environment,
+        maxBuffer: 2 * 1024 * 1024,
+        timeout: 60_000,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (!error && stdout.includes(SOURCE_RESOLUTION_PROBE_COMPLETE)) {
+          resolve();
+          return;
+        }
+        reject(
+          new Error(
+            `${scenario.name} source resolution subprocess failed or did not run its probe\n${stdout}\n${stderr}`,
+            { cause: error },
+          ),
+        );
+      },
+    );
+  });
 }
 
 function mainSource(
@@ -696,6 +1116,120 @@ export default function LazyLeaf() {
 }
 `;
 }
+
+test(
+  SOURCE_RESOLUTION_TEST_NAME,
+  { timeout: 90_000 },
+  async () => {
+    const serializedProbe = process.env[SOURCE_RESOLUTION_PROBE_ENV];
+    if (serializedProbe) {
+      await runSourceResolutionProbe(
+        JSON.parse(serializedProbe) as SourceResolutionProbe,
+      );
+      console.log(SOURCE_RESOLUTION_PROBE_COMPLETE);
+      return;
+    }
+
+    await Promise.all([
+      runSourceResolutionScenario({
+        addonFile: 'addons.js',
+        commaFile: 'default.js',
+        conditionFile: 'default.js',
+        name: 'default Node conditions',
+        preserveSymlinks: false,
+        preserveSymlinksMain: false,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'default.js',
+        commaFile: 'default.js',
+        conditionFile: 'condition.js',
+        execArguments: [
+          '-C',
+          'natui-short-condition',
+          '--conditions=natui-long-condition',
+          '--no-addons',
+          '--preserve-symlinks',
+        ],
+        name: 'process.execArgv conditions and symlink flags',
+        preserveSymlinks: true,
+        preserveSymlinksMain: false,
+        resolverOnly: true,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'default.js',
+        commaFile: 'default.js',
+        conditionFile: 'condition.js',
+        name: 'NODE_OPTIONS conditions and symlink flags',
+        nodeOptions:
+          '-C "natui-short-condition" --conditions="natui-long-condition" --no-addons --preserve-symlinks',
+        preserveSymlinks: true,
+        preserveSymlinksMain: false,
+        resolverOnly: true,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'addons.js',
+        commaFile: 'default.js',
+        conditionFile: 'default.js',
+        execArguments: [
+          '--addons=false',
+          '--no_preserve_symlinks=false',
+          '--no_preserve_symlinks_main=false',
+        ],
+        name: 'command line overrides NODE_OPTIONS booleans',
+        nodeOptions:
+          '--no_addons=false --preserve_symlinks=false --preserve_symlinks_main=false',
+        preserveSymlinks: false,
+        preserveSymlinksMain: false,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'addons.js',
+        commaFile: 'default.js',
+        conditionFile: 'default.js',
+        execArguments: [
+          '--conditions=node-addons',
+          '--no-addons',
+        ],
+        name: 'explicit node-addons condition survives --no-addons',
+        preserveSymlinks: false,
+        preserveSymlinksMain: false,
+        resolverOnly: true,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'addons.js',
+        commaFile: 'condition.js',
+        conditionFile: 'default.js',
+        execArguments: [
+          '--conditions=natui-short-condition,natui-long-condition',
+        ],
+        name: 'comma-separated condition text stays a single condition',
+        preserveSymlinks: false,
+        preserveSymlinksMain: false,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'addons.js',
+        commaFile: 'default.js',
+        conditionFile: 'default.js',
+        execArguments: ['--preserve-symlinks-main'],
+        name: 'main-entry symlink preservation is independent',
+        preserveSymlinks: false,
+        preserveSymlinksMain: true,
+      }),
+      runSourceResolutionScenario({
+        addonFile: 'addons.js',
+        commaFile: 'default.js',
+        conditionFile: 'default.js',
+        execArguments: [
+          '--preserve-symlinks',
+          '--preserve-symlinks-main',
+        ],
+        name: 'main and child symlink preservation combine',
+        preserveSymlinks: true,
+        preserveSymlinksMain: true,
+        resolverOnly: true,
+      }),
+    ]);
+  },
+);
 
 test(
   'a newer generation supersedes a gated evaluation and close ignores stale imports',
@@ -1936,6 +2470,250 @@ export const LazyLeaf = lazy(() => import('./lazy.js'));
         ).catch(() => undefined);
       }
       delete globals[appKey];
+      delete globals[loaderCountKey];
+      delete globals[lazyV1EvaluatedKey];
+      delete globals[lazyV2EvaluatedKey];
+      await rm(fixture, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'a failed generation preserves a lazy child reached through an older cached loader',
+  { timeout: 40_000 },
+  async () => {
+    const fixture = await mkdtemp(
+      join(PACKAGE_ROOT, 'natui-dev-lifecycle-'),
+    );
+    const unique = `${process.pid}-${Date.now()}`;
+    const appKey = `__natuiLifecycleOlderLoaderApp_${unique}`;
+    const failureKey = `__natuiLifecycleOlderLoaderFailure_${unique}`;
+    const loaderCountKey = `__natuiLifecycleOlderLoaderCount_${unique}`;
+    const lazyV1EvaluatedKey = `__natuiLifecycleOlderLoaderLazyV1_${unique}`;
+    const lazyV2EvaluatedKey = `__natuiLifecycleOlderLoaderLazyV2_${unique}`;
+    const globals = globalThis as Record<string, unknown>;
+
+    const logs: string[] = [];
+    const mainPath = join(fixture, 'main.ts');
+    const appPath = join(fixture, 'app.ts');
+    const loaderPath = join(fixture, 'loader.ts');
+    const lazyPath = join(fixture, 'lazy.ts');
+    const fakeHostPath = join(fixture, 'fake-host.cjs');
+    const quitMarkerPath = join(fixture, 'host-quit');
+    const originalConsoleError = console.error;
+    const expectedReactErrors: Error[] = [];
+    let server: NatuiDevServer | undefined;
+
+    const appSource = (label: string, forceLazy: boolean) => `
+import {
+  Suspense,
+  createElement,
+  useState,
+} from 'react';
+import { LazyLeaf } from './loader.js';
+
+export function App() {
+  const [show, setShow] = useState(false);
+
+  if (${JSON.stringify(forceLazy)} || show) {
+    return createElement(
+      Suspense,
+      {
+        fallback: createElement(
+          'Text',
+          { accessibilityIdentifier: 'lifecycle-status' },
+          'loading',
+        ),
+      },
+      createElement(LazyLeaf),
+    );
+  }
+
+  return createElement(
+    'VStack',
+    null,
+    createElement(
+      'Text',
+      { accessibilityIdentifier: 'lifecycle-status' },
+      ${JSON.stringify(label)} + '-hidden',
+    ),
+    createElement(
+      'Button',
+      {
+        accessibilityIdentifier: 'lifecycle-reveal',
+        onPress: () => setShow(true),
+      },
+      'reveal',
+    ),
+  );
+}
+`;
+    const loaderSource = `
+import { lazy } from 'react';
+
+const loaderGlobals = globalThis as Record<string, unknown>;
+loaderGlobals[${JSON.stringify(loaderCountKey)}] =
+  Number(loaderGlobals[${JSON.stringify(loaderCountKey)}] ?? 0) + 1;
+
+export const LazyLeaf = lazy(() => import('./lazy.js'));
+`;
+    const lazySource = (label: string, evaluatedKey: string) => `
+import { createElement, useState } from 'react';
+
+const lazyGlobals = globalThis as Record<string, unknown>;
+lazyGlobals[${JSON.stringify(evaluatedKey)}] =
+  Number(lazyGlobals[${JSON.stringify(evaluatedKey)}] ?? 0) + 1;
+
+export default function LazyLeaf() {
+  const [count, setCount] = useState(0);
+  if (lazyGlobals[${JSON.stringify(failureKey)}]) {
+    throw new Error('older cached loader child exploded');
+  }
+  return createElement(
+    'VStack',
+    null,
+    createElement(
+      'Text',
+      { accessibilityIdentifier: 'lifecycle-status' },
+      ${JSON.stringify(label)} + ':' + String(count),
+    ),
+    createElement(
+      'Button',
+      {
+        accessibilityIdentifier: 'lifecycle-increment',
+        onPress: () => setCount((value) => value + 1),
+      },
+      'increment',
+    ),
+  );
+}
+`;
+
+    try {
+      console.error = (...args: unknown[]) => {
+        const error = args.find(
+          (value): value is Error => value instanceof Error,
+        );
+        if (error?.message === 'older cached loader child exploded') {
+          expectedReactErrors.push(error);
+          return;
+        }
+        originalConsoleError(...args);
+      };
+
+      await Promise.all([
+        writeFile(fakeHostPath, FAKE_HOST_SOURCE),
+        writeFile(
+          mainPath,
+          mainSource(appKey, fakeHostPath, quitMarkerPath),
+        ),
+        writeFile(appPath, appSource('g1', false)),
+        writeFile(loaderPath, loaderSource),
+        writeFile(
+          lazyPath,
+          lazySource('v1', lazyV1EvaluatedKey),
+        ),
+      ]);
+
+      server = await createDevServer({
+        entry: mainPath,
+        root: PACKAGE_ROOT,
+        log(message) {
+          logs.push(message);
+        },
+      });
+      await waitForLog(logs, 0, /\[natui\] mounted /);
+
+      const app = await waitFor('older cached loader app handle', () =>
+        globals[appKey] as NatuiApp | undefined,
+      );
+      await waitForTreeText(app, 'g1-hidden');
+      assert.equal(globals[loaderCountKey], 1);
+      assert.equal(globals[lazyV1EvaluatedKey], undefined);
+
+      await delay(200);
+      const secondGenerationLog = logs.length;
+      await writeFile(appPath, appSource('g2', false));
+      await waitForLog(
+        logs,
+        secondGenerationLog,
+        /\[natui\] refreshed #1 /,
+      );
+      await waitForTreeText(app, 'g2-hidden');
+      assert.equal(
+        globals[loaderCountKey],
+        1,
+        'G2 reused the loader that still carried its G1 owner',
+      );
+
+      globals[failureKey] = true;
+      const failedGenerationLog = logs.length;
+      await writeFile(appPath, appSource('g3', true));
+      await waitFor('failed generation lazy v1 evaluation', () =>
+        globals[lazyV1EvaluatedKey] === 1 ? true : undefined,
+      );
+      await waitForLog(
+        logs,
+        failedGenerationLog,
+        /refresh failed; recovered the previous code with a remount/,
+      );
+      const rolledBackTree = await waitForTreeText(app, 'g2-hidden');
+      assert.ok(
+        expectedReactErrors.some(
+          (error) => error.message === 'older cached loader child exploded',
+        ),
+      );
+
+      delete globals[failureKey];
+      const reveal = identifiedNode(
+        rolledBackTree,
+        'Button',
+        'lifecycle-reveal',
+      );
+      app.emit(reveal.id, 'press');
+      const v1Tree = await waitForTreeText(app, 'v1:0');
+      const increment = identifiedNode(
+        v1Tree,
+        'Button',
+        'lifecycle-increment',
+      );
+      app.emit(increment.id, 'press');
+      const countedV1Tree = await waitForTreeText(app, 'v1:1');
+      const preservedIds = nativeIds(countedV1Tree);
+
+      await delay(200);
+      const lazyRefreshLog = logs.length;
+      await writeFile(
+        lazyPath,
+        lazySource('v2', lazyV2EvaluatedKey),
+      );
+      await waitFor('older cached loader lazy v2 evaluation', () =>
+        globals[lazyV2EvaluatedKey] === 1 ? true : undefined,
+      );
+      await waitForLog(logs, lazyRefreshLog, /\[natui\] refreshed #2 /);
+      const v2Tree = await waitForTreeText(app, 'v2:1');
+      assert.deepEqual(nativeIds(v2Tree), preservedIds);
+
+      await settleWithin(
+        server.close(),
+        CLOSE_TIMEOUT_MS,
+        'older cached loader server close',
+      );
+      server = undefined;
+      await waitFor('older cached loader fake host to process quit', async () =>
+        (await pathExists(quitMarkerPath)) ? true : undefined,
+      );
+    } finally {
+      console.error = originalConsoleError;
+      if (server) {
+        await settleWithin(
+          server.close(),
+          WAIT_TIMEOUT_MS,
+          'older cached loader cleanup',
+        ).catch(() => undefined);
+      }
+      delete globals[appKey];
+      delete globals[failureKey];
       delete globals[loaderCountKey];
       delete globals[lazyV1EvaluatedKey];
       delete globals[lazyV2EvaluatedKey];

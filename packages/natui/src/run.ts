@@ -8,7 +8,7 @@ import {
   type TreeNode,
   type WindowProps,
 } from './protocol.js';
-import { createNatuiRenderer } from './reconciler/renderer.js';
+import { createManagedNatuiRenderer } from './reconciler/renderer.js';
 
 export interface RunOptions extends WindowProps {
   /** Host binary override; defaults to NATUI_HOST env or the in-repo build. */
@@ -35,8 +35,6 @@ export interface NatuiApp {
   edit(id: number, value: unknown): void;
   /** Re-render with a new element (e.g. for external hot reload). */
   update(element: ReactNode): Promise<void>;
-  /** @internal Cancel a development update that has not committed. */
-  cancelPendingUpdate(error: Error): void;
   /** Unmount, quit the host, close the transport. */
   quit(): void;
 }
@@ -88,7 +86,7 @@ export async function runWithController(
   const bridge = new Bridge(transport);
 
   let phase: 'starting' | 'running' | 'quitting' = 'starting';
-  let renderer: ReturnType<typeof createNatuiRenderer> | undefined;
+  let renderer: ReturnType<typeof createManagedNatuiRenderer> | undefined;
   let startupCancellation: Error | undefined;
   const quit = () => {
     if (phase === 'quitting') return;
@@ -157,7 +155,7 @@ export async function runWithController(
   }
 
   phase = 'running';
-  renderer = createNatuiRenderer(bridge, { onUncaughtError, runWork });
+  renderer = createManagedNatuiRenderer(bridge, { onUncaughtError, runWork });
 
   const handleWindowClose = () => {
     if (onClose) onClose();
@@ -187,7 +185,6 @@ export async function runWithController(
     emit: (id, name, payload) => bridge.emitDebugEvent(id, name, payload),
     edit: (id, value) => bridge.editDebugValue(id, value),
     update: (el) => renderer.renderAsync(el),
-    cancelPendingUpdate: controller.cancelPendingUpdate,
     quit,
   };
 }

@@ -1,4 +1,3 @@
-import { nodeResolve } from '@rollup/plugin-node-resolve';
 import { transform } from 'esbuild';
 import { rmdirSync, rmSync } from 'node:fs';
 import {
@@ -9,6 +8,7 @@ import {
   rm,
   rmdir,
   stat,
+  writeFile,
 } from 'node:fs/promises';
 import { builtinModules } from 'node:module';
 import {
@@ -42,6 +42,11 @@ import {
   unregisterDevRuntimeSession,
 } from './runtime.js';
 import {
+  canonicalSourceUrl,
+  resolveSourceSpecifier,
+  SOURCE_RESOLUTION_OPTIONS,
+} from './resolution.js';
+import {
   EMITTED_MODULE_URL_PLACEHOLDER,
   loadAndInstrumentForRefresh,
 } from './transform.js';
@@ -74,6 +79,7 @@ const NODE_BUILTINS = new Set([
   ...builtinModules,
   ...builtinModules.map((name) => `node:${name}`),
 ]);
+const MISSING_SOURCE_RACE_WINDOW_MS = 2_000;
 
 function sessionId(): string {
   return `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -86,6 +92,60 @@ function isBareSpecifier(source: string): boolean {
     !source.startsWith('file:') &&
     !isAbsolute(source) &&
     !source.startsWith('\0')
+  );
+}
+
+function absoluteModuleUrl(source: string): URL | undefined {
+  if (isAbsolute(source)) return undefined;
+  try {
+    return new URL(source);
+  } catch {
+    return undefined;
+  }
+}
+
+function localSourceSpecifierUrl(
+  source: string,
+  importer: string | undefined,
+  entry: string,
+): URL | undefined {
+  const absoluteUrl = absoluteModuleUrl(source);
+  if (absoluteUrl?.protocol === 'file:') return absoluteUrl;
+  if (!source.startsWith('.')) return undefined;
+  return new URL(
+    source,
+    importer?.startsWith('file:')
+      ? importer
+      : pathToFileURL(importer ?? entry),
+  );
+}
+
+function physicalModulePath(moduleId: string): string {
+  const url = absoluteModuleUrl(moduleId);
+  return url?.protocol === 'file:' ? fileURLToPath(url) : moduleId;
+}
+
+function moduleSourceUrl(moduleId: string): URL {
+  return absoluteModuleUrl(moduleId) ?? pathToFileURL(moduleId);
+}
+
+function filesystemIdentity(path: string): string {
+  const normalized = resolve(path);
+  return process.platform === 'win32'
+    ? normalized.toLowerCase()
+    : normalized;
+}
+
+function isEntryModuleIdentity(
+  moduleId: string,
+  entry: string,
+): boolean {
+  const moduleUrl = moduleSourceUrl(moduleId);
+  return (
+    !moduleUrl.search &&
+    !moduleUrl.hash &&
+    filesystemIdentity(physicalModulePath(moduleId)) ===
+      filesystemIdentity(entry)
   );
 }
 
@@ -117,19 +177,40 @@ function sourceCandidates(path: string): string[] {
   return [...new Set(candidates)];
 }
 
-async function resolveSourceFile(source: string, importer: string | undefined): Promise<string | null> {
-  let path: string;
-  if (source.startsWith('file:')) path = fileURLToPath(source);
-  else if (isAbsolute(source)) path = source;
-  else {
-    if (!importer || !source.startsWith('.')) return null;
-    path = resolve(dirname(importer), source);
+function sourceCandidatesForSpecifier(
+  source: string,
+  importer: string | undefined,
+  entry: string,
+): {
+  candidates: string[];
+  sourceUrl: URL | undefined;
+} | null {
+  const sourceUrl = localSourceSpecifierUrl(source, importer, entry);
+  if (sourceUrl) {
+    return {
+      candidates: sourceCandidates(fileURLToPath(sourceUrl)),
+      sourceUrl,
+    };
   }
+  if (!isAbsolute(source)) return null;
+  return {
+    candidates: sourceCandidates(source),
+    sourceUrl: undefined,
+  };
+}
 
-  for (const candidate of sourceCandidates(path)) {
-    if (await isFile(candidate)) return candidate;
+function resolvedLocalModuleId(
+  path: string,
+  sourceUrl: URL | undefined,
+  main = false,
+): string {
+  const resolvedUrl = canonicalSourceUrl(pathToFileURL(path), main);
+  if (!sourceUrl?.search && !sourceUrl?.hash) {
+    return fileURLToPath(resolvedUrl);
   }
-  return null;
+  resolvedUrl.search = sourceUrl.search;
+  resolvedUrl.hash = sourceUrl.hash;
+  return resolvedUrl.href;
 }
 
 async function findWorkspaceRoot(root: string): Promise<string> {
@@ -159,13 +240,9 @@ function isInside(parent: string, child: string): boolean {
   return path === '' || (!path.startsWith(`..${sep}`) && path !== '..' && !isAbsolute(path));
 }
 
-function findEntryFile(bundle: OutputBundle, entry: string): string | undefined {
+function findEntryFile(bundle: OutputBundle): string | undefined {
   for (const output of Object.values(bundle)) {
-    if (
-      output.type === 'chunk' &&
-      output.isEntry &&
-      resolve(output.facadeModuleId ?? '') === entry
-    ) {
+    if (output.type === 'chunk' && output.isEntry) {
       return output.fileName;
     }
   }
@@ -175,10 +252,223 @@ function findEntryFile(bundle: OutputBundle, entry: string): string | undefined 
 interface GenerationBundle {
   artifactFiles: string[];
   entryFile: string;
+  moduleFiles: Map<string, string>;
+  moduleRevisions: Map<string, ModuleRevision>;
   changedFiles: Array<{
     fileName: string;
     moduleId: string;
   }>;
+}
+
+interface ModuleRevision {
+  revision: number;
+  sourceVersion: number;
+}
+
+interface ActiveModuleRevisionBuild {
+  attempt: number;
+  committed: Map<string, ModuleRevision>;
+  modules: Map<string, ModuleRevision>;
+  sourceVersions: Map<string, number>;
+}
+
+function createModuleRevisionTracker() {
+  let attempt = 0;
+  let activeBuild: ActiveModuleRevisionBuild | undefined;
+  let committedModules = new Map<string, ModuleRevision>();
+  const sourceVersions = new Map<string, number>();
+
+  const getActiveBuild = () => {
+    if (!activeBuild) {
+      throw new Error('natui: module revision requested outside a development build');
+    }
+    return activeBuild;
+  };
+
+  const moduleRevision = (moduleId: string): ModuleRevision => {
+    const build = getActiveBuild();
+    const existing = build.modules.get(moduleId);
+    if (existing) return existing;
+
+    const sourceVersion = build.sourceVersions.get(moduleId) ?? 0;
+    const committed = build.committed.get(moduleId);
+    const next = {
+      revision:
+        committed?.sourceVersion === sourceVersion
+          ? committed.revision
+          : build.attempt,
+      sourceVersion,
+    };
+    build.modules.set(moduleId, next);
+    return next;
+  };
+
+  return {
+    beginBuild() {
+      activeBuild = {
+        attempt: ++attempt,
+        committed: new Map(committedModules),
+        modules: new Map(),
+        sourceVersions: new Map(sourceVersions),
+      };
+    },
+    commit(modules: Map<string, ModuleRevision>) {
+      committedModules = new Map(modules);
+    },
+    markChanged(moduleId: string) {
+      sourceVersions.set(moduleId, (sourceVersions.get(moduleId) ?? 0) + 1);
+    },
+    revisionFor(moduleId: string) {
+      return moduleRevision(moduleId).revision;
+    },
+    snapshot(moduleIds: Iterable<string>) {
+      return new Map(
+        [...moduleIds].map((moduleId) => [
+          moduleId,
+          { ...moduleRevision(moduleId) },
+        ]),
+      );
+    },
+  };
+}
+
+type ModuleRevisionTracker = ReturnType<typeof createModuleRevisionTracker>;
+
+function createMissingSourceMonitor(rebuildTriggerPath: string) {
+  const candidateGroups = new Map<
+    string,
+    {
+      available: boolean;
+      candidates: string[];
+      expiresAt: number;
+    }
+  >();
+  let checking = false;
+  let closed = false;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let triggerVersion = 0;
+
+  const groupKey = (candidates: readonly string[]) => candidates.join('\0');
+  const stopIfIdle = () => {
+    if (candidateGroups.size > 0 || !interval) return;
+    clearInterval(interval);
+    interval = undefined;
+  };
+  const check = async () => {
+    if (checking || closed) return;
+    checking = true;
+    try {
+      let shouldTrigger = false;
+      for (const [key, group] of candidateGroups) {
+        if (!group.available) {
+          for (const candidate of group.candidates) {
+            if (await isFile(candidate)) {
+              group.available = true;
+              break;
+            }
+          }
+          if (!group.available && Date.now() >= group.expiresAt) {
+            candidateGroups.delete(key);
+            continue;
+          }
+        }
+        shouldTrigger ||= group.available;
+      }
+      if (shouldTrigger) {
+        await writeFile(rebuildTriggerPath, String(++triggerVersion));
+      }
+    } catch {
+      // Rollup's own watcher remains the primary recovery path. Keep polling
+      // so a transient trigger write failure does not strand a missing import.
+    } finally {
+      checking = false;
+      stopIfIdle();
+    }
+  };
+  const start = () => {
+    if (interval || closed) return;
+    interval = setInterval(() => void check(), 50);
+    interval.unref();
+  };
+
+  return {
+    close() {
+      closed = true;
+      candidateGroups.clear();
+      if (interval) clearInterval(interval);
+      interval = undefined;
+    },
+    resolved(candidates: readonly string[]) {
+      candidateGroups.delete(groupKey(candidates));
+      stopIfIdle();
+    },
+    track(candidates: readonly string[]) {
+      const key = groupKey(candidates);
+      if (!candidateGroups.has(key)) {
+        candidateGroups.set(key, {
+          available: false,
+          candidates: [...candidates],
+          expiresAt: Date.now() + MISSING_SOURCE_RACE_WINDOW_MS,
+        });
+      } else {
+        const group = candidateGroups.get(key)!;
+        if (!group.available) {
+          group.expiresAt = Date.now() + MISSING_SOURCE_RACE_WINDOW_MS;
+        }
+      }
+      start();
+    },
+    triggerObserved() {
+      for (const [key, group] of candidateGroups) {
+        if (group.available) candidateGroups.delete(key);
+      }
+      stopIfIdle();
+    },
+  };
+}
+
+type MissingSourceMonitor = ReturnType<typeof createMissingSourceMonitor>;
+
+async function prepareDevServerResources(
+  root: string,
+  entry: string,
+  id: string,
+) {
+  const cacheBase = join(root, '.natui');
+  let cacheDir: string | undefined;
+  let runtimeSession:
+    | ReturnType<typeof registerDevRuntimeSession>
+    | undefined;
+
+  try {
+    await mkdir(cacheBase, { recursive: true });
+    cacheDir = await mkdtemp(join(cacheBase, 'dev-'));
+    const rebuildTriggerPath = join(cacheDir, '.missing-source-rebuild');
+    await writeFile(rebuildTriggerPath, '0');
+    const workspaceRoot = await findWorkspaceRoot(root);
+    runtimeSession = registerDevRuntimeSession(id, entry);
+    return {
+      cacheBase,
+      cacheDir,
+      rebuildTriggerPath,
+      runtimeSession,
+      workspaceRoot,
+    };
+  } catch (error) {
+    if (runtimeSession) {
+      try {
+        runtimeSession.close();
+      } catch {
+        // Continue releasing the remaining resources.
+      }
+      unregisterDevRuntimeSession(id);
+    }
+    if (cacheDir) {
+      await rm(cacheDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+    await rmdir(cacheBase).catch(() => undefined);
+    throw error;
+  }
 }
 
 function developmentPlugins(
@@ -187,52 +477,160 @@ function developmentPlugins(
   entry: string,
   packageIndexUrl: string,
   runtimeUrl: string,
-  moduleRevisions: Map<string, number>,
-  changedModuleIds: Set<string>,
+  moduleRevisionTracker: ModuleRevisionTracker,
+  missingSourceMonitor: MissingSourceMonitor,
+  rebuildTriggerPath: string,
+  committedModuleFiles: Map<string, string>,
   onGenerationBundle: (bundle: GenerationBundle) => void,
 ): Plugin[] {
   const virtualNatui = '\0natui-dev-entry';
+  const moduleIdsByPhysicalPath = new Map<string, Set<string>>();
 
   return [
     {
       name: 'natui-resolve',
+      buildStart() {
+        this.addWatchFile(rebuildTriggerPath);
+        moduleRevisionTracker.beginBuild();
+      },
       watchChange(moduleId) {
-        moduleRevisions.set(moduleId, (moduleRevisions.get(moduleId) ?? 0) + 1);
-        changedModuleIds.add(moduleId);
+        const physicalPath = physicalModulePath(moduleId);
+        const sourceModuleIds = moduleIdsByPhysicalPath.get(
+          filesystemIdentity(physicalPath),
+        );
+        if (!sourceModuleIds) {
+          moduleRevisionTracker.markChanged(moduleId);
+          return;
+        }
+        for (const sourceModuleId of sourceModuleIds) {
+          moduleRevisionTracker.markChanged(sourceModuleId);
+        }
       },
       async resolveId(source, importer) {
         if (source === 'natui') return virtualNatui;
         if (source === packageIndexUrl || source === runtimeUrl) {
           return { id: source, external: true };
         }
+        const absoluteUrl = absoluteModuleUrl(source);
+        const importerIsEntry =
+          importer === undefined ||
+          isEntryModuleIdentity(importer, entry);
+        const parentUrl = canonicalSourceUrl(
+          moduleSourceUrl(importer ?? entry),
+          importerIsEntry,
+        );
+        if (absoluteUrl && absoluteUrl.protocol !== 'file:') {
+          return {
+            id: resolveSourceSpecifier(
+              source,
+              parentUrl,
+              importerIsEntry,
+            ),
+            external: true,
+          };
+        }
         if (isBareSpecifier(source)) {
-          const resolved = await this.resolve(source, importer, { skipSelf: true });
-          if (!resolved) this.error(`natui: cannot resolve package "${source}"`);
-          if (resolved.external) return resolved;
-
-          const resolvedPath = resolved.id;
+          let resolvedUrl: string;
+          try {
+            resolvedUrl = resolveSourceSpecifier(
+              source,
+              parentUrl,
+              importerIsEntry,
+            );
+          } catch (error) {
+            this.error(
+              error instanceof Error
+                ? error
+                : `natui: cannot resolve package "${source}": ${String(error)}`,
+            );
+          }
+          const url = new URL(resolvedUrl);
+          if (url.protocol !== 'file:') {
+            return { id: resolvedUrl, external: true };
+          }
+          const resolvedPath = fileURLToPath(url);
+          if (!(await isFile(resolvedPath))) {
+            this.error(`natui: cannot resolve package "${source}"`);
+          }
           const isLocalWorkspaceSource =
             isAbsolute(resolvedPath) &&
             isInside(root, resolvedPath) &&
             !resolvedPath.split(sep).includes('node_modules');
           if (isLocalWorkspaceSource && !source.startsWith('natui/')) {
-            return resolvedPath;
+            const extension = extname(resolvedPath).toLowerCase();
+            if (
+              CODE_EXTENSIONS.has(extension) ||
+              extension === '.json'
+            ) {
+              return url.search || url.hash
+                ? resolvedUrl
+                : resolvedPath;
+            }
           }
 
           return {
-            id: resolvedPath.startsWith('file:')
-              ? resolvedPath
-              : pathToFileURL(resolvedPath).href,
+            id: resolvedUrl,
             external: true,
           };
         }
 
-        const resolved = await resolveSourceFile(source, importer);
-        if (!resolved) return null;
-        if (CODE_EXTENSIONS.has(extname(resolved).toLowerCase()) || extname(resolved) === '.json') {
-          return resolved;
+        const sourceCandidateGroup = sourceCandidatesForSpecifier(
+          source,
+          importer,
+          entry,
+        );
+        if (!sourceCandidateGroup) return null;
+        const { candidates, sourceUrl } = sourceCandidateGroup;
+        let resolved: string | undefined;
+        for (const candidate of candidates) {
+          if (await isFile(candidate)) {
+            resolved = candidate;
+            break;
+          }
         }
-        return { id: pathToFileURL(resolved).href, external: true };
+        if (!resolved) {
+          missingSourceMonitor.track(candidates);
+          const watchedPaths = new Set<string>();
+          for (const candidate of candidates) {
+            watchedPaths.add(candidate);
+            let parent = dirname(candidate);
+            for (;;) {
+              try {
+                await access(parent);
+                break;
+              } catch {
+                watchedPaths.add(parent);
+                const nextParent = dirname(parent);
+                if (nextParent === parent) break;
+                parent = nextParent;
+              }
+            }
+          }
+          for (const watchedPath of watchedPaths) {
+            this.addWatchFile(watchedPath);
+          }
+          return null;
+        }
+        missingSourceMonitor.resolved(candidates);
+        const extension = extname(resolved).toLowerCase();
+        if (CODE_EXTENSIONS.has(extension) || extension === '.json') {
+          return resolvedLocalModuleId(
+            resolved,
+            sourceUrl,
+            importer === undefined,
+          );
+        }
+        const resolvedId = resolvedLocalModuleId(
+          resolved,
+          sourceUrl,
+          importer === undefined,
+        );
+        return {
+          id: resolvedId.startsWith('file:')
+            ? resolvedId
+            : pathToFileURL(resolved).href,
+          external: true,
+        };
       },
       async load(moduleId) {
         if (moduleId === virtualNatui) {
@@ -243,20 +641,43 @@ function developmentPlugins(
           ].join('\n');
         }
 
-        const extension = extname(moduleId).toLowerCase();
+        const physicalPath = physicalModulePath(moduleId);
+        const physicalIdentity = filesystemIdentity(physicalPath);
+        const sourceModuleIds =
+          moduleIdsByPhysicalPath.get(physicalIdentity) ?? new Set<string>();
+        sourceModuleIds.add(moduleId);
+        moduleIdsByPhysicalPath.set(physicalIdentity, sourceModuleIds);
+
+        const extension = extname(physicalPath).toLowerCase();
         if (extension === '.json') {
-          this.addWatchFile(moduleId);
-          return `export default ${await readFile(moduleId, 'utf8')};`;
+          this.addWatchFile(physicalPath);
+          const rawContents = await readFile(physicalPath, 'utf8');
+          const contents =
+            rawContents.charCodeAt(0) === 0xfeff
+              ? rawContents.slice(1)
+              : rawContents;
+          try {
+            JSON.parse(contents);
+          } catch (error) {
+            this.error(
+              `natui: invalid JSON in ${physicalPath}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+          return `export default JSON.parse(${JSON.stringify(contents)});`;
         }
         if (!CODE_EXTENSIONS.has(extension)) return null;
 
-        this.addWatchFile(moduleId);
-        const instrumented = await loadAndInstrumentForRefresh(moduleId, root, id);
+        this.addWatchFile(physicalPath);
+        const instrumented = await loadAndInstrumentForRefresh(
+          physicalPath,
+          root,
+          id,
+          moduleId,
+        );
         const compiled = await transform(instrumented.contents, {
           define: {
-            'import.meta.dirname': JSON.stringify(dirname(moduleId)),
-            'import.meta.filename': JSON.stringify(moduleId),
-            'import.meta.url': JSON.stringify(pathToFileURL(moduleId).href),
             'process.env.NODE_ENV': '"development"',
           },
           format: 'esm',
@@ -264,7 +685,7 @@ function developmentPlugins(
           jsxDev: true,
           loader: instrumented.loader,
           platform: 'node',
-          sourcefile: moduleId,
+          sourcefile: physicalPath,
           sourcemap: 'inline',
           target: 'node22',
         });
@@ -278,24 +699,23 @@ function developmentPlugins(
         };
       },
     },
-    nodeResolve({
-      exportConditions: ['node', 'import', 'default'],
-      extensions: ['.mjs', '.js', '.json', '.node', '.mts', '.ts', '.tsx', '.jsx'],
-      preferBuiltins: true,
-    }),
     {
       name: 'natui-entry-manifest',
       generateBundle(_options, bundle) {
-        const fileName = findEntryFile(bundle, entry);
+        const fileName = findEntryFile(bundle);
         if (!fileName) {
           this.error(`natui: development build produced no entry module for ${entry}`);
         }
+        const moduleFiles = new Map<string, string>();
         const changedFiles = Object.values(bundle).flatMap((output) => {
           if (
             output.type !== 'chunk' ||
-            output.facadeModuleId === null ||
-            !changedModuleIds.has(output.facadeModuleId)
+            output.facadeModuleId === null
           ) {
+            return [];
+          }
+          moduleFiles.set(output.facadeModuleId, output.fileName);
+          if (committedModuleFiles.get(output.facadeModuleId) === output.fileName) {
             return [];
           }
           return [{
@@ -303,11 +723,16 @@ function developmentPlugins(
             moduleId: output.facadeModuleId,
           }];
         });
-        changedModuleIds.clear();
         const artifactFiles = Object.values(bundle).flatMap((output) =>
           output.type === 'chunk' ? [output.fileName] : [],
         );
-        onGenerationBundle({ artifactFiles, entryFile: fileName, changedFiles });
+        onGenerationBundle({
+          artifactFiles,
+          entryFile: fileName,
+          moduleFiles,
+          moduleRevisions: moduleRevisionTracker.snapshot(moduleFiles.keys()),
+          changedFiles,
+        });
       },
     },
   ];
@@ -320,18 +745,23 @@ export async function createDevServer(
   installRefreshRuntime();
 
   const root = resolve(options.root ?? process.cwd());
-  const entry = isAbsolute(options.entry ?? '')
+  const requestedEntry = isAbsolute(options.entry ?? '')
     ? resolve(options.entry!)
     : resolve(root, options.entry ?? 'src/main.tsx');
   const log = options.log ?? ((message: string) => console.error(message));
-  await access(entry);
+  await access(requestedEntry);
+  const entry = fileURLToPath(
+    canonicalSourceUrl(pathToFileURL(requestedEntry), true),
+  );
 
   const id = sessionId();
-  const runtimeSession = registerDevRuntimeSession(id);
-  const cacheBase = join(root, '.natui');
-  await mkdir(cacheBase, { recursive: true });
-  const cacheDir = await mkdtemp(join(cacheBase, 'dev-'));
-  const workspaceRoot = await findWorkspaceRoot(root);
+  const {
+    cacheBase,
+    cacheDir,
+    rebuildTriggerPath,
+    runtimeSession,
+    workspaceRoot,
+  } = await prepareDevServerResources(root, entry, id);
   const packageIndexUrl = new URL('../index.js', import.meta.url).href;
   const runtimeUrl = new URL('./runtime.js', import.meta.url).href;
 
@@ -349,8 +779,9 @@ export async function createDevServer(
   let generation = 0;
   let refreshCount = 0;
   let mounted = false;
-  const moduleRevisions = new Map<string, number>();
-  const changedModuleIds = new Set<string>();
+  const moduleRevisionTracker = createModuleRevisionTracker();
+  const missingSourceMonitor = createMissingSourceMonitor(rebuildTriggerPath);
+  const committedModuleFiles = new Map<string, string>();
   let firstBuildSettled = false;
   let resolveFirstBuild!: () => void;
   const firstBuildHandled = new Promise<void>((resolveFirst) => {
@@ -380,6 +811,8 @@ export async function createDevServer(
   const evaluateGeneration = async ({
     artifactFiles,
     entryFile,
+    moduleFiles,
+    moduleRevisions,
     changedFiles,
   }: GenerationBundle) => {
     if (closed || entryFile === lastEntryFile) return;
@@ -423,7 +856,14 @@ export async function createDevServer(
             ) {
               continue;
             }
-            await import(pathToFileURL(join(cacheDir, changedFile.fileName)).href);
+            const moduleUrl = pathToFileURL(
+              join(cacheDir, changedFile.fileName),
+            ).href;
+            const moduleRuntime = runtimeSession.captureModuleRuntime(
+              changedFile.moduleId,
+              moduleUrl,
+            );
+            await moduleRuntime.importModule(() => import(moduleUrl));
             runtimeSession.ensureGeneration(generationToken);
           }
 
@@ -446,6 +886,11 @@ export async function createDevServer(
           previousCommittedTransaction?.retire();
           previousTransactionPaused = false;
           committedTransaction = transaction;
+          committedModuleFiles.clear();
+          for (const [moduleId, fileName] of moduleFiles) {
+            committedModuleFiles.set(moduleId, fileName);
+          }
+          moduleRevisionTracker.commit(moduleRevisions);
         }),
       );
       // ESM evaluation itself is not abortable. Keep a canceled evaluation's
@@ -555,7 +1000,7 @@ export async function createDevServer(
 
   const revisionedModuleName = (chunk: PreRenderedChunk) => {
     const revision = chunk.facadeModuleId
-      ? (moduleRevisions.get(chunk.facadeModuleId) ?? 0)
+      ? moduleRevisionTracker.revisionFor(chunk.facadeModuleId)
       : 0;
     return `[name]-r${revision}-[hash].mjs`;
   };
@@ -611,14 +1056,19 @@ export async function createDevServer(
         log(`[natui] ${formatRollupError(warning)}`);
       },
       output,
+      preserveSymlinks:
+        SOURCE_RESOLUTION_OPTIONS.preserveSymlinks ||
+        SOURCE_RESOLUTION_OPTIONS.preserveSymlinksMain,
       plugins: developmentPlugins(
         workspaceRoot,
         id,
         entry,
         packageIndexUrl,
         runtimeUrl,
-        moduleRevisions,
-        changedModuleIds,
+        moduleRevisionTracker,
+        missingSourceMonitor,
+        rebuildTriggerPath,
+        committedModuleFiles,
         (bundle) => {
           nextGenerationBundle = bundle;
         },
@@ -628,6 +1078,11 @@ export async function createDevServer(
         // before rebuilding so a rapid follow-up save is not missed.
         buildDelay: 50,
         clearScreen: false,
+        onInvalidate(moduleId) {
+          if (moduleId === rebuildTriggerPath) {
+            missingSourceMonitor.triggerObserved();
+          }
+        },
       },
     });
     watcher.on('event', onWatchEvent);
@@ -641,6 +1096,7 @@ export async function createDevServer(
     cancelCurrentEvaluation?.(canceled);
     currentTransaction?.rollback();
     committedTransaction?.retire();
+    missingSourceMonitor.close();
     runtimeSession.close();
     unregisterDevRuntimeSession(id);
     await watcher?.close().catch(() => undefined);
@@ -664,6 +1120,7 @@ export async function createDevServer(
       cancelCurrentEvaluation?.(canceled);
       currentTransaction?.rollback();
       committedTransaction?.retire();
+      missingSourceMonitor.close();
       runtimeSession.close();
       unregisterDevRuntimeSession(id);
 

@@ -33,6 +33,17 @@ import { settle, setup } from './helpers.js';
 
 // ---------------------------------------------------------------------------
 
+test('public renderer exposes only its documented runtime controls', () => {
+  const { renderer } = setup();
+  assert.deepEqual(
+    Object.keys(renderer).sort(),
+    ['container', 'render', 'unmount'],
+  );
+  renderer.unmount();
+});
+
+// ---------------------------------------------------------------------------
+
 function Counter() {
   const [count, setCount] = useState(0);
   return (

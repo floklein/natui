@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 import { transform } from 'esbuild';
 import { instrumentForRefresh } from '../src/dev/transform.js';
 
@@ -82,6 +83,11 @@ test('development transform preserves contextual and nested import expressions',
       return import('./data.json', await pick());
     }
 
+    let specifier = './first.js';
+    export async function loadCaptured(pick: () => Promise<object>) {
+      return import(specifier, await pick());
+    }
+
     export function loadNested() {
       return import(import('./specifier.js'));
     }
@@ -101,7 +107,23 @@ test('development transform preserves contextual and nested import expressions',
     instrumented.contents.match(
       new RegExp(`${helperDeclaration[1]}\\(`, 'g'),
     )?.length,
-    5,
+    6,
+  );
+  const capturedSpecifier = instrumented.contents.indexOf('= specifier');
+  const capturedOptions = instrumented.contents.indexOf(
+    '= await pick()',
+    capturedSpecifier,
+  );
+  const capturedImport = instrumented.contents.indexOf(
+    `${helperDeclaration[1]}(() => import(`,
+    capturedOptions,
+  );
+  assert.ok(capturedSpecifier >= 0);
+  assert.ok(capturedSpecifier < capturedOptions);
+  assert.ok(capturedOptions < capturedImport);
+  assert.doesNotMatch(
+    instrumented.contents.slice(capturedImport),
+    /import\(specifier,/,
   );
 
   await transform(instrumented.contents, {
@@ -109,4 +131,65 @@ test('development transform preserves contextual and nested import expressions',
     loader: instrumented.loader,
     target: 'node22',
   });
+});
+
+test('development transform avoids preamble collisions and rewrites complete import.meta access', async () => {
+  const root = resolve('refresh-transform-fixture');
+  const filename = join(root, 'src', 'collisions.tsx');
+  const source = `
+    const __natui\\u0049mportMeta = 'user import meta';
+    const \\u005f\\u005fnatuiModuleRuntime = 'user module runtime';
+    const __natuiRefreshReg = 'user refresh reg';
+    const __natuiRefreshRuntime = 'user refresh runtime';
+    const __natuiRefreshSig = 'user refresh sig';
+
+    export const node = <__natuiImport />;
+    export const sourceMeta = import.meta;
+    export const values = [
+      __natui\\u0049mportMeta,
+      \\u005f\\u005fnatuiModuleRuntime,
+      __natuiRefreshReg,
+      __natuiRefreshRuntime,
+      __natuiRefreshSig,
+    ];
+  `;
+
+  const instrumented = await instrumentForRefresh(
+    source,
+    filename,
+    root,
+    'test-session',
+  );
+
+  assert.doesNotMatch(instrumented.contents, /\bimport\.meta\b/);
+  assert.match(instrumented.contents, /\.importMeta/);
+  await transform(instrumented.contents, {
+    format: 'esm',
+    loader: instrumented.loader,
+    target: 'node22',
+  });
+});
+
+test('development transform preserves query and fragment source identity', async () => {
+  const root = resolve('refresh-transform-fixture');
+  const filename = join(root, 'src', 'variant.ts');
+  const sourceIdentity = pathToFileURL(filename);
+  sourceIdentity.search = '?variant=one';
+  sourceIdentity.hash = '#section';
+
+  const instrumented = await instrumentForRefresh(
+    'export function Variant() { return null; }',
+    filename,
+    root,
+    'test-session',
+    sourceIdentity.href,
+  );
+
+  assert.match(
+    instrumented.contents,
+    /test-session:\.\/src\/variant\.ts\?variant=one#section /,
+  );
+  assert.ok(
+    instrumented.contents.includes(JSON.stringify(sourceIdentity.href)),
+  );
 });

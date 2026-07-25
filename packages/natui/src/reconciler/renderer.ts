@@ -10,8 +10,6 @@ import { makeHostConfig } from './hostConfig.js';
 
 export interface NatuiRenderer {
   render(element: ReactNode, onCommitted?: () => void): void;
-  renderAsync(element: ReactNode): Promise<void>;
-  cancelPendingRender(error: Error): void;
   unmount(): void;
   container: RootContainer;
 }
@@ -22,14 +20,22 @@ export interface NatuiRendererOptions {
    * uncaught error before invoking this callback.
    */
   onUncaughtError?: (error: Error) => void;
+}
+
+interface ManagedNatuiRenderer extends NatuiRenderer {
+  renderAsync(element: ReactNode): Promise<void>;
+  cancelPendingRender(error: Error): void;
+}
+
+interface ManagedNatuiRendererOptions extends NatuiRendererOptions {
   /** @internal Establish the current development generation for host events. */
   runWork?: <T>(work: () => T) => T;
 }
 
-export function createNatuiRenderer(
+function createRenderer(
   bridge: Bridge,
-  options: NatuiRendererOptions = {},
-): NatuiRenderer {
+  options: ManagedNatuiRendererOptions = {},
+): ManagedNatuiRenderer {
   let commitVersion = 0;
   const { hostConfig, runWithPriority } = makeHostConfig(bridge, () => {
     commitVersion += 1;
@@ -175,4 +181,20 @@ export function createNatuiRenderer(
       bridge.flush();
     },
   };
+}
+
+export function createNatuiRenderer(
+  bridge: Bridge,
+  options: NatuiRendererOptions = {},
+): NatuiRenderer {
+  const { container, render, unmount } = createRenderer(bridge, options);
+  return { container, render, unmount };
+}
+
+/** @internal Renderer lifecycle controls used by the Node development runtime. */
+export function createManagedNatuiRenderer(
+  bridge: Bridge,
+  options: ManagedNatuiRendererOptions = {},
+): ManagedNatuiRenderer {
+  return createRenderer(bridge, options);
 }

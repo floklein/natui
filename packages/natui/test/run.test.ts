@@ -71,6 +71,10 @@ test('handshake success: matching protocol and platform mounts and quits cleanly
     ),
     readyTimeoutMs: 5000,
   });
+  assert.deepEqual(
+    Object.keys(app).sort(),
+    ['dump', 'edit', 'emit', 'quit', 'screenshot', 'update'],
+  );
   app.quit();
   // Prove the host received the quit MESSAGE and exited on its own; the
   // transport's kill() backstop (SIGTERM at 200ms) must not be what ends it.
