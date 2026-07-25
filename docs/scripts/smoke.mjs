@@ -271,7 +271,10 @@ try {
   const startMarkdown = await request(baseUrl, '/docs/start.md');
   assertTextResponse(startMarkdown, '/docs/start.md', 'text/markdown');
   assertPermanentlyCached(startMarkdown, '/docs/start.md');
-  assert(/^# Start$/m.test(startMarkdown.text), '/docs/start.md is missing its canonical heading');
+  assert(
+    /^# Getting started$/m.test(startMarkdown.text),
+    '/docs/start.md is missing its canonical heading',
+  );
   assert(
     (startMarkdown.text.match(/^# /gm) ?? []).length === 1,
     '/docs/start.md contains duplicate top-level headings',
