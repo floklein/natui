@@ -240,13 +240,13 @@ try {
   const llmsIndex = await request(baseUrl, '/llms.txt');
   assert(llmsIndex.response.status === 200, '/llms.txt did not return 200');
   assertPermanentlyCached(llmsIndex, '/llms.txt');
-  const agentsIndexPosition = llmsIndex.text.indexOf('](/docs/agents)');
   const introductionIndexPosition = llmsIndex.text.indexOf('](/docs):');
-  assert(agentsIndexPosition >= 0, '/llms.txt is missing /docs/agents');
+  const agentsIndexPosition = llmsIndex.text.indexOf('](/docs/agents)');
   assert(introductionIndexPosition >= 0, '/llms.txt is missing /docs');
+  assert(agentsIndexPosition >= 0, '/llms.txt is missing /docs/agents');
   assert(
-    agentsIndexPosition < introductionIndexPosition,
-    '/docs/agents is not the first root documentation page in /llms.txt',
+    introductionIndexPosition < agentsIndexPosition,
+    '/docs/agents does not follow /docs in /llms.txt',
   );
   assert(/\/docs\/start/.test(llmsIndex.text), '/llms.txt is missing /docs/start');
   assert(/\/docs\/components/.test(llmsIndex.text), '/llms.txt is missing /docs/components');
