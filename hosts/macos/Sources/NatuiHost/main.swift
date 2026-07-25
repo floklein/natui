@@ -51,7 +51,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         // JS decides what happens next (usually: unmount + quit message).
-        Emitter.windowClosed()
+        LifecycleCoordinator.shared.windowClosed()
     }
 
     /// Debug: render our own window to a PNG. Needs no screen-recording
@@ -81,6 +81,118 @@ final class WindowManager: NSObject, NSWindowDelegate {
             Emitter.send(["t": "shot", "path": path])
         } catch {
             fail("write failed: \(error)")
+        }
+    }
+}
+
+// MARK: - Application lifecycle
+
+/// One terminal shutdown path for window close, native Quit, protocol quit,
+/// and parent-process loss. Normal close and Quit wait for React to unmount
+/// and acknowledge with a `quit` message before JavaScriptCore is released.
+@MainActor
+final class LifecycleCoordinator {
+    static let shared = LifecycleCoordinator()
+
+    private static let quitGracePeriod: TimeInterval = 2
+
+    private var embeddedRuntime = false
+    private var awaitingJavaScript = false
+    private var pendingApplicationTermination = false
+    private var allowTermination = false
+    private var completing = false
+    private var quitWatchdog: DispatchWorkItem?
+
+    func configure(embeddedRuntime: Bool) {
+        self.embeddedRuntime = embeddedRuntime
+    }
+
+    func windowClosed() {
+        if embeddedRuntime {
+            requestGracefulQuit()
+        } else {
+            // Node mode's optional onClose callback may intentionally keep the
+            // host alive. Preserve that API instead of imposing a host timer.
+            Emitter.windowClosed()
+        }
+    }
+
+    func applicationShouldTerminate() -> NSApplication.TerminateReply {
+        if allowTermination { return .terminateNow }
+        pendingApplicationTermination = true
+        requestGracefulQuit()
+        return .terminateLater
+    }
+
+    func requestGracefulQuit() {
+        guard !completing, !awaitingJavaScript else { return }
+        awaitingJavaScript = true
+        Emitter.windowClosed()
+
+        let watchdog = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.awaitingJavaScript, !self.completing else { return }
+                Emitter.log("quit acknowledgement timed out; forcing application termination")
+                self.finishQuit()
+            }
+        }
+        quitWatchdog = watchdog
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.quitGracePeriod,
+            execute: watchdog
+        )
+    }
+
+    func completeQuit() {
+        finishQuit()
+    }
+
+    /// An uncaught JavaScriptCore exception leaves the React runtime in an
+    /// unknown state. Report it once, then use the same deferred teardown as
+    /// normal quit so the context is never released from its own callback.
+    func javascriptFailed(_ message: String) {
+        guard !completing else { return }
+        Emitter.log("embedded runtime failed: \(message)")
+        // JSHost dispatches this method after the throwing callback returns,
+        // so it is safe to cancel timers before entering an alert's modal loop.
+        JSHost.shared.stop()
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "This application encountered an error."
+            alert.informativeText = message
+            alert.runModal()
+        }
+        finishQuit()
+    }
+
+    /// The sidecar's stdin reached EOF, so no JavaScript process remains to
+    /// acknowledge cleanup. Terminate without entering the graceful wait.
+    func forceQuit() {
+        finishQuit()
+    }
+
+    private func finishQuit() {
+        guard !completing else { return }
+        completing = true
+        allowTermination = true
+        awaitingJavaScript = false
+        quitWatchdog?.cancel()
+        quitWatchdog = nil
+        let shouldReply = pendingApplicationTermination
+        pendingApplicationTermination = false
+
+        // A bundle may send quit from inside __natui_send. Never release its
+        // JSContext while JavaScriptCore still has that host call on stack.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                JSHost.shared.stop()
+                if shouldReply {
+                    NSApp.reply(toApplicationShouldTerminate: true)
+                } else {
+                    NSApp.terminate(nil)
+                }
+            }
         }
     }
 }
@@ -115,8 +227,13 @@ enum Router {
                     Emitter.log("edit: unknown node \(id)")
                 }
             }
+        case "requestClose":
+            // Verification-only native close request. It exercises the same
+            // host -> React cleanup -> quit acknowledgement path as the
+            // window close button and native Quit.
+            LifecycleCoordinator.shared.windowClosed()
         case "quit":
-            NSApp.terminate(nil)
+            LifecycleCoordinator.shared.completeQuit()
         default:
             Emitter.log("unknown message type: \(msg.t)")
         }
@@ -152,7 +269,9 @@ func startStdinReader(terminateOnEOF: Bool) {
         if terminateOnEOF {
             // EOF: the JS process died or closed the pipe. Exit cleanly.
             DispatchQueue.main.async {
-                NSApp.terminate(nil)
+                MainActor.assumeIsolated {
+                    LifecycleCoordinator.shared.forceQuit()
+                }
             }
         } else {
             Emitter.log("stdin closed; embedded app keeps running without the debug channel")
@@ -170,22 +289,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             // Mode is decided BEFORE the stdin reader starts, because it
             // changes what stdin EOF means (see startStdinReader).
-            let bundlePath = embeddedBundlePath()
+            var packagedApp: PackagedApp?
+            let packagedResult = AppBundleLoader.loadIfPackaged()
+            let bundlePath: String?
+            if let packagedResult {
+                bundlePath = nil
+                switch packagedResult {
+                case .success(let app):
+                    packagedApp = app
+                case .failure(let error):
+                    presentStartupFailure(error.localizedDescription)
+                    return
+                }
+            } else {
+                bundlePath = explicitBundlePath()
+            }
+            let hasEmbeddedApp = bundlePath != nil || packagedApp != nil
+            LifecycleCoordinator.shared.configure(embeddedRuntime: hasEmbeddedApp)
             // Stdin stays active in both modes: in embedded mode it is the
             // debug channel (dump/emit/screenshot/edit) for external probes.
-            startStdinReader(terminateOnEOF: bundlePath == nil)
-            if let bundlePath {
+            startStdinReader(terminateOnEOF: !hasEmbeddedApp)
+            if let packagedApp {
                 // Stage 2: evaluate the React bundle in-process (JSC). The
                 // ready message is sent after the bundle registered its
                 // receive hook, and reaches both the JS sink and stdout.
-                JSHost.shared.start(bundlePath: bundlePath)
+                if let error = JSHost.shared.start(
+                    sourceName: packagedApp.sourceName,
+                    source: packagedApp.source
+                ) {
+                    presentStartupFailure(
+                        "\(packagedApp.name) \(packagedApp.version): \(error)"
+                    )
+                    return
+                }
+            } else if let bundlePath {
+                if let error = JSHost.shared.start(bundlePath: bundlePath) {
+                    presentStartupFailure(error)
+                    return
+                }
             }
             // Only now are we able to process messages; JS waits for this.
             Emitter.ready()
         }
     }
 
-    private func embeddedBundlePath() -> String? {
+    private func explicitBundlePath() -> String? {
         let args = CommandLine.arguments
         guard let flagIndex = args.firstIndex(of: "--bundle"), args.indices.contains(flagIndex + 1) else {
             return nil
@@ -196,6 +344,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // The JS side orchestrates shutdown via the quit message.
         false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            LifecycleCoordinator.shared.applicationShouldTerminate()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            JSHost.shared.stop()
+        }
+    }
+
+    private func presentStartupFailure(_ message: String) {
+        Emitter.log("startup failed: \(message)")
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "This application could not start."
+            alert.informativeText = message
+            alert.runModal()
+            exit(EXIT_FAILURE)
+        }
     }
 }
 

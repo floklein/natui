@@ -1,0 +1,181 @@
+---
+title: Application bundles
+description: Package a NatUI entry as a native macOS app or a portable Windows executable.
+---
+
+NatUI includes a repository-local reference packager for turning an embedded
+React entry into a native application artifact. The packaged application runs
+React inside JavaScriptCore on macOS or V8 on Windows. It does not start Node
+at application runtime.
+
+## Package the demo
+
+From the repository root:
+
+```bash
+pnpm package:demo
+```
+
+The command builds `packages/natui`, reads
+`examples/demo/natui.app.json`, bundles the configured entry with esbuild, and
+builds the native host for the current operating system and architecture.
+
+Output goes to `examples/demo/dist/package`:
+
+- Windows x64:
+  `NatUIDemo-0.1.0-windows-x64.exe`
+- Windows ARM64:
+  `NatUIDemo-0.1.0-windows-arm64.exe`
+- macOS:
+  `NatUIDemo.app`
+
+Packaging is platform-specific. Build each macOS architecture on that
+architecture. Windows packaging supports x64 and ARM64 targets.
+
+## Application configuration
+
+The demo configuration is:
+
+```json
+{
+  "$schema": "../../schemas/natui-app.schema.json",
+  "schemaVersion": 1,
+  "id": "dev.natui.demo",
+  "name": "NatUI Demo",
+  "version": "0.1.0",
+  "buildNumber": "1",
+  "entry": "src/main-embedded.tsx",
+  "executable": "NatUIDemo",
+  "output": "dist/package"
+}
+```
+
+| Field | Purpose |
+|---|---|
+| `schemaVersion` | Application configuration schema, currently `1` |
+| `id` | Lowercase reverse-DNS application identifier |
+| `name` | Native display name, up to 80 characters |
+| `version` | Three-part application version such as `1.2.3` |
+| `buildNumber` | Positive integer string used by native version metadata |
+| `entry` | Browser-compatible embedded React entry |
+| `executable` | Native executable name without spaces |
+| `output` | Output directory relative to `natui.app.json` |
+| `icons.macos` | Optional `.icns` path |
+| `icons.windows` | Optional `.ico` path |
+
+Entry, output, and icon paths must stay inside the application directory.
+Unknown configuration fields fail packaging instead of being ignored.
+
+The configured entry must call `runEmbedded` from `natui/inproc`. Imports from
+`natui/components` remain free of Node built-ins and can be included in the
+browser-targeted application bundle.
+
+## Platform artifacts
+
+### Windows
+
+Windows packaging produces one portable, architecture-specific, self-contained
+EXE. The file contains the minified application JavaScript, generated
+manifest, WinUI host, .NET runtime, Windows App SDK runtime, and V8
+dependencies.
+
+The .NET single-file host extracts its runtime dependencies into a cache under
+the current user's temporary directory at launch. This extraction is managed
+by the runtime and does not install machine-wide dependencies. Copy the one
+EXE to ship the application.
+
+### macOS
+
+macOS packaging produces a standard `.app` directory. Its executable is under
+`Contents/MacOS`, while `main.js` and `manifest.json` are under
+`Contents/Resources/NatUI`. Copy the complete `.app` directory when moving the
+application.
+
+The generated `Info.plist` carries the configured application identifier,
+display name, version, build number, minimum macOS version, and optional icon.
+
+## Generated manifest and compatibility
+
+Each artifact contains a generated manifest shaped like:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "dev.natui.demo",
+  "name": "NatUI Demo",
+  "version": "0.1.0",
+  "buildNumber": "1",
+  "entry": "main.js",
+  "entrySha256": "<64 lowercase hexadecimal characters>",
+  "protocolVersion": 1,
+  "minHostApi": 1,
+  "platform": "windows",
+  "architecture": "x64"
+}
+```
+
+Before evaluating JavaScript, the native loader validates:
+
+- Bundle schema version
+- Exact wire protocol version
+- Minimum host API level
+- Target platform and architecture
+- SHA-256 digest of `main.js`
+
+The protocol version covers message compatibility. The host API level covers
+additive native components and host behavior that use the same wire format.
+A newer host API can run a bundle that requires an older level. An older host
+cannot run a bundle that requires newer capabilities.
+
+## Embedded application lifecycle
+
+`runEmbedded` resolves to an `EmbeddedApp` after the first React commit:
+
+```tsx
+const app = await runEmbedded(<App />, {
+  title: 'My app',
+  onClose() {
+    console.log('The native window requested close');
+  },
+});
+
+app.update(<App />);
+app.quit();
+```
+
+`quit()` is idempotent. The first call synchronously unmounts React, runs
+effect cleanup, sends one native quit request, disposes pending bridge work,
+and detaches `globalThis.__natui_recv`. Later calls do nothing. A native window
+close invokes `onClose` once and follows the same shutdown path.
+
+Startup protocol or host API incompatibility also asks the native host to quit
+and removes the receive hook, so a broken packaged application does not remain
+alive without a usable React tree.
+
+## Verify the packaged lifecycle
+
+Run:
+
+```bash
+pnpm verify:package
+```
+
+This command rebuilds the demo package for the current platform, launches the
+artifact from an unrelated working directory, validates the ready handshake,
+waits for the demo tree, requests a native close, and requires a clean exit.
+It needs a normal desktop window session.
+
+## Current boundaries
+
+The reference packager does not currently provide:
+
+- Code signing
+- macOS notarization
+- Installer generation
+- Automatic updates
+- Single-instance orchestration
+- Multi-window application APIs
+
+Packaging creates runnable artifacts. Release distribution still requires the
+platform-specific signing, notarization, installer, and update work appropriate
+for the application.

@@ -24,6 +24,18 @@ public static class Program
         // exit code 0xC000027B); route them to stderr like all diagnostics.
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             Ipc.Log($"unhandled: {e.ExceptionObject}");
+        // In a fully self-extracting single-file publish, AppContext points
+        // at the distributed exe while the WinUI DLLs live beside the
+        // extracted managed assembly. WASDK's generated initializer uses the
+        // former path. Correct it before the first XAML activation.
+        var assemblyDirectory = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+        if (assemblyDirectory is not null
+            && File.Exists(Path.Combine(assemblyDirectory, "Microsoft.WindowsAppRuntime.dll")))
+        {
+            Environment.SetEnvironmentVariable(
+                "MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY",
+                assemblyDirectory + Path.DirectorySeparatorChar);
+        }
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(p =>
         {
@@ -52,6 +64,9 @@ public sealed class App : Application, IXamlMetadataProvider
     private Window? _window;
     private Router? _router;
     private bool _quitting;
+    private bool _quitRequested;
+    private bool _startupFailed;
+    private System.Threading.Timer? _quitWatchdog;
 
     // Code-only app: the XAML compiler normally generates this metadata
     // provider plumbing from App.xaml. Without it, parsing WinUI's own
@@ -102,7 +117,7 @@ public sealed class App : Application, IXamlMetadataProvider
         // never intercepts input while empty.
         var chromePanel = new StackPanel { Orientation = Orientation.Vertical };
         var overlayLayer = new Grid();
-        var mapper = new NodeMapper(rootStack, chromePanel, overlayLayer);
+        var mapper = new NodeMapper(rootStack, chromePanel, overlayLayer, RequestQuit);
         var store = new NodeStore(mapper);
 
         // The shell Grid paints the theme background so screenshots are not
@@ -132,15 +147,32 @@ public sealed class App : Application, IXamlMetadataProvider
         _window.Content = shell;
         _window.Closed += (_, _) =>
         {
-            // JS decides what happens next (usually: unmount + quit message).
             // Application.Exit also closes the window, so stay silent then.
-            if (!_quitting) Ipc.WindowClosed();
+            if (_quitting) return;
+            if (_startupFailed)
+            {
+                Quit(1);
+                return;
+            }
+            RequestQuit();
         };
 
         _router = new Router(this, _window, store);
-        var bundlePath = EmbeddedBundlePath();
+        var isPackaged = AppBundle.IsEmbedded;
+        var bundlePath = isPackaged ? null : ExplicitBundlePath();
+        PackagedApp? packagedApp = null;
+        if (isPackaged)
+        {
+            if (!AppBundle.TryLoad(out packagedApp, out var manifestError))
+            {
+                ShowStartupFailure(rootStack, manifestError ?? "Invalid packaged application.");
+                return;
+            }
+            _window.Title = packagedApp!.Name;
+        }
+        var hasEmbeddedApp = bundlePath is not null || packagedApp is not null;
 
-        if (bundlePath is null && !Console.IsInputRedirected)
+        if (!hasEmbeddedApp && !Console.IsInputRedirected)
         {
             // Double-clicked, no protocol channel: show a hint instead of
             // sitting invisible or exiting silently.
@@ -158,14 +190,21 @@ public sealed class App : Application, IXamlMetadataProvider
         {
             StartStdinReader(
                 _window.DispatcherQueue,
-                terminateOnEof: bundlePath is null);
+                terminateOnEof: !hasEmbeddedApp);
         }
-        if (bundlePath is not null)
+        if (hasEmbeddedApp)
         {
             _embeddedHost = new EmbeddedJsHost(_window.DispatcherQueue, _router);
-            if (!_embeddedHost.Start(bundlePath))
+            var started = packagedApp is not null
+                ? _embeddedHost.StartSource(packagedApp.SourceName, packagedApp.Source)
+                : _embeddedHost.Start(bundlePath!);
+            if (!started)
             {
-                Quit();
+                ShowStartupFailure(
+                    rootStack,
+                    packagedApp is null
+                        ? $"Cannot start embedded bundle at {bundlePath}."
+                        : $"Cannot start {packagedApp.Name} {packagedApp.Version}.");
                 return;
             }
         }
@@ -173,10 +212,29 @@ public sealed class App : Application, IXamlMetadataProvider
         Ipc.Ready();
     }
 
-    internal void Quit()
+    internal void RequestQuit()
+    {
+        if (_quitting || _quitRequested) return;
+        _quitRequested = true;
+        _quitWatchdog = new System.Threading.Timer(
+            _ =>
+            {
+                Ipc.Log("graceful shutdown timed out; forcing process exit");
+                Environment.Exit(Environment.ExitCode);
+            },
+            null,
+            TimeSpan.FromSeconds(2),
+            Timeout.InfiniteTimeSpan);
+        Ipc.WindowClosed();
+    }
+
+    internal void Quit(int exitCode = 0)
     {
         if (_quitting) return;
         _quitting = true;
+        _quitWatchdog?.Dispose();
+        _quitWatchdog = null;
+        Environment.ExitCode = exitCode;
         var embeddedHost = _embeddedHost;
         _embeddedHost = null;
         // A bundle can send quit from inside a V8 callback. Dispose on the
@@ -197,7 +255,24 @@ public sealed class App : Application, IXamlMetadataProvider
         Exit();
     }
 
-    private static string? EmbeddedBundlePath()
+    private void ShowStartupFailure(NatuiStack rootStack, string message)
+    {
+        _startupFailed = true;
+        Environment.ExitCode = 1;
+        Ipc.Log($"startup failed: {message}");
+        rootStack.Children.Clear();
+        rootStack.Children.Add(new TextBlock
+        {
+            Text = $"This application could not start.\n\n{message}",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 640,
+            Margin = new Thickness(24),
+        });
+        rootStack.RebuildLayout();
+        _window!.Activate();
+    }
+
+    private static string? ExplicitBundlePath()
     {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--bundle");
@@ -242,7 +317,7 @@ public sealed class App : Application, IXamlMetadataProvider
             if (terminateOnEof)
             {
                 // Sidecar mode: stdin is the parent-process lifeline.
-                dispatcher.TryEnqueue(Quit);
+                dispatcher.TryEnqueue(() => Quit());
             }
             else
             {
@@ -311,6 +386,12 @@ internal sealed class Router(App app, Window window, NodeStore store)
                 {
                     store.UserEdit(editId, message["value"]);
                 }
+                break;
+            case "requestClose":
+                // Verification-only native close request. It exercises the
+                // same host -> React cleanup -> quit acknowledgement path as
+                // the window close button and a role:"quit" menu item.
+                app.RequestQuit();
                 break;
             case "quit":
                 app.Quit();

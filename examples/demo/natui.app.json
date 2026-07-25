@@ -1,0 +1,11 @@
+{
+  "$schema": "../../schemas/natui-app.schema.json",
+  "schemaVersion": 1,
+  "id": "dev.natui.demo",
+  "name": "NatUI Demo",
+  "version": "0.1.0",
+  "buildNumber": "1",
+  "entry": "src/main-embedded.tsx",
+  "executable": "NatUIDemo",
+  "output": "dist/package"
+}

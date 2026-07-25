@@ -1,5 +1,9 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+let embedDevelopmentInfoPlist =
+    ProcessInfo.processInfo.environment["NATUI_PACKAGE_APP"] != "1"
 
 let package = Package(
     name: "natui-host",
@@ -12,7 +16,7 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ],
-            linkerSettings: [
+            linkerSettings: embedDevelopmentInfoPlist ? [
                 // Embed Info.plist into the bare executable: gives the process
                 // bundle identity so an unbundled binary gets Retina rendering
                 // and proper keyboard focus (TextField) without an .app bundle.
@@ -22,7 +26,7 @@ let package = Package(
                     "-Xlinker", "__info_plist",
                     "-Xlinker", "Sources/NatuiHost/Info.plist",
                 ])
-            ]
+            ] : []
         )
     ]
 )

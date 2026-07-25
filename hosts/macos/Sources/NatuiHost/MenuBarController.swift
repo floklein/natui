@@ -35,7 +35,10 @@ final class MenuBarController: NSObject {
     }
 
     private func appMenuItem() -> NSMenuItem {
-        let name = ProcessInfo.processInfo.processName
+        let name =
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? ProcessInfo.processInfo.processName
         let appMenu = NSMenu(title: name)
         appMenu.addItem(
             withTitle: "About \(name)",

@@ -11,9 +11,10 @@
  * (esbuild --platform=browser). It deliberately does not import run.ts.
  */
 import type { ReactNode } from 'react';
-import { Bridge } from './bridge/bridge.js';
+import { Bridge, type ReadyInfo } from './bridge/bridge.js';
 import type { Transport } from './bridge/transport.js';
 import {
+  HOST_API_VERSION,
   PROTOCOL_VERSION,
   type InboundMessage,
   type OutboundMessage,
@@ -32,17 +33,27 @@ class InProcTransport implements Transport {
   private messageCb: ((msg: InboundMessage) => void) | undefined;
   private buffered: InboundMessage[] = [];
   private hostSend: SendFn;
+  private globals: NatuiGlobals;
+  private receive: (line: string) => void;
+  private closed = false;
 
   constructor() {
     const g = globalThis as NatuiGlobals;
     if (typeof g.__natui_send !== 'function') {
       throw new Error(
         'natui/inproc: no embedding host detected (__natui_send is missing). ' +
-          'Run this bundle inside the NatUI host with --bundle.',
+        'Run this bundle inside the NatUI host with --bundle.',
       );
     }
+    if (typeof g.__natui_recv === 'function') {
+      throw new Error(
+        'natui/inproc: an embedded application is already active in this JavaScript runtime',
+      );
+    }
+    this.globals = g;
     this.hostSend = g.__natui_send;
-    g.__natui_recv = (line) => {
+    this.receive = (line) => {
+      if (this.closed) return;
       let msg: InboundMessage;
       try {
         msg = JSON.parse(line) as InboundMessage;
@@ -53,9 +64,13 @@ class InProcTransport implements Transport {
       if (this.messageCb) this.messageCb(msg);
       else this.buffered.push(msg);
     };
+    g.__natui_recv = this.receive;
   }
 
   send(msg: OutboundMessage): void {
+    if (this.closed) {
+      throw new Error('natui/inproc: cannot send through a closed embedding transport');
+    }
     this.hostSend(JSON.stringify(msg));
   }
 
@@ -68,10 +83,37 @@ class InProcTransport implements Transport {
     // The host owns our lifetime; there is no exit event to observe.
   }
 
-  close(): void {}
+  close(): void {
+    this.closed = true;
+    if (this.globals.__natui_recv === this.receive) {
+      delete this.globals.__natui_recv;
+    }
+    this.buffered = [];
+    this.messageCb = undefined;
+  }
 }
 
-export type RunEmbeddedOptions = WindowProps;
+export interface RunEmbeddedOptions extends WindowProps {
+  /** Called once when the native window asks the application to close. */
+  onClose?: () => void;
+  /** Startup handshake timeout override (mainly for tests). */
+  readyTimeoutMs?: number;
+}
+
+export type EmbeddedPlatform = 'macos' | 'windows';
+export type EmbeddedAppState = 'running' | 'stopping' | 'stopped';
+
+export interface EmbeddedApp {
+  readonly platform: EmbeddedPlatform;
+  readonly state: EmbeddedAppState;
+  /** Re-render with a new element. Throws after shutdown begins. */
+  update(element: ReactNode): void;
+  /**
+   * Synchronously unmount React, flush effect cleanup, ask the host to quit,
+   * and detach the in-process receive hook. Safe to call more than once.
+   */
+  quit(): void;
+}
 
 /** How long the embedding host may take to send `ready` after evaluation. */
 const EMBEDDED_READY_TIMEOUT_MS = 10_000;
@@ -80,29 +122,104 @@ const EMBEDDED_READY_TIMEOUT_MS = 10_000;
 export async function runEmbedded(
   element: ReactNode,
   options: RunEmbeddedOptions = {},
-): Promise<void> {
+): Promise<EmbeddedApp> {
+  const { onClose, readyTimeoutMs, ...windowProps } = options;
   const transport = new InProcTransport();
   // The Bridge subscribes immediately, so no host message can be dropped
   // between the handshake and regular operation.
   const bridge = new Bridge(transport);
 
-  const ready = await bridge.waitForReady(EMBEDDED_READY_TIMEOUT_MS);
-  if (ready.protocol !== PROTOCOL_VERSION) {
-    throw new Error(
-      `natui/inproc: embedding host speaks protocol v${ready.protocol} but this bundle ` +
-        `requires v${PROTOCOL_VERSION}; rebuild the host to match`,
-    );
-  }
-  if (ready.platform !== 'macos' && ready.platform !== 'windows') {
-    throw new Error(`natui/inproc: embedding host reported unknown platform "${ready.platform}"`);
-  }
+  let state: 'starting' | EmbeddedAppState = 'starting';
+  let renderer: ReturnType<typeof createNatuiRenderer> | undefined;
 
-  const renderer = createNatuiRenderer(bridge);
-  bridge.onWindowClose(() => {
-    renderer.unmount();
-    bridge.quit();
-  });
+  const quit = () => {
+    if (state === 'stopping' || state === 'stopped') return;
+    state = 'stopping';
+    let cleanupError: unknown;
+    const cleanup = (step: () => void) => {
+      try {
+        step();
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    };
+    try {
+      const activeRenderer = renderer;
+      if (activeRenderer) cleanup(() => activeRenderer.unmount());
+      cleanup(() => bridge.quit());
+      cleanup(() => bridge.dispose('embedded app stopped'));
+      cleanup(() => transport.close());
+    } finally {
+      state = 'stopped';
+    }
+    if (cleanupError) throw cleanupError;
+  };
 
-  bridge.sendWindow(options);
-  await new Promise<void>((resolve) => renderer.render(element, resolve));
+  let ready: ReadyInfo;
+  try {
+    ready = await bridge.waitForReady(readyTimeoutMs ?? EMBEDDED_READY_TIMEOUT_MS);
+    if (ready.protocol !== PROTOCOL_VERSION) {
+      throw new Error(
+        `natui/inproc: embedding host speaks protocol v${ready.protocol} but this bundle ` +
+          `requires v${PROTOCOL_VERSION}; rebuild the host to match`,
+      );
+    }
+    if (!Number.isInteger(ready.hostApi) || ready.hostApi < HOST_API_VERSION) {
+      const reported = Number.isInteger(ready.hostApi) ? `v${ready.hostApi}` : 'no API level';
+      throw new Error(
+        `natui/inproc: embedding host reports ${reported} but this bundle requires host ` +
+          `API v${HOST_API_VERSION} or newer; rebuild the host to match`,
+      );
+    }
+    if (ready.platform !== 'macos' && ready.platform !== 'windows') {
+      throw new Error(
+        `natui/inproc: embedding host reported unknown platform "${ready.platform}"`,
+      );
+    }
+
+    // Renderer construction installs bridge callbacks and can itself fail.
+    // Keep it inside the protected startup region so every failure asks the
+    // native host to quit and releases the global receive hook.
+    const createdRenderer = createNatuiRenderer(bridge);
+    renderer = createdRenderer;
+    bridge.onWindowClose(() => {
+      try {
+        onClose?.();
+      } finally {
+        quit();
+      }
+    });
+
+    bridge.sendWindow(windowProps);
+    // The embedding host may synchronously deliver a native close while
+    // handling the window message. Never mount React after that close path
+    // has already unmounted and detached the transport.
+    if (state !== 'starting') {
+      throw new Error('natui/inproc: embedding host closed during application startup');
+    }
+    await new Promise<void>((resolve) => createdRenderer.render(element, resolve));
+  } catch (error) {
+    try {
+      quit();
+    } catch (cleanupError) {
+      console.error('natui/inproc: startup cleanup failed:', cleanupError);
+    }
+    throw error;
+  }
+  if (state === 'starting') state = 'running';
+
+  const platform = ready.platform;
+  return {
+    platform,
+    get state() {
+      return state === 'starting' ? 'running' : state;
+    },
+    update(nextElement) {
+      if (state !== 'running') {
+        throw new Error('natui/inproc: cannot update an application that is stopping or stopped');
+      }
+      renderer.render(nextElement);
+    },
+    quit,
+  };
 }

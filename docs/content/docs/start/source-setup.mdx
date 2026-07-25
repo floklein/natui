@@ -21,6 +21,27 @@ pnpm typecheck
 
 `pnpm build` emits the `natui` package into `packages/natui/dist`. The examples resolve the package through the pnpm workspace, so build the package before running a standalone typecheck.
 
+## Package the demo
+
+The repository includes a native application packaging workflow:
+
+```bash
+pnpm package:demo
+pnpm verify:package
+```
+
+It reads `examples/demo/natui.app.json` and produces a native artifact for the
+current platform and architecture. macOS requires the Swift toolchain. Windows
+requires the .NET SDK and emits one self-contained EXE that extracts runtime
+dependencies to a per-user temporary cache when launched.
+
+`pnpm verify:package` opens the packaged application, validates its handshake
+and native tree, then exercises the normal close lifecycle. A real desktop
+window session is required.
+
+See [application bundles](/docs/guides/application-bundles) for configuration
+and distribution boundaries.
+
 ## Package entrypoints
 
 The workspace exposes three entrypoints:
@@ -29,4 +50,6 @@ The workspace exposes three entrypoints:
 - `natui/components` for component-only bundles that avoid Node built-ins
 - `natui/inproc` for the embedded host entrypoint
 
-NatUI is not documented as a public registry package. Keep installation and examples tied to a source checkout until a packaging workflow exists.
+NatUI is not documented as a public registry package. The application
+packager is currently a repository-local reference workflow, so installation
+and examples remain tied to a source checkout.

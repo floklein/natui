@@ -491,7 +491,10 @@ internal sealed partial class NodeMapper
             switch (role)
             {
                 case "quit":
-                    flyoutItem.Click += (_, _) => Application.Current.Exit();
+                    // Native Quit must take the same path as a window close:
+                    // React unmounts and acknowledges with `quit` before the
+                    // V8 engine and WinUI application are torn down.
+                    flyoutItem.Click += (_, _) => requestQuit();
                     break;
                 case "cut" or "copy" or "paste" or "selectAll" or "undo" or "redo":
                 {

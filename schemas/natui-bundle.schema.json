@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://natui.dev/schemas/natui-bundle.schema.json",
+  "title": "NatUI packaged application manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "version",
+    "buildNumber",
+    "entry",
+    "entrySha256",
+    "protocolVersion",
+    "minHostApi",
+    "platform",
+    "architecture"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "buildNumber": {
+      "type": "string"
+    },
+    "entry": {
+      "type": "string"
+    },
+    "entrySha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "protocolVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "minHostApi": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "platform": {
+      "enum": [
+        "macos",
+        "windows"
+      ]
+    },
+    "architecture": {
+      "enum": [
+        "x64",
+        "arm64"
+      ]
+    }
+  }
+}

@@ -32,7 +32,11 @@ internal sealed class EmbeddedJsHost(
             Ipc.Log($"embedded: cannot read bundle at {bundlePath}: {ex.Message}");
             return false;
         }
+        return StartSource(bundlePath, source);
+    }
 
+    public bool StartSource(string sourceName, string source)
+    {
         try
         {
             var engine = new V8ScriptEngine();
@@ -78,7 +82,7 @@ internal sealed class EmbeddedJsHost(
                   };
                 })();
                 """);
-            engine.Execute(bundlePath, source);
+            engine.Execute(sourceName, source);
 
             if (engine.Evaluate("typeof globalThis.__natui_recv === 'function'") is not true)
             {
