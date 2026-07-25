@@ -80,8 +80,9 @@ pnpm install
 pnpm demo
 ```
 
-(`pnpm demo` is the root script; it builds the `natui` package and runs the
-`natui-demo` example via `pnpm --filter natui-demo dev`.)
+`pnpm demo` is the root development-server script. It builds the `natui`
+package, runs `natui-demo`, and applies React Fast Refresh after source edits.
+Use `pnpm demo:start` for a one-shot launch without watching.
 
 The host can also evaluate the browser bundle in-process with V8:
 

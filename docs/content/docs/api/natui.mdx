@@ -27,6 +27,7 @@ sends window properties, and mounts the React element.
 |---|---|
 | `host` | Host executable string or `{ cmd, args? }` override |
 | `onClose` | Callback for native window close |
+| `onUncaughtError` | Callback for errors React cannot recover from |
 | `readyTimeoutMs` | Startup handshake timeout override |
 
 Without `onClose`, closing the native window unmounts React, sends `quit`, and exits the Node process.
@@ -41,7 +42,7 @@ Without `onClose`, closing the native window unmounts React, sends `quit`, and e
 | `screenshot(path)` | Resolves to the written PNG path |
 | `emit(id, name, payload?)` | Synthesizes a debug event |
 | `edit(id, value)` | Performs an optimistic debug edit |
-| `update(element)` | Renders a new React element |
+| `update(element)` | Resolves after the new tree and its synchronous effect updates settle; rejects on an uncaught render or effect error |
 | `quit()` | Unmounts, asks the host to quit, and closes transport |
 
 ## Other exports

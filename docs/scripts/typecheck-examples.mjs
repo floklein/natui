@@ -171,6 +171,7 @@ const program = ts.createProgram(generatedFiles, {
     natui: ['../packages/natui/src/index.ts'],
     'natui/components': ['../packages/natui/src/components.ts'],
     'natui/inproc': ['../packages/natui/src/inproc.ts'],
+    'natui/dev': ['../packages/natui/src/dev/index.ts'],
   },
 });
 

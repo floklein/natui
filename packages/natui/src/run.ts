@@ -8,13 +8,15 @@ import {
   type TreeNode,
   type WindowProps,
 } from './protocol.js';
-import { createNatuiRenderer } from './reconciler/renderer.js';
+import { createManagedNatuiRenderer } from './reconciler/renderer.js';
 
 export interface RunOptions extends WindowProps {
   /** Host binary override; defaults to NATUI_HOST env or the in-repo build. */
   host?: string | HostCommand;
   /** Called when the user closes the window. Default: unmount and exit. */
   onClose?: () => void;
+  /** Called when React cannot recover from a render error. */
+  onUncaughtError?: (error: Error) => void;
   /** Startup handshake timeout override (mainly for tests). */
   readyTimeoutMs?: number;
 }
@@ -32,8 +34,16 @@ export interface NatuiApp {
    */
   edit(id: number, value: unknown): void;
   /** Re-render with a new element (e.g. for external hot reload). */
-  update(element: ReactNode): void;
+  update(element: ReactNode): Promise<void>;
   /** Unmount, quit the host, close the transport. */
+  quit(): void;
+}
+
+/** @internal Minimal lifecycle handle exposed while an app is still starting. */
+export interface NatuiAppController {
+  /** Cancel an initial mount or update that has not committed. */
+  cancelPendingUpdate(error: Error): void;
+  /** Stop startup or unmount and terminate the host. */
   quit(): void;
 }
 
@@ -49,7 +59,23 @@ const KNOWN_PLATFORMS = new Set(['macos', 'windows']);
 
 /** Render a React element into a native window. Resolves once mounted. */
 export async function run(element: ReactNode, options: RunOptions = {}): Promise<NatuiApp> {
-  const { host, onClose, readyTimeoutMs, ...windowProps } = options;
+  return runWithController(element, options);
+}
+
+/** @internal Run with access to a lifecycle handle before the initial mount settles. */
+export async function runWithController(
+  element: ReactNode,
+  options: RunOptions = {},
+  onController?: (controller: NatuiAppController) => void,
+  runWork?: <T>(work: () => T) => T,
+): Promise<NatuiApp> {
+  const {
+    host,
+    onClose,
+    onUncaughtError,
+    readyTimeoutMs,
+    ...windowProps
+  } = options;
 
   const hostCmd: HostCommand =
     typeof host === 'string' ? { cmd: host } : (host ?? defaultHostCommand());
@@ -60,6 +86,28 @@ export async function run(element: ReactNode, options: RunOptions = {}): Promise
   const bridge = new Bridge(transport);
 
   let phase: 'starting' | 'running' | 'quitting' = 'starting';
+  let renderer: ReturnType<typeof createManagedNatuiRenderer> | undefined;
+  let startupCancellation: Error | undefined;
+  const quit = () => {
+    if (phase === 'quitting') return;
+    phase = 'quitting';
+    renderer?.unmount();
+    bridge.quit();
+    bridge.dispose('quit() was called');
+    setTimeout(() => transport.close(), 200).unref?.();
+  };
+  const controller: NatuiAppController = {
+    cancelPendingUpdate(error) {
+      if (renderer) renderer.cancelPendingRender(error);
+      else {
+        startupCancellation = error;
+        quit();
+      }
+    },
+    quit,
+  };
+  onController?.(controller);
+
   transport.onExit((code) => {
     // Rejects the pending ready waiter (startup) and any dump/shot waiters.
     bridge.hostExited(code);
@@ -100,40 +148,43 @@ export async function run(element: ReactNode, options: RunOptions = {}): Promise
   } catch (err) {
     // Don't leak an incompatible or half-started host process.
     bridge.dispose('startup failed');
-    transport.close();
-    throw err;
+    // quit() already sent a protocol shutdown and installed a kill backstop.
+    // Preserve that clean path when cancellation happened before ready.
+    if (!startupCancellation) transport.close();
+    throw startupCancellation ?? err;
   }
 
   phase = 'running';
-  const renderer = createNatuiRenderer(bridge);
+  renderer = createManagedNatuiRenderer(bridge, { onUncaughtError, runWork });
 
-  const quit = () => {
-    phase = 'quitting';
-    renderer.unmount();
-    bridge.quit();
-    bridge.dispose('quit() was called');
-    setTimeout(() => transport.close(), 200).unref?.();
-  };
-
-  bridge.onWindowClose(() => {
+  const handleWindowClose = () => {
     if (onClose) onClose();
     else {
       quit();
       // Give the quit message a beat to reach the host before exiting.
       setTimeout(() => process.exit(0), 250);
     }
+  };
+  bridge.onWindowClose(() => {
+    if (runWork) runWork(handleWindowClose);
+    else handleWindowClose();
   });
 
   bridge.sendWindow(windowProps);
   // Resolve once the initial tree is actually committed (and thus flushed).
-  await new Promise<void>((resolve) => renderer.render(element, resolve));
+  try {
+    await renderer.renderAsync(element);
+  } catch (error) {
+    quit();
+    throw error;
+  }
 
   return {
     dump: () => bridge.requestDump(),
     screenshot: (path) => bridge.requestScreenshot(path),
     emit: (id, name, payload) => bridge.emitDebugEvent(id, name, payload),
     edit: (id, value) => bridge.editDebugValue(id, value),
-    update: (el) => renderer.render(el),
+    update: (el) => renderer.renderAsync(el),
     quit,
   };
 }
