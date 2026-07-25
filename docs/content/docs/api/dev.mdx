@@ -1,0 +1,50 @@
+---
+title: natui/dev
+description: Start and control the NatUI development server programmatically.
+---
+
+The `natui/dev` entrypoint exposes the same state-preserving development
+server used by the `natui dev` command.
+
+## createDevServer
+
+```ts typecheck
+import { createDevServer } from 'natui/dev';
+
+const server = await createDevServer({
+  root: process.cwd(),
+  entry: 'src/main.tsx',
+});
+
+const close = async () => {
+  await server.close();
+};
+
+process.once('SIGINT', () => void close());
+process.once('SIGTERM', () => void close());
+```
+
+The watcher keeps the process alive. The signal handlers use the returned
+server handle to cleanly stop the watcher and native host.
+
+The executable entry must call `run()` once. The server watches the
+application's local source graph, applies React Fast Refresh after successful
+builds, and keeps the previous native UI mounted after a build or evaluation
+error.
+
+<auto-type-table path="../../../../packages/natui/src/dev/server.ts" name="DevServerOptions" />
+
+| Property | Purpose |
+|---|---|
+| `entry` | Executable entry path, relative to `root` unless absolute |
+| `root` | Project root for module resolution and the watcher |
+| `log` | Receives build, mount, refresh, and error status text |
+
+## NatuiDevServer
+
+<auto-type-table path="../../../../packages/natui/src/dev/server.ts" name="NatuiDevServer" />
+
+`close()` stops the build watcher, unmounts React, asks the native host to quit,
+and removes temporary build output. Calling it more than once is safe.
+
+The server runs its module builder in-process and does not open an HTTP port.

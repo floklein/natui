@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.natui/
 *.tsbuildinfo
 .DS_Store
 docs/.next/

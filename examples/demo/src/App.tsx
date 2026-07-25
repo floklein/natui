@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 // 'natui/components' is engine-neutral (no Node built-ins), so this file
 // works both under Node (main.tsx) and inside embedded JSC (main-embedded).
 import {
@@ -23,9 +23,8 @@ interface Todo {
   done: boolean;
 }
 
-let nextTodoId = 4;
-
 export function App() {
+  const nextTodoId = useRef(4);
   const [count, setCount] = useState(0);
   const [draft, setDraft] = useState('');
   const [volume, setVolume] = useState(40);
@@ -40,7 +39,7 @@ export function App() {
   const addTodo = () => {
     const label = draft.trim();
     if (!label) return;
-    setTodos((prev) => [...prev, { id: nextTodoId++, label, done: false }]);
+    setTodos((prev) => [...prev, { id: nextTodoId.current++, label, done: false }]);
     setDraft('');
   };
 

@@ -5,6 +5,7 @@
     "natui",
     "components",
     "inproc",
+    "dev",
     "bridge",
     "renderer",
     "transport",

@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx src/main.tsx",
-    "dev:watch": "tsx src/dev.tsx",
+    "dev": "natui dev src/main.tsx",
+    "start": "tsx src/main.tsx",
     "verify": "tsx src/verify.tsx",
     "build:embedded": "esbuild src/main-embedded.tsx --bundle --format=iife --platform=browser --jsx=automatic --define:process.env.NODE_ENV='\"production\"' --outfile=dist/embedded.js",
     "typecheck": "tsc --noEmit"
