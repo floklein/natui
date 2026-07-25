@@ -92,6 +92,7 @@ troubleshooting, and current platform differences.
 
 ## Documentation
 
+- [Set up AI agents](docs/content/docs/agents.mdx)
 - [Get started](docs/content/docs/start/index.mdx)
 - [Browse all 37 components](docs/content/docs/components/index.mdx)
 - [Read the guides](docs/content/docs/guides/index.mdx)
