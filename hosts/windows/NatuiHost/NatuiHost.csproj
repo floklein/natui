@@ -24,6 +24,10 @@
 
     <!-- We provide our own Main (Program.cs); no XAML-generated entry point. -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- The code-only host does not receive the WinUI template manifest.
+         Without an explicit DPI mode, Windows bitmap-scales the whole window
+         on scaled displays, so otherwise-native text and controls look blurry. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <EnableMsixTooling>true</EnableMsixTooling>
     <!-- A code-only project has no Page/PriResource items, so the WASDK
          targets skip PRI generation by default. Force it: without a merged
