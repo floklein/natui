@@ -10,6 +10,8 @@ import { makeHostConfig } from './hostConfig.js';
 
 export interface NatuiRenderer {
   render(element: ReactNode, onCommitted?: () => void): void;
+  renderAsync(element: ReactNode): Promise<void>;
+  cancelPendingRender(error: Error): void;
   unmount(): void;
   container: RootContainer;
 }
@@ -20,14 +22,23 @@ export interface NatuiRendererOptions {
    * uncaught error before invoking this callback.
    */
   onUncaughtError?: (error: Error) => void;
+  /** @internal Establish the current development generation for host events. */
+  runWork?: <T>(work: () => T) => T;
 }
 
 export function createNatuiRenderer(
   bridge: Bridge,
   options: NatuiRendererOptions = {},
 ): NatuiRenderer {
-  const { hostConfig, runWithPriority } = makeHostConfig(bridge);
+  let commitVersion = 0;
+  const { hostConfig, runWithPriority } = makeHostConfig(bridge, () => {
+    commitVersion += 1;
+  });
   const reconciler = Reconciler(hostConfig);
+  // react-reconciler 0.33 takes its DevTools metadata from HostConfig at
+  // runtime, while the current DefinitelyTyped declaration still models the
+  // older argument-taking API.
+  (reconciler.injectIntoDevTools as unknown as () => boolean)();
 
   const container: RootContainer = {
     isRoot: true,
@@ -36,12 +47,29 @@ export function createNatuiRenderer(
     bridge,
   };
 
-  const logReactError = (error: Error) => {
+  let pendingRender:
+    | {
+        reject(error: Error): void;
+        resolve(): void;
+      }
+    | undefined;
+
+  const reportError = (error: Error) => {
     console.error('[natui] React error:', error);
   };
   const onUncaughtError = (error: Error) => {
-    logReactError(error);
-    options.onUncaughtError?.(error);
+    reportError(error);
+    const request = pendingRender;
+    pendingRender = undefined;
+    // React reports an uncaught render error before its failed-root commit is
+    // fully visible to React Refresh. Reject on the next turn so recovery can
+    // reliably retry that root.
+    if (request) setImmediate(() => request.reject(error));
+    try {
+      options.onUncaughtError?.(error);
+    } catch (handlerError) {
+      console.error('[natui] onUncaughtError handler failed:', handlerError);
+    }
   };
 
   const root = reconciler.createContainer(
@@ -52,8 +80,8 @@ export function createNatuiRenderer(
     null, // concurrentUpdatesByDefaultOverride
     'natui', // identifierPrefix
     onUncaughtError,
-    logReactError, // onCaughtError
-    logReactError, // onRecoverableError
+    reportError, // onCaughtError
+    reportError, // onRecoverableError
     () => {}, // onDefaultTransitionIndicator
   );
 
@@ -64,8 +92,12 @@ export function createNatuiRenderer(
   // optimistic local value plus seq/ack echo suppression, not from React
   // priority, and enforcement only lands once the drag settles.
   bridge.setPriorityRunner((_kind, fn) => {
-    runWithPriority(DiscreteEventPriority, fn);
-    reconciler.flushSyncWork();
+    const dispatch = () => {
+      runWithPriority(DiscreteEventPriority, fn);
+      reconciler.flushSyncWork();
+    };
+    if (options.runWork) options.runWork(dispatch);
+    else dispatch();
   });
 
   return {
@@ -73,7 +105,66 @@ export function createNatuiRenderer(
     render(element, onCommitted) {
       reconciler.updateContainer(element, root, null, onCommitted ?? null);
     },
+    renderAsync(element) {
+      if (pendingRender) {
+        return Promise.reject(
+          new Error('natui: cannot start a render while another render is pending'),
+        );
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        const request = { resolve, reject };
+        let observedCommitVersion = commitVersion;
+        let quietTurns = 0;
+        let settleTurns = 0;
+        const settle = () => {
+          if (pendingRender !== request) return;
+          const flushedPassiveEffects = reconciler.flushPassiveEffects();
+          if (pendingRender !== request) return;
+
+          if (
+            !flushedPassiveEffects &&
+            observedCommitVersion === commitVersion
+          ) {
+            quietTurns += 1;
+          } else {
+            quietTurns = 0;
+          }
+          observedCommitVersion = commitVersion;
+          settleTurns += 1;
+
+          // Passive effects can create arbitrarily long synchronous update
+          // chains. Wait until the root stays quiet instead of assuming a
+          // fixed number of follow-up renders. The cap prevents a component
+          // with a deliberate infinite update loop from blocking startup
+          // forever.
+          if (quietTurns < 2 && settleTurns < 100) {
+            setImmediate(settle);
+            return;
+          }
+
+          pendingRender = undefined;
+          resolve();
+        };
+
+        pendingRender = request;
+        reconciler.updateContainer(element, root, null, () => {
+          if (pendingRender !== request) return;
+          // Effects can enqueue one or more follow-up renders. Let the
+          // scheduler drain those turns before the dev server declares the
+          // generation committed.
+          queueMicrotask(settle);
+        });
+      });
+    },
+    cancelPendingRender(error) {
+      const request = pendingRender;
+      pendingRender = undefined;
+      request?.reject(error);
+    },
     unmount() {
+      pendingRender?.reject(new Error('natui: renderer unmounted before the render committed'));
+      pendingRender = undefined;
       // updateContainer alone schedules on the default lane, which
       // flushSyncWork does NOT flush, the unmount commit would race the quit
       // message. updateContainerSync uses the sync lane, making this

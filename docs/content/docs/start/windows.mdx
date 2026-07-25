@@ -20,6 +20,9 @@ dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
 pnpm demo
 ```
 
+`pnpm demo` starts the React Fast Refresh development server. Use
+`pnpm demo:start` to open the example once without watching.
+
 The host is an unpackaged, self-contained WinUI 3 executable. The JavaScript bridge locates normal debug and release output paths automatically. Set `NATUI_HOST` when your executable is elsewhere:
 
 ```powershell

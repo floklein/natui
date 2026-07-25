@@ -4,8 +4,14 @@
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "natui": "./bin/natui.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -18,23 +24,34 @@
     "./inproc": {
       "types": "./dist/inproc.d.ts",
       "import": "./dist/inproc.js"
+    },
+    "./dev": {
+      "types": "./dist/dev/index.d.ts",
+      "import": "./dist/dev/index.js"
     }
   },
   "files": [
+    "bin",
     "dist"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node --eval \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
-    "test": "node --import tsx --test test/reconciler.test.tsx test/validation.test.tsx test/bridge.test.ts test/run.test.ts test/inproc.test.tsx test/menus.test.tsx test/presentation.test.tsx test/selection.test.tsx"
+    "test": "node --import tsx --test --test-concurrency=1 test/reconciler.test.tsx test/validation.test.tsx test/bridge.test.ts test/run.test.ts test/inproc.test.tsx test/menus.test.tsx test/presentation.test.tsx test/selection.test.tsx test/refresh.test.tsx test/refresh-transaction.test.ts test/dev-transform.test.ts test/dev-server.integration.test.ts test/dev-server-lifecycle.integration.test.ts"
   },
   "dependencies": {
-    "react-reconciler": "0.33.0"
+    "@babel/core": "7.29.7",
+    "@rollup/plugin-node-resolve": "16.0.3",
+    "esbuild": "^0.28.0",
+    "react-reconciler": "0.33.0",
+    "react-refresh": "0.18.0",
+    "rollup": "^4.62.0"
   },
   "peerDependencies": {
     "react": "^19.2.0"
   },
   "devDependencies": {
+    "@types/babel__core": "7.20.5",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-reconciler": "0.33.0",

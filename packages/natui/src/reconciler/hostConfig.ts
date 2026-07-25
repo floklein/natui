@@ -1,4 +1,4 @@
-import { createContext } from 'react';
+import { createContext, version as reactVersion } from 'react';
 import type { HostConfig } from 'react-reconciler';
 import {
   DefaultEventPriority,
@@ -27,21 +27,28 @@ type Props = Record<string, unknown>;
 const HOST_CONTEXT: Record<never, never> = {};
 
 export type NatuiHostConfig = HostConfig<
-  string, // Type
-  Props, // Props
-  RootContainer, // Container
-  HostInstance, // Instance
-  HostTextInstance, // TextInstance
-  never, // SuspenseInstance
-  never, // HydratableInstance
-  never, // FormInstance
-  Child, // PublicInstance
-  Record<never, never>, // HostContext
-  never, // ChildSet
-  ReturnType<typeof setTimeout>, // TimeoutHandle
-  -1, // NoTimeout
-  null // TransitionStatus
->;
+    string, // Type
+    Props, // Props
+    RootContainer, // Container
+    HostInstance, // Instance
+    HostTextInstance, // TextInstance
+    never, // SuspenseInstance
+    never, // HydratableInstance
+    never, // FormInstance
+    Child, // PublicInstance
+    Record<never, never>, // HostContext
+    never, // ChildSet
+    ReturnType<typeof setTimeout>, // TimeoutHandle
+    -1, // NoTimeout
+    null // TransitionStatus
+  > & {
+    // react-reconciler 0.33 reads these runtime fields when it registers
+    // DevTools and React Refresh support. Its public TypeScript HostConfig
+    // declaration does not include them yet.
+    rendererVersion: string;
+    rendererPackageName: string;
+    extraDevToolsConfig: null;
+  };
 
 export interface HostConfigHandle {
   hostConfig: NatuiHostConfig;
@@ -49,10 +56,16 @@ export interface HostConfigHandle {
   runWithPriority(priority: number, fn: () => void): void;
 }
 
-export function makeHostConfig(bridge: Bridge): HostConfigHandle {
+export function makeHostConfig(
+  bridge: Bridge,
+  onCommit?: () => void,
+): HostConfigHandle {
   let currentUpdatePriority: number = NoEventPriority;
 
   const hostConfig: NatuiHostConfig = {
+    rendererVersion: reactVersion,
+    rendererPackageName: 'natui',
+    extraDevToolsConfig: null,
     supportsMutation: true,
     supportsPersistence: false,
     supportsHydration: false,
@@ -242,6 +255,7 @@ export function makeHostConfig(bridge: Bridge): HostConfigHandle {
 
     resetAfterCommit() {
       bridge.flush();
+      onCommit?.();
     },
 
     preparePortalMount() {},

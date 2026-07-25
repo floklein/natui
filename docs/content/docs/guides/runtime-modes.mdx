@@ -5,7 +5,9 @@ description: Choose between the Node development process and an embedded JavaScr
 
 ## Node process
 
-The current development path runs React in Node. `run` locates and spawns the native host, then exchanges newline-delimited JSON over standard input and output.
+The default development path runs React in Node. `run` locates and spawns the
+native host, then exchanges newline-delimited JSON over standard input and
+output.
 
 ```tsx
 import { run } from 'natui';
@@ -13,7 +15,27 @@ import { run } from 'natui';
 await run(<App />, { title: 'NatUI app' });
 ```
 
-This mode provides the simplest development loop and works with the macOS and Windows hosts.
+Use the `natui dev` command for the normal development loop:
+
+```json
+{
+  "scripts": {
+    "dev": "natui dev src/main.tsx",
+    "start": "tsx src/main.tsx"
+  }
+}
+```
+
+The server bundles and watches the application's local source graph. After a
+successful edit, React Fast Refresh updates the existing React root without
+restarting Node or the native host. Compatible function components keep hook
+state and native control identity. Build and evaluation errors keep the last
+working UI mounted.
+
+The entry must call `run()` once. Startup options such as the host path, title,
+and initial window size apply to the first generation. Restart the server to
+change them. The server is an in-process module builder and watcher, so it does
+not listen on an HTTP port.
 
 ## Embedded JavaScript
 

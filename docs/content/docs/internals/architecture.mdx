@@ -95,8 +95,10 @@ These messages allow end-to-end assertions without general-purpose UI automation
 NatUI currently has three launch paths:
 
 - **Node development:** React runs in Node, spawns the native host, and
-  exchanges NDJSON over standard streams. This path supports the current
-  edit-and-remount development loop.
+  exchanges NDJSON over standard streams. The development server rebuilds the
+  application's local source graph and applies React Fast Refresh to the
+  existing root, preserving compatible component state and native control
+  identity without restarting Node or the native window.
 - **Raw embedded development:** Both hosts evaluate an esbuild browser bundle
   in-process, using system JavaScriptCore on macOS and V8 on Windows. The
   bundle and host exchange protocol messages through `__natui_send` and
@@ -122,7 +124,6 @@ The repository includes 37 host components, including menus, toolbars, navigatio
 
 Features still outside the current alpha scope include:
 
-- State-preserving React refresh
 - A public animation or gesture API
 - Multi-window application APIs
 - Code signing, macOS notarization, installers, and automatic updates

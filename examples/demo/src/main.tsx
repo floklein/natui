@@ -8,5 +8,3 @@ await run(<App />, {
   minWidth: 380,
   minHeight: 420,
 });
-
-console.error('[demo] mounted');

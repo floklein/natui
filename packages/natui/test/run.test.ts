@@ -8,7 +8,11 @@ import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createElement } from 'react';
-import { run } from '../src/run.js';
+import {
+  run,
+  runWithController,
+  type NatuiAppController,
+} from '../src/run.js';
 import { Text } from '../src/components.js';
 
 /**
@@ -29,6 +33,21 @@ function fakeHost(
         if (JSON.parse(line).t === 'quit') {
           const marker = ${marker};
           if (marker) require('node:fs').writeFileSync(marker, 'quit');
+          process.exit(0);
+        }
+      } catch {}
+    });
+  `;
+  return { cmd: process.execPath, args: ['-e', script] };
+}
+
+function silentFakeHost(quitMarkerPath: string): { cmd: string; args: string[] } {
+  const script = `
+    const readline = require('node:readline');
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      try {
+        if (JSON.parse(line).t === 'quit') {
+          require('node:fs').writeFileSync(${JSON.stringify(quitMarkerPath)}, 'quit');
           process.exit(0);
         }
       } catch {}
@@ -119,4 +138,60 @@ test('handshake fails fast when the host exits before ready', async () => {
     run(element, { host: dying, readyTimeoutMs: 5000 }),
     /host exited \(code 3\)/,
   );
+});
+
+test('the early controller cancels startup and terminates a host before ready', async () => {
+  const marker = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'quit-received');
+  const cancellation = new Error('test canceled before ready');
+  let controller: NatuiAppController | undefined;
+  const starting = runWithController(
+    element,
+    {
+      host: silentFakeHost(marker),
+      readyTimeoutMs: 5000,
+    },
+    (value) => {
+      controller = value;
+    },
+  );
+
+  assert.ok(controller, 'the lifecycle controller is available synchronously');
+  controller.cancelPendingUpdate(cancellation);
+  await assert.rejects(starting, (error) => error === cancellation);
+  for (let i = 0; i < 40 && !existsSync(marker); i++) await sleep(50);
+  assert.ok(existsSync(marker), 'the host processed quit during startup cancellation');
+});
+
+test('the early controller rejects a suspended initial render with the exact reason', async () => {
+  const marker = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'quit-received');
+  const cancellation = new Error('test canceled suspended render');
+  const never = new Promise<never>(() => {});
+  let renderStarted = false;
+  let controller: NatuiAppController | undefined;
+  function Suspended(): never {
+    renderStarted = true;
+    throw never;
+  }
+
+  const starting = runWithController(
+    createElement(Suspended),
+    {
+      host: fakeHost(
+        { t: 'ready', platform: thisPlatform, protocol: 1, hostApi: 1 },
+        marker,
+      ),
+      readyTimeoutMs: 5000,
+    },
+    (value) => {
+      controller = value;
+    },
+  );
+  for (let i = 0; i < 100 && !renderStarted; i++) await sleep(10);
+  assert.ok(renderStarted, 'the initial React render reached the suspended component');
+  assert.ok(controller);
+
+  controller.cancelPendingUpdate(cancellation);
+  await assert.rejects(starting, (error) => error === cancellation);
+  for (let i = 0; i < 40 && !existsSync(marker); i++) await sleep(50);
+  assert.ok(existsSync(marker), 'the host processed quit after render cancellation');
 });

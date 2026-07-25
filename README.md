@@ -91,6 +91,37 @@ an explicit executable path when using a different build location. See the
 [Windows host guide](hosts/windows/NatuiHost/README.md) for ARM builds,
 troubleshooting, and current platform differences.
 
+## Development server
+
+`pnpm dev` builds the NatUI package and starts the base demo through the native
+development server. It bundles and watches the application's local source
+graph, then applies React Fast Refresh to the existing native window:
+
+```bash
+pnpm dev
+```
+
+Compatible component edits preserve hook state, native control identity,
+window position, and window size. A build or evaluation error leaves the last
+working UI mounted while the server waits for another edit. Changes to hook
+order or component kind intentionally remount that component, following React
+Fast Refresh semantics.
+
+Applications can use the same server from a package script:
+
+```json
+{
+  "scripts": {
+    "dev": "natui dev src/main.tsx",
+    "start": "tsx src/main.tsx"
+  }
+}
+```
+
+The executable entry should call `run()` once. Window startup options are read
+on the first successful generation, so restart the server after changing them.
+The native development server does not open an HTTP port.
+
 ## Documentation
 
 - [Set up AI agents](docs/content/docs/agents.mdx)
@@ -159,8 +190,9 @@ platform notes.
 
 ## Runtime modes
 
-The default development mode runs React in Node.js and communicates with the
-native host over standard input and output.
+The default development mode runs React in Node.js, communicates with the
+native host over standard input and output, and refreshes the existing React
+root after successful source rebuilds.
 
 Both hosts can also evaluate a bundled React application in-process. macOS
 uses JavaScriptCore and Windows uses V8. The application is then one native
@@ -221,7 +253,9 @@ shell and most component kinds.
 
 | Command | Purpose |
 |---|---|
-| `pnpm demo` | Build the package and open the base native demo |
+| `pnpm dev` | Build the package and start the base demo with React Fast Refresh |
+| `pnpm demo` | Alias for the base native development server |
+| `pnpm demo:start` | Build the package and open the base demo once, without watching |
 | `pnpm verify` | Drive the base demo through native tree dumps, edits, and screenshots |
 | `pnpm verify:kitchen` | Verify app-shell and multi-component workflows |
 | `pnpm verify:embedded` | Verify the platform's in-process JavaScript runtime |
@@ -255,13 +289,15 @@ implement all 37 public components. Component docs define the shared contract
 and call out platform-native conventions. GUI suites remain local because CI
 has no normal window session.
 
-## Package entry points
+## Package exports and CLI
 
 The workspace exposes:
 
 - `natui` for components, `run`, and advanced protocol exports
 - `natui/components` for component-only bundles without Node.js built-ins
 - `natui/inproc` for the embedded host entry point
+- `natui/dev` for programmatic development-server startup
+- the `natui dev [entry]` command for state-preserving native development
 
 ## License
 
