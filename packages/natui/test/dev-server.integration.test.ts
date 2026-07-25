@@ -188,7 +188,7 @@ function entrySource(
   return `
 import { createElement } from 'react';
 import { sep as nodePathSeparator } from 'node:path';
-import { run } from 'natui';
+import { run } from '@natui/core';
 import { App } from './app.js';
 import { moduleIdentity } from './store.js';
 import packageCondition from 'natui-import-meta-conditional-fixture';
@@ -642,7 +642,7 @@ process.stdout.write(JSON.stringify(result));
         realMainPath,
         `
 import { createElement } from 'react';
-import { run } from 'natui';
+import { run } from '@natui/core';
 import realDependency from '../dependency-real/source.js';
 import aliasDependency from '../dependency-alias/source.js';
 import { sourceMain as queriedMain } from './main.js?copy';
@@ -912,7 +912,7 @@ export default {
           entryPath,
           `
 import { createElement } from 'react';
-import { run } from 'natui';
+import { run } from '@natui/core';
 import plain from './source.js';
 import emptyQuery from './source.js?';
 import emptyFragment from './source.js#';

@@ -72,7 +72,7 @@ importers:
 
   examples/demo:
     dependencies:
-      natui:
+      '@natui/core':
         specifier: workspace:*
         version: link:../../packages/natui
       react:
@@ -97,7 +97,7 @@ importers:
 
   examples/kitchen-sink:
     dependencies:
-      natui:
+      '@natui/core':
         specifier: workspace:*
         version: link:../../packages/natui
       react:

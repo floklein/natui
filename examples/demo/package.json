@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "natui": "workspace:*",
+    "@natui/core": "workspace:*",
     "react": "19.2.8"
   },
   "devDependencies": {

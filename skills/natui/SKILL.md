@@ -31,7 +31,7 @@ because NatUI is in alpha.
 - Build the interface from NatUI components. Do not emit HTML, DOM elements,
   CSS, browser events, or React DOM APIs.
 - Import `run` from `natui` for the Node development path. Prefer
-  `natui/components` for component modules that must remain free of Node.js
+  `@natui/core/components` for component modules that must remain free of Node.js
   built-ins, especially embedded bundles.
 - Keep editable controls and presentations controlled with `value` and
   `onChange`. Update React state from the value passed by NatUI rather than

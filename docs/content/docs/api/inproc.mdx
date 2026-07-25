@@ -1,5 +1,5 @@
 ---
-title: natui/inproc
+title: "@natui/core/inproc"
 description: Reference the in-process runtime for a native host that embeds JavaScript.
 ---
 
@@ -28,8 +28,8 @@ One embedded application may be active in a JavaScript runtime at a time. A
 second `runEmbedded` call rejects instead of replacing the active receive hook.
 
 ```tsx
-import { Text } from 'natui/components';
-import { runEmbedded } from 'natui/inproc';
+import { Text } from '@natui/core/components';
+import { runEmbedded } from '@natui/core/inproc';
 
 const app = await runEmbedded(<Text>Hello</Text>, {
   title: 'embedded NatUI',

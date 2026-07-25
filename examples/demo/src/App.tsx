@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-// 'natui/components' is engine-neutral (no Node built-ins), so this file
+// '@natui/core/components' is engine-neutral (no Node built-ins), so this file
 // works both under Node (main.tsx) and inside embedded JSC (main-embedded).
 import {
   Button,
@@ -15,7 +15,7 @@ import {
   TextField,
   Toggle,
   VStack,
-} from 'natui/components';
+} from '@natui/core/components';
 
 interface Todo {
   id: number;

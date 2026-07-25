@@ -66,8 +66,8 @@ The demo configuration is:
 Entry, output, and icon paths must stay inside the application directory.
 Unknown configuration fields fail packaging instead of being ignored.
 
-The configured entry must call `runEmbedded` from `natui/inproc`. Imports from
-`natui/components` remain free of Node built-ins and can be included in the
+The configured entry must call `runEmbedded` from `@natui/core/inproc`. Imports from
+`@natui/core/components` remain free of Node built-ins and can be included in the
 browser-targeted application bundle.
 
 ## Platform artifacts

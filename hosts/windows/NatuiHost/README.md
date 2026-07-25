@@ -17,7 +17,7 @@ verified locally against real windows.
 | file | contents |
 |---|---|
 | `Program.cs` | custom `Main`, code-only `App`, window shell, stdin reader thread, `Router` |
-| `EmbeddedJsHost.cs` | in-process V8 runtime, host callbacks, timers, and `natui/inproc` bridge |
+| `EmbeddedJsHost.cs` | in-process V8 runtime, host callbacks, timers, and `@natui/core/inproc` bridge |
 | `Ipc.cs` | locked NDJSON stdout writer (`ready`, `event`, `window`, `tree`, `shot` with optional `error`), stderr logging |
 | `NodeStore.cs` | node registry and op interpreter (same semantics as the Swift `Store.apply`), `UserEdit` |
 | `NodeMapper.cs` | node to `FrameworkElement` mapping, prop application, label refresh, events, `NatuiStack` |

@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, statSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { useState } from 'react';
-import { run, Slider, Text, TextField, VStack, type TreeNode } from 'natui';
+import { run, Slider, Text, TextField, VStack, type TreeNode } from '@natui/core';
 import { App } from './App.js';
 
 // fileURLToPath, not URL.pathname: the latter yields "/C:/…" on Windows.

@@ -23,7 +23,7 @@ the state setter:
 
 ```tsx
 import { useState } from 'react';
-import { Text, TextField, Toggle, VStack } from 'natui/components';
+import { Text, TextField, Toggle, VStack } from '@natui/core/components';
 
 export function AccountForm() {
   const [name, setName] = useState('');

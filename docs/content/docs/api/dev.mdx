@@ -1,15 +1,15 @@
 ---
-title: natui/dev
+title: "@natui/core/dev"
 description: Start and control the NatUI development server programmatically.
 ---
 
-The `natui/dev` entrypoint exposes the same state-preserving development
+The `@natui/core/dev` entrypoint exposes the same state-preserving development
 server used by the `natui dev` command.
 
 ## createDevServer
 
 ```ts typecheck
-import { createDevServer } from 'natui/dev';
+import { createDevServer } from '@natui/core/dev';
 
 const server = await createDevServer({
   root: process.cwd(),

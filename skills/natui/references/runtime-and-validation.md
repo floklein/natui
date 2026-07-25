@@ -21,7 +21,7 @@ resolve declarations from `packages/natui/dist`.
 Create a Node entrypoint that calls `run`:
 
 ```tsx
-import { run } from 'natui';
+import { run } from '@natui/core';
 import { App } from './App.js';
 
 await run(<App />, {
@@ -58,11 +58,11 @@ instructions.
 
 ## Use embedded mode for a single native process
 
-Use `natui/components` in UI modules that must bundle without Node.js built-ins.
-Call `runEmbedded` from `natui/inproc` in the embedded host bootstrap:
+Use `@natui/core/components` in UI modules that must bundle without Node.js built-ins.
+Call `runEmbedded` from `@natui/core/inproc` in the embedded host bootstrap:
 
 ```tsx
-import { runEmbedded } from 'natui/inproc';
+import { runEmbedded } from '@natui/core/inproc';
 import { App } from './App.js';
 
 await runEmbedded(<App />, {

@@ -79,7 +79,7 @@ final class JSHost {
         if !hasReceiver {
             let message =
                 "The application did not start the NatUI embedded runtime. "
-                + "Build its entry with natui/inproc."
+                + "Build its entry with @natui/core/inproc."
             Emitter.log("embedded: \(message)")
             stop()
             return message
