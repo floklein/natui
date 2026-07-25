@@ -22,6 +22,7 @@ jobs:
       # packages/natui/dist, which only exists after a build.
       - run: pnpm build
       - run: pnpm typecheck
+      - run: pnpm release:check
 
   docs:
     name: Documentation checks and build

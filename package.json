@@ -16,6 +16,7 @@
     "verify:embedded": "pnpm --filter natui build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs",
     "package:demo": "pnpm --filter natui build && node tools/package-app.mjs examples/demo/natui.app.json",
     "verify:package": "pnpm package:demo && node examples/demo/src/verify-package.mjs",
+    "release:check": "node tools/verify-release.mjs",
     "docs:dev": "pnpm --filter natui-docs dev",
     "docs:check": "pnpm --filter natui-docs check",
     "docs:build": "pnpm --filter natui-docs build",

@@ -9,10 +9,10 @@ browser layout engine. The platform owns layout, controls, dark mode, focus,
 and accessibility.
 
 > [!IMPORTANT]
-> NatUI is still in Alpha and is not a published registry package.
-> Use it from a source checkout. Native application packaging is implemented
-> as a repository-local reference workflow, while release signing and stable
-> compatibility policy are still evolving.
+> NatUI 0.1.0 is an alpha release. The npm package contains the JavaScript
+> renderer and development tooling, while the native hosts are still built
+> from a source checkout. Release signing and stable compatibility policy are
+> still evolving.
 
 ```tsx
 import { useState } from 'react';
@@ -302,3 +302,6 @@ The workspace exposes:
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+See [RELEASING.md](RELEASING.md) for the release validation and publication
+checklist.
