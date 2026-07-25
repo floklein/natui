@@ -624,6 +624,9 @@ export async function createDevServer(
         },
       ),
       watch: {
+        // Rollup re-arms changed files on Linux. Let that subscription settle
+        // before rebuilding so a rapid follow-up save is not missed.
+        buildDelay: 50,
         clearScreen: false,
       },
     });
