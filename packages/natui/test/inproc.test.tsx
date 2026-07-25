@@ -146,6 +146,42 @@ test('a synchronous close during window setup never mounts React afterward', asy
   }
 });
 
+test('a native close after the first commit still rejects pending startup', async () => {
+  const sent: OutboundMessage[] = [];
+  let closeScheduled = false;
+  try {
+    globals.__natui_send = (line) => {
+      const message = JSON.parse(line) as OutboundMessage;
+      sent.push(message);
+      if (message.t === 'commit' && !closeScheduled) {
+        closeScheduled = true;
+        const receive = globals.__natui_recv;
+        setTimeout(() => {
+          receive?.(JSON.stringify({ t: 'window', name: 'close' }));
+        }, 0);
+      }
+    };
+    const pending = runEmbedded(<Text>Hello</Text>, { readyTimeoutMs: 1_000 });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    globals.__natui_recv!(JSON.stringify({
+      t: 'ready',
+      platform: 'windows',
+      protocol: 1,
+      hostApi: 1,
+    }));
+
+    await assert.rejects(pending, /closed during application startup/);
+    assert.ok(
+      sent.some((message) => message.t === 'commit'),
+      'the initial tree committed before the native close',
+    );
+    assert.equal(sent.filter((message) => message.t === 'quit').length, 1);
+    assert.equal(globals.__natui_recv, undefined);
+  } finally {
+    resetEmbeddingGlobals();
+  }
+});
+
 test('a second embedded application cannot replace the active receive hook', async () => {
   try {
     globals.__natui_send = () => {};
@@ -193,6 +229,73 @@ test('embedded startup incompatibility asks the host to quit and detaches', asyn
     assert.equal(sent.filter((message) => message.t === 'quit').length, 1);
     assert.equal(globals.__natui_recv, undefined);
   } finally {
+    resetEmbeddingGlobals();
+  }
+});
+
+test('a fatal initial render rejects startup, quits, and detaches', async () => {
+  const sent: OutboundMessage[] = [];
+  const logged: unknown[][] = [];
+  const originalConsoleError = console.error;
+
+  function BrokenApp(): never {
+    throw new Error('initial render exploded');
+  }
+
+  try {
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    globals.__natui_send = (line) => {
+      sent.push(JSON.parse(line) as OutboundMessage);
+    };
+    const pending = runEmbedded(<BrokenApp />, { readyTimeoutMs: 1_000 });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    globals.__natui_recv!(JSON.stringify({
+      t: 'ready',
+      platform: 'windows',
+      protocol: 1,
+      hostApi: 1,
+    }));
+
+    await assert.rejects(pending, /initial render exploded/);
+    assert.equal(sent.filter((message) => message.t === 'commit').length, 0);
+    assert.equal(sent.filter((message) => message.t === 'quit').length, 1);
+    assert.equal(globals.__natui_recv, undefined);
+    assert.ok(
+      logged.some((args) => args.some((value) => String(value).includes('initial render exploded'))),
+      'the initial React error was still logged',
+    );
+  } finally {
+    console.error = originalConsoleError;
+    resetEmbeddingGlobals();
+  }
+});
+
+test('a fatal render after startup is logged without changing controller state', async () => {
+  const logged: unknown[][] = [];
+  const originalConsoleError = console.error;
+
+  function BrokenApp(): never {
+    throw new Error('update render exploded');
+  }
+
+  try {
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    const { app } = await startEmbedded();
+    app.update(<BrokenApp />);
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(app.state, 'running');
+    assert.ok(
+      logged.some((args) => args.some((value) => String(value).includes('update render exploded'))),
+      'the post-start React error was logged',
+    );
+    app.quit();
+  } finally {
+    console.error = originalConsoleError;
     resetEmbeddingGlobals();
   }
 });

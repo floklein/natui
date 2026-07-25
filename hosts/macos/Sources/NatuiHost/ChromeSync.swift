@@ -24,7 +24,7 @@ final class ChromeSync {
         toolbar.attach(window)
     }
 
-    /// Called at the end of every Store.apply.
+    /// Called once during app bootstrap, then at the end of every Store.apply.
     func sync(rootChildren: [Node]) {
         let menuNode = rootChildren.first { $0.kind == "MenuBar" }
         if !hasSyncedMenuBar || changed(menuNode, since: lastMenuBar) {

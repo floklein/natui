@@ -14,11 +14,16 @@ final class WindowManager: NSObject, NSWindowDelegate {
     static let shared = WindowManager()
 
     private(set) var window: NSWindow?
+    private var defaultTitle = "NatUI"
+
+    func setDefaultTitle(_ title: String) {
+        defaultTitle = title
+    }
 
     func configure(props: [String: JSONValue]) {
         let width = props["width"]?.cgFloatValue ?? 640
         let height = props["height"]?.cgFloatValue ?? 480
-        let title = props["title"]?.stringValue ?? "NatUI"
+        let title = props["title"]?.stringValue ?? defaultTitle
 
         let window = self.window ?? makeWindow()
         window.title = title
@@ -287,6 +292,10 @@ func startStdinReader(terminateOnEOF: Bool) {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
+            // Create the standard About/Quit menu even if React renders no
+            // root nodes and Store.apply is never called.
+            ChromeSync.shared.sync(rootChildren: [])
+
             // Mode is decided BEFORE the stdin reader starts, because it
             // changes what stdin EOF means (see startStdinReader).
             var packagedApp: PackagedApp?
@@ -310,6 +319,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // debug channel (dump/emit/screenshot/edit) for external probes.
             startStdinReader(terminateOnEOF: !hasEmbeddedApp)
             if let packagedApp {
+                // A packaged app's display name is its window-title fallback.
+                // An explicit runEmbedded title still wins in configure.
+                WindowManager.shared.setDefaultTitle(packagedApp.name)
                 // Stage 2: evaluate the React bundle in-process (JSC). The
                 // ready message is sent after the bundle registered its
                 // receive hook, and reaches both the JS sink and stdout.

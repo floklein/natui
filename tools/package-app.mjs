@@ -4,9 +4,11 @@ import { createHash } from 'node:crypto';
 import {
   chmod,
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -69,15 +71,17 @@ function assertRelativePath(value, field) {
   if (typeof value !== 'string' || value.length === 0) {
     throw configurationError(`${field} must be a non-empty relative path`);
   }
-  if (path.isAbsolute(value)) {
-    throw configurationError(`${field} must be relative to natui.app.json`);
-  }
   const normalized = value.replaceAll('\\', '/');
   if (
+    /^[A-Za-z]:/.test(value)
+    || path.posix.isAbsolute(normalized)
+    || path.win32.isAbsolute(value)
+  ) {
+    throw configurationError(`${field} must be relative to natui.app.json`);
+  }
+  if (
     normalized === '.'
-    || normalized === '..'
-    || normalized.startsWith('../')
-    || normalized.includes('/../')
+    || normalized.split('/').includes('..')
   ) {
     throw configurationError(`${field} must stay inside the application directory`);
   }
@@ -88,6 +92,142 @@ function assertContained(root, candidate, field) {
   if (relative === '' || relative === '.') return;
   if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
     throw configurationError(`${field} must stay inside the application directory`);
+  }
+}
+
+function isMissingPathError(error) {
+  return (
+    error !== null
+    && typeof error === 'object'
+    && 'code' in error
+    && error.code === 'ENOENT'
+  );
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function samePath(left, right) {
+  return path.relative(left, right) === '' && path.relative(right, left) === '';
+}
+
+/**
+ * Resolve every existing path component while retaining a missing suffix.
+ *
+ * realpath() fails for a legitimate new output leaf. Walking upward finds the
+ * nearest existing parent, including any junction or symbolic-link target,
+ * before the missing suffix is appended to that physical location.
+ */
+async function resolveFromExistingParent(candidate, field) {
+  let current = path.resolve(candidate);
+  const missing = [];
+
+  while (true) {
+    try {
+      const existing = await realpath(current);
+      return path.resolve(existing, ...missing);
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw configurationError(`cannot resolve ${field}: ${errorMessage(error)}`);
+      }
+
+      try {
+        const info = await lstat(current);
+        if (info.isSymbolicLink()) {
+          throw configurationError(`${field} contains a broken symbolic link: ${current}`);
+        }
+      } catch (linkError) {
+        if (!isMissingPathError(linkError)) throw linkError;
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) {
+        throw configurationError(`cannot resolve ${field}: no existing parent for ${candidate}`);
+      }
+      missing.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+async function resolveContainedFile(root, candidate, field) {
+  let resolved;
+  try {
+    resolved = await realpath(candidate);
+  } catch {
+    throw configurationError(`${field} does not exist: ${candidate}`);
+  }
+  assertContained(root, resolved, field);
+  await assertFile(resolved, field);
+  return resolved;
+}
+
+async function prepareContainedDirectory(root, candidate, field) {
+  const projected = await resolveFromExistingParent(candidate, field);
+  assertContained(root, projected, field);
+  await mkdir(projected, { recursive: true });
+
+  let resolved;
+  try {
+    resolved = await realpath(projected);
+  } catch (error) {
+    throw configurationError(`cannot resolve ${field}: ${errorMessage(error)}`);
+  }
+  assertContained(root, resolved, field);
+
+  const info = await stat(resolved);
+  if (!info.isDirectory()) {
+    throw configurationError(`${field} is not a directory: ${resolved}`);
+  }
+  return resolved;
+}
+
+async function assertStableDirectory(root, directory, field) {
+  let resolved;
+  try {
+    resolved = await realpath(directory);
+  } catch (error) {
+    throw configurationError(`cannot recheck ${field}: ${errorMessage(error)}`);
+  }
+  assertContained(root, resolved, field);
+  if (!samePath(resolved, directory)) {
+    throw configurationError(`${field} changed through a symbolic link or junction while packaging`);
+  }
+}
+
+async function assertSafeReplacementPaths(
+  root,
+  outputDirectory,
+  stageRoot,
+  stagedArtifact,
+  target,
+) {
+  await assertStableDirectory(root, outputDirectory, 'output');
+  await assertStableDirectory(outputDirectory, stageRoot, 'staging directory');
+
+  let resolvedStagedArtifact;
+  try {
+    resolvedStagedArtifact = await realpath(stagedArtifact);
+  } catch (error) {
+    throw configurationError(`cannot recheck staged artifact: ${errorMessage(error)}`);
+  }
+  assertContained(stageRoot, resolvedStagedArtifact, 'staged artifact');
+  if (!samePath(resolvedStagedArtifact, stagedArtifact)) {
+    throw configurationError(
+      'staged artifact changed through a symbolic link or junction while packaging',
+    );
+  }
+
+  for (const [candidate, field] of [
+    [target, 'output artifact'],
+    [`${target}.previous-${process.pid}`, 'output artifact backup'],
+  ]) {
+    const resolved = await resolveFromExistingParent(candidate, field);
+    assertContained(outputDirectory, resolved, field);
+    if (!samePath(resolved, candidate)) {
+      throw configurationError(`${field} resolves through a symbolic link or junction`);
+    }
   }
 }
 
@@ -119,8 +259,21 @@ export function validateAppConfig(value, configDirectory = process.cwd()) {
   if (typeof value.name !== 'string' || value.name.trim() !== value.name || !value.name) {
     throw configurationError('name must be a non-empty string without outer whitespace');
   }
-  if (value.name.length > 80) {
+  if ([...value.name].length > 80) {
     throw configurationError('name must be 80 characters or fewer');
+  }
+  for (const character of value.name) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint !== 0x9
+      && codePoint !== 0xa
+      && codePoint !== 0xd
+      && !(codePoint >= 0x20 && codePoint <= 0xd7ff)
+      && !(codePoint >= 0xe000 && codePoint <= 0xfffd)
+      && !(codePoint >= 0x10000 && codePoint <= 0x10ffff)
+    ) {
+      throw configurationError('name contains a character that is not valid in XML 1.0');
+    }
   }
   if (typeof value.version !== 'string' || !VERSION.test(value.version)) {
     throw configurationError('version must contain three numeric parts, for example "1.2.3"');
@@ -327,8 +480,10 @@ async function buildJavaScript(config, outputFile) {
 }
 
 async function packageWindows(config, stagedArtifact, architecture, scratchDirectory) {
-  const icon = config.icons.windows;
-  if (icon) await assertFile(icon, 'icons.windows');
+  let icon = config.icons.windows;
+  if (icon) {
+    icon = await resolveContainedFile(config.root, icon, 'icons.windows');
+  }
 
   const appDirectory = path.join(scratchDirectory, 'app');
   const artifactsDirectory = path.join(scratchDirectory, 'artifacts');
@@ -372,8 +527,10 @@ async function packageWindows(config, stagedArtifact, architecture, scratchDirec
 }
 
 async function packageMac(config, stagedArtifact, architecture, scratchDirectory) {
-  const icon = config.icons.macos;
-  if (icon) await assertFile(icon, 'icons.macos');
+  let icon = config.icons.macos;
+  if (icon) {
+    icon = await resolveContainedFile(config.root, icon, 'icons.macos');
+  }
 
   await run(
     'swift',
@@ -451,7 +608,6 @@ export async function packageApplication({
     throw configurationError(`cannot read ${absoluteConfig}: ${error.message}`);
   }
   const config = validateAppConfig(source, path.dirname(absoluteConfig));
-  await assertFile(config.entryPath, 'entry');
 
   if (outDir !== undefined) {
     assertRelativePath(outDir, 'out-dir');
@@ -459,6 +615,29 @@ export async function packageApplication({
     assertContained(config.root, resolved, 'out-dir');
     config.outputPath = resolved;
   }
+
+  let resolvedRoot;
+  try {
+    resolvedRoot = await realpath(config.root);
+  } catch (error) {
+    throw configurationError(
+      `cannot resolve application directory ${config.root}: ${errorMessage(error)}`,
+    );
+  }
+  config.entryPath = await resolveContainedFile(resolvedRoot, config.entryPath, 'entry');
+  for (const platform of Object.keys(config.icons)) {
+    config.icons[platform] = await resolveContainedFile(
+      resolvedRoot,
+      config.icons[platform],
+      `icons.${platform}`,
+    );
+  }
+  config.outputPath = await prepareContainedDirectory(
+    resolvedRoot,
+    config.outputPath,
+    outDir === undefined ? 'output' : 'out-dir',
+  );
+  config.root = resolvedRoot;
 
   const platform = normalizePlatform();
   const architecture = normalizeArchitecture(requestedArchitecture);
@@ -468,7 +647,6 @@ export async function packageApplication({
     );
   }
 
-  await mkdir(config.outputPath, { recursive: true });
   const stageRoot = await mkdtemp(path.join(config.outputPath, '.natui-stage-'));
   const scratch = await mkdtemp(path.join(tmpdir(), 'natui-native-'));
   const artifactName = platform === 'windows'
@@ -483,6 +661,13 @@ export async function packageApplication({
     } else {
       await packageMac(config, stagedArtifact, architecture, scratch);
     }
+    await assertSafeReplacementPaths(
+      config.root,
+      config.outputPath,
+      stageRoot,
+      stagedArtifact,
+      target,
+    );
     await replaceArtifact(stagedArtifact, target);
   } finally {
     await rm(stageRoot, { recursive: true, force: true });

@@ -131,6 +131,7 @@ export async function runEmbedded(
 
   let state: 'starting' | EmbeddedAppState = 'starting';
   let renderer: ReturnType<typeof createNatuiRenderer> | undefined;
+  let rejectInitialRender: ((error: Error) => void) | undefined;
 
   const quit = () => {
     if (state === 'stopping' || state === 'stopped') return;
@@ -180,7 +181,11 @@ export async function runEmbedded(
     // Renderer construction installs bridge callbacks and can itself fail.
     // Keep it inside the protected startup region so every failure asks the
     // native host to quit and releases the global receive hook.
-    const createdRenderer = createNatuiRenderer(bridge);
+    const createdRenderer = createNatuiRenderer(bridge, {
+      onUncaughtError(error) {
+        rejectInitialRender?.(error);
+      },
+    });
     renderer = createdRenderer;
     bridge.onWindowClose(() => {
       try {
@@ -197,8 +202,20 @@ export async function runEmbedded(
     if (state !== 'starting') {
       throw new Error('natui/inproc: embedding host closed during application startup');
     }
-    await new Promise<void>((resolve) => createdRenderer.render(element, resolve));
+    await new Promise<void>((resolve, reject) => {
+      rejectInitialRender = reject;
+      // React invokes the root update callback before reporting an error that
+      // escaped the tree. Keep startup pending through the following host
+      // turn so onUncaughtError can reject instead of publishing a broken
+      // controller as running.
+      createdRenderer.render(element, () => setTimeout(resolve, 0));
+    });
+    rejectInitialRender = undefined;
+    if (state !== 'starting') {
+      throw new Error('natui/inproc: embedding host closed during application startup');
+    }
   } catch (error) {
+    rejectInitialRender = undefined;
     try {
       quit();
     } catch (cleanupError) {

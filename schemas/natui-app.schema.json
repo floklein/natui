@@ -4,6 +4,13 @@
   "title": "NatUI application package configuration",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!\\.$)(?!\\.\\.(?:[\\\\/]|$))(?![\\s\\S]*[\\\\/]\\.\\.(?:[\\\\/]|$))[\\s\\S]+$"
+    }
+  },
   "required": [
     "schemaVersion",
     "id",
@@ -27,39 +34,36 @@
     "name": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 80
+      "maxLength": 80,
+      "pattern": "^(?![\\s\\uFEFF])(?=[\\s\\S]*[^\\s\\uFEFF]$)(?![\\s\\S]*[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\uD800-\\uDFFF\\uFFFE\\uFFFF])[\\s\\S]+$"
     },
     "version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+      "pattern": "^0*(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.0*(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.0*(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
     },
     "buildNumber": {
       "type": "string",
-      "pattern": "^[1-9]\\d*$"
+      "pattern": "^(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
     },
     "entry": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/relativePath"
     },
     "executable": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
     },
     "output": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/relativePath"
     },
     "icons": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "macos": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/relativePath"
         },
         "windows": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/relativePath"
         }
       }
     }
