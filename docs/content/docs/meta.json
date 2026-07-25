@@ -1,8 +1,8 @@
 {
   "title": "NatUI",
   "pages": [
-    "agents",
     "index",
+    "agents",
     "start",
     "components",
     "guides",

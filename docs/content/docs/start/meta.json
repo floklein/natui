@@ -1,4 +1,4 @@
 {
-  "title": "Start",
+  "title": "Getting started",
   "pages": ["index", "source-setup", "first-app", "macos", "windows", "kitchen-sink"]
 }
