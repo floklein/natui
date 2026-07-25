@@ -41,13 +41,13 @@ class InProcTransport implements Transport {
     const g = globalThis as NatuiGlobals;
     if (typeof g.__natui_send !== 'function') {
       throw new Error(
-        'natui/inproc: no embedding host detected (__natui_send is missing). ' +
+        '@natui/core/inproc: no embedding host detected (__natui_send is missing). ' +
         'Run this bundle inside the NatUI host with --bundle.',
       );
     }
     if (typeof g.__natui_recv === 'function') {
       throw new Error(
-        'natui/inproc: an embedded application is already active in this JavaScript runtime',
+        '@natui/core/inproc: an embedded application is already active in this JavaScript runtime',
       );
     }
     this.globals = g;
@@ -58,7 +58,7 @@ class InProcTransport implements Transport {
       try {
         msg = JSON.parse(line) as InboundMessage;
       } catch {
-        console.error(`natui/inproc: bad message from host: ${line.slice(0, 200)}`);
+        console.error(`@natui/core/inproc: bad message from host: ${line.slice(0, 200)}`);
         return;
       }
       if (this.messageCb) this.messageCb(msg);
@@ -69,7 +69,7 @@ class InProcTransport implements Transport {
 
   send(msg: OutboundMessage): void {
     if (this.closed) {
-      throw new Error('natui/inproc: cannot send through a closed embedding transport');
+      throw new Error('@natui/core/inproc: cannot send through a closed embedding transport');
     }
     this.hostSend(JSON.stringify(msg));
   }
@@ -161,20 +161,20 @@ export async function runEmbedded(
     ready = await bridge.waitForReady(readyTimeoutMs ?? EMBEDDED_READY_TIMEOUT_MS);
     if (ready.protocol !== PROTOCOL_VERSION) {
       throw new Error(
-        `natui/inproc: embedding host speaks protocol v${ready.protocol} but this bundle ` +
+        `@natui/core/inproc: embedding host speaks protocol v${ready.protocol} but this bundle ` +
           `requires v${PROTOCOL_VERSION}; rebuild the host to match`,
       );
     }
     if (!Number.isInteger(ready.hostApi) || ready.hostApi < HOST_API_VERSION) {
       const reported = Number.isInteger(ready.hostApi) ? `v${ready.hostApi}` : 'no API level';
       throw new Error(
-        `natui/inproc: embedding host reports ${reported} but this bundle requires host ` +
+        `@natui/core/inproc: embedding host reports ${reported} but this bundle requires host ` +
           `API v${HOST_API_VERSION} or newer; rebuild the host to match`,
       );
     }
     if (ready.platform !== 'macos' && ready.platform !== 'windows') {
       throw new Error(
-        `natui/inproc: embedding host reported unknown platform "${ready.platform}"`,
+        `@natui/core/inproc: embedding host reported unknown platform "${ready.platform}"`,
       );
     }
 
@@ -200,7 +200,7 @@ export async function runEmbedded(
     // handling the window message. Never mount React after that close path
     // has already unmounted and detached the transport.
     if (state !== 'starting') {
-      throw new Error('natui/inproc: embedding host closed during application startup');
+      throw new Error('@natui/core/inproc: embedding host closed during application startup');
     }
     await new Promise<void>((resolve, reject) => {
       rejectInitialRender = reject;
@@ -212,14 +212,14 @@ export async function runEmbedded(
     });
     rejectInitialRender = undefined;
     if (state !== 'starting') {
-      throw new Error('natui/inproc: embedding host closed during application startup');
+      throw new Error('@natui/core/inproc: embedding host closed during application startup');
     }
   } catch (error) {
     rejectInitialRender = undefined;
     try {
       quit();
     } catch (cleanupError) {
-      console.error('natui/inproc: startup cleanup failed:', cleanupError);
+      console.error('@natui/core/inproc: startup cleanup failed:', cleanupError);
     }
     throw error;
   }
@@ -233,7 +233,7 @@ export async function runEmbedded(
     },
     update(nextElement) {
       if (state !== 'running') {
-        throw new Error('natui/inproc: cannot update an application that is stopping or stopped');
+        throw new Error('@natui/core/inproc: cannot update an application that is stopping or stopped');
       }
       renderer.render(nextElement);
     },

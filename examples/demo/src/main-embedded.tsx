@@ -8,7 +8,7 @@
  *   ../../hosts/macos/.build/release/natui-host --bundle dist/embedded.js
  *   ..\..\hosts\windows\NatuiHost\bin\Release\net8.0-windows10.0.19041.0\win-x64\NatuiHost.exe --bundle dist\embedded.js
  */
-import { runEmbedded } from 'natui/inproc';
+import { runEmbedded } from '@natui/core/inproc';
 import { App } from './App.js';
 
 void runEmbedded(

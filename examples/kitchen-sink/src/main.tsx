@@ -1,4 +1,4 @@
-import { run } from 'natui';
+import { run } from '@natui/core';
 import { App } from './App.js';
 
 await run(<App />, {

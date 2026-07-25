@@ -9,7 +9,7 @@ namespace NatuiHost;
 /// <summary>
 /// Runs a browser-targeted NatUI bundle in-process with V8. The bridge is the
 /// same pair of plain-string functions used by the macOS JavaScriptCore host:
-/// the host injects __natui_send and natui/inproc registers __natui_recv.
+/// the host injects __natui_send and @natui/core/inproc registers __natui_recv.
 /// All engine access stays on the WinUI dispatcher thread.
 /// </summary>
 internal sealed class EmbeddedJsHost(
@@ -91,7 +91,7 @@ internal sealed class EmbeddedJsHost(
             {
                 Ipc.Log(
                     "embedded: bundle did not register __natui_recv; "
-                    + "is it built with natui/inproc?");
+                    + "is it built with @natui/core/inproc?");
                 Dispose();
                 return false;
             }

@@ -527,7 +527,7 @@ async function runSourceResolutionProbe(
         mainPath,
         `
 import { createElement } from 'react';
-import { run } from 'natui';
+import { run } from '@natui/core';
 
 (globalThis as Record<string, unknown>)[${JSON.stringify(resultKey)}] =
   ${resolutionExpression};
@@ -755,7 +755,7 @@ function mainSource(
 ): string {
   return `
 import { createElement } from 'react';
-import { run } from 'natui';
+import { run } from '@natui/core';
 import { App } from './app.js';
 
 const app = await run(createElement(App), {

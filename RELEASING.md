@@ -81,6 +81,6 @@ Only after both platform checks and the exact release commit are approved:
 5. Verify the npm version, remote tag, GitHub release, and both downloaded
    native artifacts independently.
 
-The first npm publication needs an account authorized for the `natui` package.
+The first npm publication needs an account authorized for the `@natui/core` package.
 After the package exists, configure npm trusted publishing for a dedicated
 GitHub Actions workflow before automating later releases.

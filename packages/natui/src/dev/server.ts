@@ -507,7 +507,7 @@ function developmentPlugins(
         }
       },
       async resolveId(source, importer) {
-        if (source === 'natui') return virtualNatui;
+        if (source === '@natui/core') return virtualNatui;
         if (source === packageIndexUrl || source === runtimeUrl) {
           return { id: source, external: true };
         }
@@ -556,7 +556,7 @@ function developmentPlugins(
             isAbsolute(resolvedPath) &&
             isInside(root, resolvedPath) &&
             !resolvedPath.split(sep).includes('node_modules');
-          if (isLocalWorkspaceSource && !source.startsWith('natui/')) {
+          if (isLocalWorkspaceSource && !source.startsWith('@natui/core/')) {
             const extension = extname(resolvedPath).toLowerCase();
             if (
               CODE_EXTENSIONS.has(extension) ||
@@ -1048,7 +1048,7 @@ export async function createDevServer(
   try {
     watcher = watch({
       external(source) {
-        if (source === 'natui') return false;
+        if (source === '@natui/core') return false;
         return NODE_BUILTINS.has(source);
       },
       input: entry,

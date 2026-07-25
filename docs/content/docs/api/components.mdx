@@ -1,12 +1,12 @@
 ---
-title: natui/components
+title: "@natui/core/components"
 description: Reference the Node-free component entrypoint and its shared TypeScript types.
 ---
 
 This entrypoint exports all 37 host components and their prop types without importing the Node process runtime.
 
 ```tsx
-import { Button, Text, VStack } from 'natui/components';
+import { Button, Text, VStack } from '@natui/core/components';
 ```
 
 Use it for embedded bundles and anywhere that should remain free of Node built-ins. Use the primary `natui` entrypoint for a normal Node-driven application.

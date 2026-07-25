@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-// 'natui/components' is engine-neutral (no Node built-ins), so this file
+// '@natui/core/components' is engine-neutral (no Node built-ins), so this file
 // works both under Node (main.tsx) and inside embedded JSC.
 import {
   Alert,
@@ -40,7 +40,7 @@ import {
   type SortDescriptor,
   type TableRowSpec,
   type ToolbarItemSpec,
-} from 'natui/components';
+} from '@natui/core/components';
 
 // ---------------------------------------------------------------------------
 // Data model

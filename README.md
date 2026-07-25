@@ -16,7 +16,7 @@ and accessibility.
 
 ```tsx
 import { useState } from 'react';
-import { Button, HStack, Text, VStack, run } from 'natui';
+import { Button, HStack, Text, VStack, run } from '@natui/core';
 
 function App() {
   const [count, setCount] = useState(0);
@@ -263,7 +263,7 @@ shell and most component kinds.
 | `pnpm verify:package` | Verify the packaged manifest, tree, and close lifecycle |
 | `pnpm test` | Run renderer, bridge, protocol, and component contract tests |
 | `pnpm typecheck` | Typecheck all workspace projects |
-| `pnpm build` | Build the public `natui` package |
+| `pnpm build` | Build the public `@natui/core` package |
 
 The real-window suites validate native tree state, interactions, controlled
 input behavior, and host-rendered PNG files. They complement the contract
@@ -282,7 +282,7 @@ exact coverage and evidence limits.
 | Embedded JavaScript runtime | JavaScriptCore, verified | V8, verified |
 | Native application packaging | `.app` | One self-contained EXE |
 
-Both embedded runtimes use the same `natui/inproc` entry point. Raw development
+Both embedded runtimes use the same `@natui/core/inproc` entry point. Raw development
 bundles use the `--bundle` host argument. Packaged artifacts discover and
 validate their embedded application manifest automatically. Both hosts
 implement all 37 public components. Component docs define the shared contract
@@ -293,10 +293,10 @@ has no normal window session.
 
 The workspace exposes:
 
-- `natui` for components, `run`, and advanced protocol exports
-- `natui/components` for component-only bundles without Node.js built-ins
-- `natui/inproc` for the embedded host entry point
-- `natui/dev` for programmatic development-server startup
+- `@natui/core` for components, `run`, and advanced protocol exports
+- `@natui/core/components` for component-only bundles without Node.js built-ins
+- `@natui/core/inproc` for the embedded host entry point
+- `@natui/core/dev` for programmatic development-server startup
 - the `natui dev [entry]` command for state-preserving native development
 
 ## License

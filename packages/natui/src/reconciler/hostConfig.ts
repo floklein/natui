@@ -64,7 +64,7 @@ export function makeHostConfig(
 
   const hostConfig: NatuiHostConfig = {
     rendererVersion: reactVersion,
-    rendererPackageName: 'natui',
+    rendererPackageName: '@natui/core',
     extraDevToolsConfig: null,
     supportsMutation: true,
     supportsPersistence: false,

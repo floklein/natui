@@ -18,8 +18,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { run, type TreeNode } from 'natui';
-import type { MenuSpec, TableRowSpec, ToolbarItemSpec } from 'natui/components';
+import { run, type TreeNode } from '@natui/core';
+import type { MenuSpec, TableRowSpec, ToolbarItemSpec } from '@natui/core/components';
 import { App } from './App.js';
 
 const OUT_DIR = fileURLToPath(new URL('../../../screenshots/kitchen-sink/', import.meta.url));

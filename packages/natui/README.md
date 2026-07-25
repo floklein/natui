@@ -13,14 +13,14 @@ it from the [NatUI repository](https://github.com/floklein/natui) and set
 ## Install
 
 ```bash
-npm install natui react
+npm install @natui/core react
 ```
 
 NatUI requires Node.js 22 or newer and React 19.2.
 
 ```tsx
 import { useState } from 'react';
-import { Button, Text, VStack, run } from 'natui';
+import { Button, Text, VStack, run } from '@natui/core';
 
 function App() {
   const [count, setCount] = useState(0);

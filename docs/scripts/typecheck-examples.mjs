@@ -92,7 +92,7 @@ function wrapComponentExample(code) {
     .join('\n');
 
   return [
-    `import { ${componentNames.join(', ')} } from 'natui/components';`,
+    `import { ${componentNames.join(', ')} } from '@natui/core/components';`,
     ...exampleContextNames.map((name) => `declare const ${name}: any;`),
     '',
     'function DocumentationExample() {',
@@ -168,10 +168,10 @@ const program = ts.createProgram(generatedFiles, {
   esModuleInterop: true,
   baseUrl: docsRoot,
   paths: {
-    natui: ['../packages/natui/src/index.ts'],
-    'natui/components': ['../packages/natui/src/components.ts'],
-    'natui/inproc': ['../packages/natui/src/inproc.ts'],
-    'natui/dev': ['../packages/natui/src/dev/index.ts'],
+    '@natui/core': ['../packages/natui/src/index.ts'],
+    '@natui/core/components': ['../packages/natui/src/components.ts'],
+    '@natui/core/inproc': ['../packages/natui/src/inproc.ts'],
+    '@natui/core/dev': ['../packages/natui/src/dev/index.ts'],
   },
 });
 

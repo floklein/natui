@@ -31,7 +31,7 @@ assert.equal(packageManifest.license, 'MIT');
 assert.equal(packageManifest.publishConfig?.access, 'public');
 assert.equal(
   packageManifest.repository?.url,
-  'https://github.com/floklein/natui.git',
+  'git+https://github.com/floklein/natui.git',
   'repository URL must match the GitHub repository used for npm provenance',
 );
 
@@ -60,7 +60,7 @@ if (packed.error) throw packed.error;
 assert.equal(packed.status, 0, packed.stderr || 'npm pack failed');
 
 const [tarball] = JSON.parse(packed.stdout);
-assert.equal(tarball.name, 'natui');
+assert.equal(tarball.name, '@natui/core');
 assert.equal(tarball.version, version);
 
 const files = new Set(tarball.files.map(({ path }) => path.replaceAll('\\', '/')));
@@ -85,12 +85,24 @@ for (const path of requiredFiles) {
 }
 
 const packageDirectory = resolve(root, 'packages/natui');
+const indexedBin = spawnSync('git', ['ls-files', '--stage', 'bin/natui.js'], {
+  cwd: packageDirectory,
+  encoding: 'utf8',
+});
+if (indexedBin.error) throw indexedBin.error;
+assert.equal(indexedBin.status, 0, indexedBin.stderr || 'git ls-files failed');
+assert.match(
+  indexedBin.stdout,
+  /^100755 /,
+  'bin/natui.js must be executable in the git index',
+);
+
 const exportsSmoke = spawnSync(
   process.execPath,
   [
     '--input-type=module',
     '--eval',
-    "await Promise.all([import('natui'), import('natui/components'), import('natui/inproc'), import('natui/dev')]);",
+    "await Promise.all([import('@natui/core'), import('@natui/core/components'), import('@natui/core/inproc'), import('@natui/core/dev')]);",
   ],
   { cwd: packageDirectory, encoding: 'utf8' },
 );
@@ -106,5 +118,5 @@ assert.equal(cliSmoke.status, 0, cliSmoke.stderr || 'natui CLI failed to start')
 assert.match(cliSmoke.stdout, /^Usage: natui dev \[entry\]/);
 
 console.log(
-  `Verified natui@${version}: ${tarball.entryCount} files, ${tarball.size} packed bytes.`,
+  `Verified @natui/core@${version}: ${tarball.entryCount} files, ${tarball.size} packed bytes.`,
 );
