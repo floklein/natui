@@ -3,6 +3,22 @@
   "version": "0.1.0",
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
   "license": "MIT",
+  "keywords": [
+    "react",
+    "native",
+    "desktop",
+    "swiftui",
+    "winui"
+  ],
+  "homepage": "https://natui.dev",
+  "bugs": {
+    "url": "https://github.com/floklein/natui/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/floklein/natui.git",
+    "directory": "packages/natui"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -37,7 +53,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node --eval \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "node --import tsx --test --test-concurrency=1 test/reconciler.test.tsx test/validation.test.tsx test/bridge.test.ts test/run.test.ts test/inproc.test.tsx test/menus.test.tsx test/presentation.test.tsx test/selection.test.tsx test/refresh.test.tsx test/refresh-transaction.test.ts test/dev-transform.test.ts test/dev-server.integration.test.ts test/dev-server-lifecycle.integration.test.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "@babel/core": "7.29.7",
