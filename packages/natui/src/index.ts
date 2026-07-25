@@ -8,7 +8,7 @@ export type {
   TreeNode,
   WindowProps,
 } from './protocol.js';
-export { PROTOCOL_VERSION, ROOT_ID } from './protocol.js';
+export { HOST_API_VERSION, PROTOCOL_VERSION, ROOT_ID } from './protocol.js';
 
 // Lower-level building blocks, exported for tests and custom transports.
 export { Bridge } from './bridge/bridge.js';

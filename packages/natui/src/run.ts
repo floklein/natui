@@ -2,7 +2,12 @@ import type { ReactNode } from 'react';
 import { Bridge } from './bridge/bridge.js';
 import { defaultHostCommand } from './bridge/locate.js';
 import { type HostCommand, spawnStdioTransport } from './bridge/transport.js';
-import { PROTOCOL_VERSION, type TreeNode, type WindowProps } from './protocol.js';
+import {
+  HOST_API_VERSION,
+  PROTOCOL_VERSION,
+  type TreeNode,
+  type WindowProps,
+} from './protocol.js';
 import { createNatuiRenderer } from './reconciler/renderer.js';
 
 export interface RunOptions extends WindowProps {
@@ -74,6 +79,13 @@ export async function run(element: ReactNode, options: RunOptions = {}): Promise
       throw new Error(
         `natui: host speaks protocol v${ready.protocol} but this renderer requires ` +
           `v${PROTOCOL_VERSION}; rebuild the host to match`,
+      );
+    }
+    if (!Number.isInteger(ready.hostApi) || ready.hostApi < HOST_API_VERSION) {
+      const reported = Number.isInteger(ready.hostApi) ? `v${ready.hostApi}` : 'no API level';
+      throw new Error(
+        `natui: host reports ${reported} but this renderer requires host API ` +
+          `v${HOST_API_VERSION} or newer; rebuild the host to match`,
       );
     }
     if (!KNOWN_PLATFORMS.has(ready.platform)) {

@@ -46,7 +46,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 test('handshake success: matching protocol and platform mounts and quits cleanly', async () => {
   const marker = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'quit-received');
   const app = await run(element, {
-    host: fakeHost({ t: 'ready', platform: thisPlatform, protocol: 1 }, marker),
+    host: fakeHost(
+      { t: 'ready', platform: thisPlatform, protocol: 1, hostApi: 1 },
+      marker,
+    ),
     readyTimeoutMs: 5000,
   });
   app.quit();
@@ -66,10 +69,25 @@ test('handshake rejects a protocol version mismatch and terminates the host', as
   );
 });
 
+test('handshake rejects a host API older than the renderer requires', async () => {
+  await assert.rejects(
+    run(element, {
+      host: fakeHost({
+        t: 'ready',
+        platform: thisPlatform,
+        protocol: 1,
+        hostApi: 0,
+      }),
+      readyTimeoutMs: 5000,
+    }),
+    /requires host API v1 or newer/,
+  );
+});
+
 test('handshake rejects an unknown platform', async () => {
   await assert.rejects(
     run(element, {
-      host: fakeHost({ t: 'ready', platform: 'beos', protocol: 1 }),
+      host: fakeHost({ t: 'ready', platform: 'beos', protocol: 1, hostApi: 1 }),
       readyTimeoutMs: 5000,
     }),
     /unknown platform "beos"/,
@@ -80,7 +98,7 @@ test('handshake rejects the wrong platform for this OS', { skip: !['darwin', 'wi
   const wrong = process.platform === 'darwin' ? 'windows' : 'macos';
   await assert.rejects(
     run(element, {
-      host: fakeHost({ t: 'ready', platform: wrong, protocol: 1 }),
+      host: fakeHost({ t: 'ready', platform: wrong, protocol: 1, hostApi: 1 }),
       readyTimeoutMs: 5000,
     }),
     /but this OS requires/,

@@ -5,41 +5,66 @@ description: See which NatUI behaviors are covered by tests, native tree asserti
 
 ## JavaScript suite
 
-The repository currently contains 77 contract and unit tests. They cover:
+The contract and unit tests cover:
 
 - Reconciler creation, movement, removal, and commit batching
 - Prop validation and all-or-nothing serialization
 - Host handshake, process exit, and request timeouts
+- Protocol and additive host API compatibility
+- Embedded controller updates and idempotent React cleanup
 - Controlled-value sequence acknowledgements and enforcement
 - Menu, toolbar, presentation, selection, and sorting semantics
 - Screenshot success, failure, and timeout behavior
+- Application configuration, generated manifest, integrity metadata, and native identity
 
 Linux CI runs the JavaScript tests, package build, and typecheck.
 
 ## macOS
 
-The macOS CI job compiles the Swift host and runs the JavaScript suite and package build. GUI verification is local because hosted CI has no normal window session.
+The macOS CI job compiles the Swift host, runs the JavaScript suite, builds the
+`.app`, and validates its layout, metadata, Mach-O architecture, entry
+integrity, and license. GUI verification is local because hosted CI has no
+normal window session.
 
 Local real-window suites cover:
 
 - Base demo in Node mode
 - Kitchen-sink app-shell and multi-component workflows
 - Embedded JavaScriptCore demo
+- Packaged `.app` lifecycle
 
 They assert native tree dumps, interaction events, optimistic edits, sequence acknowledgements, and host-rendered PNG files.
 
 ## Windows
 
-The blocking Windows CI job compiles the Release x64 WinUI host with .NET 8.
+The blocking Windows CI job compiles the Release x64 WinUI host with .NET 8,
+builds the portable EXE, and statically inspects its PE and .NET bundle
+contents. The output directory must contain only that EXE.
 
 Local real-window suites cover:
 
 - Base demo in Node mode
 - Kitchen-sink app-shell and multi-component workflows
 - Embedded V8 demo
+- Packaged self-contained EXE lifecycle
 
 They cover the same tree, interaction, controlled-state, sequence
 acknowledgement, and screenshot evidence categories as the macOS suites.
+
+## Packaged application verification
+
+```bash
+pnpm verify:package
+```
+
+The command packages the demo for the current platform and architecture, then
+launches it from an unrelated working directory. It asserts protocol 1, host
+API 1 or newer, materialization of the demo tree, the native close path, and
+exit code 0.
+
+Before evaluating JavaScript, each packaged host validates its generated
+manifest and SHA-256 entry digest. The manifest also gates bundle schema,
+protocol, minimum host API, platform, and architecture.
 
 ## Evidence limits
 
@@ -48,3 +73,4 @@ acknowledgement, and screenshot evidence categories as the macOS suites.
 - Debug events prove protocol handling, not physical pointer or keyboard routing.
 - Current checks do not constitute a complete accessibility audit.
 - The real-window suites do not visit every public component. The component catalog is validated separately against all 37 public exports.
+- Package verification does not prove code signing, notarization, installer behavior, automatic updates, single-instance behavior, or multi-window behavior.

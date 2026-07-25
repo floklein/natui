@@ -14,7 +14,18 @@ export interface NatuiRenderer {
   container: RootContainer;
 }
 
-export function createNatuiRenderer(bridge: Bridge): NatuiRenderer {
+export interface NatuiRendererOptions {
+  /**
+   * Observe errors that escape the React tree. NatUI still logs every
+   * uncaught error before invoking this callback.
+   */
+  onUncaughtError?: (error: Error) => void;
+}
+
+export function createNatuiRenderer(
+  bridge: Bridge,
+  options: NatuiRendererOptions = {},
+): NatuiRenderer {
   const { hostConfig, runWithPriority } = makeHostConfig(bridge);
   const reconciler = Reconciler(hostConfig);
 
@@ -25,8 +36,12 @@ export function createNatuiRenderer(bridge: Bridge): NatuiRenderer {
     bridge,
   };
 
-  const onError = (error: Error) => {
+  const logReactError = (error: Error) => {
     console.error('[natui] React error:', error);
+  };
+  const onUncaughtError = (error: Error) => {
+    logReactError(error);
+    options.onUncaughtError?.(error);
   };
 
   const root = reconciler.createContainer(
@@ -36,9 +51,9 @@ export function createNatuiRenderer(bridge: Bridge): NatuiRenderer {
     false, // isStrictMode
     null, // concurrentUpdatesByDefaultOverride
     'natui', // identifierPrefix
-    onError, // onUncaughtError
-    onError, // onCaughtError
-    onError, // onRecoverableError
+    onUncaughtError,
+    logReactError, // onCaughtError
+    logReactError, // onRecoverableError
     () => {}, // onDefaultTransitionIndicator
   );
 

@@ -7,8 +7,14 @@ description: Reference NatUI protocol constants, messages, operations, and tree 
 
 ```ts
 const PROTOCOL_VERSION = 1;
+const HOST_API_VERSION = 1;
 const ROOT_ID = 0;
 ```
+
+`PROTOCOL_VERSION` gates wire-format compatibility. `HOST_API_VERSION` is an
+additive native capability level for components and host behavior that retain
+the same wire format. A renderer accepts an equal or newer host API, but not
+an older one.
 
 ## Value types
 

@@ -26,6 +26,7 @@ The host is a Swift Package Manager executable that opens a real `NSWindow` and 
 pnpm verify
 pnpm verify:kitchen
 pnpm verify:embedded
+pnpm verify:package
 ```
 
 These local suites require a real window session. They use native tree dumps, synthesized events, optimistic edits, and host-rendered PNG files. They do not rely on browser automation.
@@ -33,5 +34,37 @@ These local suites require a real window session. They use native tree dumps, sy
 - `pnpm verify` covers the base demo and controlled-input stress cases.
 - `pnpm verify:kitchen` exercises app-shell and multi-component workflows through the kitchen-sink app.
 - `pnpm verify:embedded` runs the demo inside the host with JavaScriptCore and no Node process at runtime.
+- `pnpm verify:package` builds and launches the native `.app`, validates its
+  handshake and tree, then exercises the normal close lifecycle.
 
-The headless macOS CI job builds the Swift host and JavaScript package but does not run these GUI suites.
+The headless macOS CI job builds the Swift host and `.app`, then validates the
+bundle layout, metadata, architecture, entry integrity, and license without
+launching it. It does not run the GUI suites.
+
+## Package a macOS application
+
+From the repository root:
+
+```bash
+pnpm package:demo
+```
+
+The command reads `examples/demo/natui.app.json` and writes:
+
+```text
+examples/demo/dist/package/NatUIDemo.app
+```
+
+The `.app` contains the native executable, generated `Info.plist`, bundled
+JavaScript, and a generated manifest with its SHA-256 digest. The loader
+validates bundle schema, protocol, minimum host API, architecture, and entry
+integrity before JavaScriptCore evaluates the application.
+
+macOS packaging targets the architecture of the machine performing the build.
+Build each architecture natively and copy the complete `.app` directory when
+moving the application.
+
+The reference packager does not perform code signing or notarization. It also
+does not create an installer, automatic updater, single-instance coordinator,
+or multi-window application. See
+[application bundles](/docs/guides/application-bundles).

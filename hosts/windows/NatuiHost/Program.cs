@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,6 +25,18 @@ public static class Program
         // exit code 0xC000027B); route them to stderr like all diagnostics.
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             Ipc.Log($"unhandled: {e.ExceptionObject}");
+        // In a fully self-extracting single-file publish, AppContext points
+        // at the distributed exe while the WinUI DLLs live beside the
+        // extracted managed assembly. WASDK's generated initializer uses the
+        // former path. Correct it before the first XAML activation.
+        var assemblyDirectory = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+        if (assemblyDirectory is not null
+            && File.Exists(Path.Combine(assemblyDirectory, "Microsoft.WindowsAppRuntime.dll")))
+        {
+            Environment.SetEnvironmentVariable(
+                "MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY",
+                assemblyDirectory + Path.DirectorySeparatorChar);
+        }
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(p =>
         {
@@ -52,6 +65,27 @@ public sealed class App : Application, IXamlMetadataProvider
     private Window? _window;
     private Router? _router;
     private bool _quitting;
+    private bool _quitRequested;
+    private bool _startupFailed;
+    private bool _runtimeFailed;
+    private bool _embeddedRuntime;
+    private bool _sidecarRuntime;
+    private bool _packagedApp;
+    private string _defaultWindowTitle = "NatUI";
+    private System.Threading.Timer? _quitWatchdog;
+
+    private const uint ErrorDialogFlags = 0x00000010 | 0x00002000;
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(nint windowHandle);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int MessageBoxW(
+        nint windowHandle,
+        string text,
+        string caption,
+        uint type);
 
     // Code-only app: the XAML compiler normally generates this metadata
     // provider plumbing from App.xaml. Without it, parsing WinUI's own
@@ -102,7 +136,7 @@ public sealed class App : Application, IXamlMetadataProvider
         // never intercepts input while empty.
         var chromePanel = new StackPanel { Orientation = Orientation.Vertical };
         var overlayLayer = new Grid();
-        var mapper = new NodeMapper(rootStack, chromePanel, overlayLayer);
+        var mapper = new NodeMapper(rootStack, chromePanel, overlayLayer, RequestQuit);
         var store = new NodeStore(mapper);
 
         // The shell Grid paints the theme background so screenshots are not
@@ -132,15 +166,37 @@ public sealed class App : Application, IXamlMetadataProvider
         _window.Content = shell;
         _window.Closed += (_, _) =>
         {
-            // JS decides what happens next (usually: unmount + quit message).
             // Application.Exit also closes the window, so stay silent then.
-            if (!_quitting) Ipc.WindowClosed();
+            if (_quitting) return;
+            if (_startupFailed)
+            {
+                Quit(1);
+                return;
+            }
+            WindowClosed();
         };
 
-        _router = new Router(this, _window, store);
-        var bundlePath = EmbeddedBundlePath();
+        var isPackaged = AppBundle.IsEmbedded;
+        var bundlePath = isPackaged ? null : ExplicitBundlePath();
+        PackagedApp? packagedApp = null;
+        if (isPackaged)
+        {
+            if (!AppBundle.TryLoad(out packagedApp, out var manifestError))
+            {
+                ShowStartupFailure(rootStack, manifestError ?? "Invalid packaged application.");
+                return;
+            }
+            _packagedApp = true;
+            _defaultWindowTitle = packagedApp!.Name;
+            _window.Title = _defaultWindowTitle;
+        }
+        var hasEmbeddedApp = bundlePath is not null || packagedApp is not null;
+        var hasProtocolInput = Console.IsInputRedirected;
+        _embeddedRuntime = hasEmbeddedApp;
+        _sidecarRuntime = !hasEmbeddedApp && hasProtocolInput;
+        _router = new Router(this, _window, store, _defaultWindowTitle);
 
-        if (bundlePath is null && !Console.IsInputRedirected)
+        if (!hasEmbeddedApp && !hasProtocolInput)
         {
             // Double-clicked, no protocol channel: show a hint instead of
             // sitting invisible or exiting silently.
@@ -154,18 +210,28 @@ public sealed class App : Application, IXamlMetadataProvider
             return;
         }
 
-        if (Console.IsInputRedirected)
+        if (hasProtocolInput)
         {
             StartStdinReader(
                 _window.DispatcherQueue,
-                terminateOnEof: bundlePath is null);
+                terminateOnEof: !hasEmbeddedApp);
         }
-        if (bundlePath is not null)
+        if (hasEmbeddedApp)
         {
-            _embeddedHost = new EmbeddedJsHost(_window.DispatcherQueue, _router);
-            if (!_embeddedHost.Start(bundlePath))
+            _embeddedHost = new EmbeddedJsHost(
+                _window.DispatcherQueue,
+                _router,
+                EmbeddedRuntimeFailed);
+            var started = packagedApp is not null
+                ? _embeddedHost.StartSource(packagedApp.SourceName, packagedApp.Source)
+                : _embeddedHost.Start(bundlePath!);
+            if (!started)
             {
-                Quit();
+                ShowStartupFailure(
+                    rootStack,
+                    packagedApp is null
+                        ? $"Cannot start embedded bundle at {bundlePath}."
+                        : $"Cannot start {packagedApp.Name} {packagedApp.Version}.");
                 return;
             }
         }
@@ -173,10 +239,100 @@ public sealed class App : Application, IXamlMetadataProvider
         Ipc.Ready();
     }
 
-    internal void Quit()
+    internal void WindowClosed()
+    {
+        if (_embeddedRuntime)
+        {
+            RequestQuit();
+            return;
+        }
+
+        if (_sidecarRuntime)
+        {
+            // Node sidecar mode's optional onClose callback may intentionally
+            // keep the host alive. Emit the close event without imposing a
+            // host timer.
+            Ipc.WindowClosed();
+            return;
+        }
+
+        // The bare double-click hint has no JavaScript process to acknowledge
+        // a close event, so terminate as soon as its only window closes.
+        Quit();
+    }
+
+    internal void RequestQuit()
+    {
+        if (_quitting || _quitRequested) return;
+        _quitRequested = true;
+        _quitWatchdog = new System.Threading.Timer(
+            _ =>
+            {
+                Ipc.Log("graceful shutdown timed out; forcing process exit");
+                Environment.Exit(Environment.ExitCode);
+            },
+            null,
+            TimeSpan.FromSeconds(2),
+            Timeout.InfiniteTimeSpan);
+        Ipc.WindowClosed();
+    }
+
+    private void EmbeddedRuntimeFailed(string message)
+    {
+        if (_quitting || _runtimeFailed) return;
+        _runtimeFailed = true;
+        Environment.ExitCode = 1;
+        Ipc.Log($"embedded runtime failed: {message}");
+
+        // The failure callback is dispatched only after the throwing V8 call
+        // returns. Stop the watchdog and runtime before entering a packaged
+        // application's modal error dialog.
+        _quitWatchdog?.Dispose();
+        _quitWatchdog = null;
+        var embeddedHost = _embeddedHost;
+        _embeddedHost = null;
+        embeddedHost?.Dispose();
+
+        if (_packagedApp)
+        {
+            ShowPackagedRuntimeFailure(message);
+        }
+        Quit(1);
+    }
+
+    private void ShowPackagedRuntimeFailure(string message)
+    {
+        nint windowHandle = 0;
+        try
+        {
+            if (_window is not null)
+            {
+                windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(_window);
+                if (!IsWindow(windowHandle)) windowHandle = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            Ipc.Log($"cannot resolve runtime error dialog owner: {ex.Message}");
+        }
+
+        if (MessageBoxW(
+            windowHandle,
+            $"This application encountered an error.\n\n{message}",
+            _defaultWindowTitle,
+            ErrorDialogFlags) == 0)
+        {
+            Ipc.Log($"cannot show runtime error dialog: Win32 error {Marshal.GetLastWin32Error()}");
+        }
+    }
+
+    internal void Quit(int exitCode = 0)
     {
         if (_quitting) return;
         _quitting = true;
+        _quitWatchdog?.Dispose();
+        _quitWatchdog = null;
+        Environment.ExitCode = exitCode;
         var embeddedHost = _embeddedHost;
         _embeddedHost = null;
         // A bundle can send quit from inside a V8 callback. Dispose on the
@@ -197,7 +353,24 @@ public sealed class App : Application, IXamlMetadataProvider
         Exit();
     }
 
-    private static string? EmbeddedBundlePath()
+    private void ShowStartupFailure(NatuiStack rootStack, string message)
+    {
+        _startupFailed = true;
+        Environment.ExitCode = 1;
+        Ipc.Log($"startup failed: {message}");
+        rootStack.Children.Clear();
+        rootStack.Children.Add(new TextBlock
+        {
+            Text = $"This application could not start.\n\n{message}",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 640,
+            Margin = new Thickness(24),
+        });
+        rootStack.RebuildLayout();
+        _window!.Activate();
+    }
+
+    private static string? ExplicitBundlePath()
     {
         var args = Environment.GetCommandLineArgs();
         var index = Array.IndexOf(args, "--bundle");
@@ -242,7 +415,7 @@ public sealed class App : Application, IXamlMetadataProvider
             if (terminateOnEof)
             {
                 // Sidecar mode: stdin is the parent-process lifeline.
-                dispatcher.TryEnqueue(Quit);
+                dispatcher.TryEnqueue(() => Quit());
             }
             else
             {
@@ -274,7 +447,11 @@ public sealed class App : Application, IXamlMetadataProvider
 }
 
 /// <summary>Dispatches inbound protocol messages. Runs on the UI thread.</summary>
-internal sealed class Router(App app, Window window, NodeStore store)
+internal sealed class Router(
+    App app,
+    Window window,
+    NodeStore store,
+    string defaultWindowTitle)
 {
     public void Handle(JsonObject message)
     {
@@ -312,6 +489,11 @@ internal sealed class Router(App app, Window window, NodeStore store)
                     store.UserEdit(editId, message["value"]);
                 }
                 break;
+            case "requestClose":
+                // Verification-only native close request. It exercises the
+                // same mode-sensitive path as the window close button.
+                app.WindowClosed();
+                break;
             case "quit":
                 app.Quit();
                 break;
@@ -323,7 +505,7 @@ internal sealed class Router(App app, Window window, NodeStore store)
 
     private void ConfigureWindow(JsonObject props)
     {
-        window.Title = Json.Str(props, "title") ?? "NatUI";
+        window.Title = Json.Str(props, "title") ?? defaultWindowTitle;
         // Activate first so the XamlRoot (and its DPI scale) exists.
         window.Activate();
 

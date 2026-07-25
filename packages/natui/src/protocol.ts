@@ -4,6 +4,15 @@
  */
 
 export const PROTOCOL_VERSION = 1;
+/**
+ * Additive native component and host-behavior level.
+ *
+ * Protocol changes describe wire compatibility. Host API changes describe
+ * which renderer capabilities a host implements while keeping the same wire
+ * format. A renderer may run on a host whose API is newer than this value,
+ * but never on an older one.
+ */
+export const HOST_API_VERSION = 1;
 
 /** JSON-serializable prop values. Functions never cross the wire. */
 export type PropValue =
@@ -83,7 +92,12 @@ export interface TreeNode {
 }
 
 export type InboundMessage =
-  | { t: 'ready'; platform: 'macos' | 'windows'; protocol: number }
+  | {
+      t: 'ready';
+      platform: 'macos' | 'windows';
+      protocol: number;
+      hostApi: number;
+    }
   | {
       t: 'event';
       id: number;

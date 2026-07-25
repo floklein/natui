@@ -9,11 +9,23 @@ Receivers ignore unknown message types for forward compatibility.
 
 ## Handshake
 
-1. The host sends `{"t":"ready","platform":"macos","protocol":1}`.
-2. JavaScript checks that the version is 1, the platform is known, and it matches the current operating system.
+1. The host sends `{"t":"ready","platform":"macos","protocol":1,"hostApi":1}`.
+2. JavaScript checks that the protocol is 1, the host API is at least 1, and the platform is known. Node mode also checks that the platform matches the current operating system.
 3. JavaScript sends a `window` message, then begins committing the React tree.
 
-A mismatch is a startup failure. JavaScript terminates the incompatible or half-started host.
+A mismatch is a startup failure. JavaScript terminates the incompatible or
+half-started host. Embedded startup also removes its host-to-JavaScript receive
+hook.
+
+The protocol version describes wire-format compatibility. The host API is a
+monotonic capability level for additive components and native behavior that
+keep the same wire format. A renderer accepts a host API equal to or newer
+than its required level.
+
+Packaged applications add a bundle manifest check before this handshake. The
+native loader validates bundle schema, exact protocol, minimum host API,
+platform, architecture, and the SHA-256 digest of the JavaScript entry before
+evaluating it.
 
 ## JavaScript to host messages
 
@@ -50,7 +62,7 @@ The host applies every operation in a commit before updating visible UI.
 
 | Message | Meaning |
 |---|---|
-| `ready` | Report platform and protocol version |
+| `ready` | Report platform, protocol version, and host API level |
 | `event` | Report an interaction on a node |
 | `window` | Report native window close |
 | `tree` | Reply to `dump` |

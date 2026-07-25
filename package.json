@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
   "scripts": {
-    "build": "pnpm -r --filter './packages/*' build",
+    "build": "pnpm --filter natui build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter natui test",
+    "test": "pnpm --filter natui test && node --test tools/package-app.test.mjs",
     "build:host:macos": "swift build -c release --package-path hosts/macos",
     "demo": "pnpm --filter natui build && pnpm --filter natui-demo dev",
     "verify": "pnpm --filter natui build && pnpm --filter natui-demo verify",
     "verify:kitchen": "pnpm --filter natui build && pnpm --filter natui-kitchen-sink verify",
     "verify:embedded": "pnpm --filter natui build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs",
+    "package:demo": "pnpm --filter natui build && node tools/package-app.mjs examples/demo/natui.app.json",
+    "verify:package": "pnpm package:demo && node examples/demo/src/verify-package.mjs",
     "docs:dev": "pnpm --filter natui-docs dev",
     "docs:check": "pnpm --filter natui-docs check",
     "docs:build": "pnpm --filter natui-docs build",
@@ -19,6 +21,7 @@
     "docs:smoke": "pnpm --filter natui-docs smoke"
   },
   "devDependencies": {
+    "esbuild": "0.28.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4"
   },

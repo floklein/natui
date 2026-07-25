@@ -57,16 +57,27 @@ See [controlled state](/docs/guides/controlled-state) and the [wire protocol](/d
 
 The Swift host stores each node in an observable model. A recursive SwiftUI view switches on the node kind without type erasure, and children use stable ids so React moves remain native moves.
 
-The host is a Swift Package Manager executable with native GUI application identity. It supports the Node standard-stream mode and an embedded JavaScriptCore mode.
+The development host is a Swift Package Manager executable with native GUI
+application identity. It supports the Node standard-stream mode and an
+embedded JavaScriptCore mode. The reference packager wraps the release host,
+application JavaScript, compatibility manifest, and native metadata in a
+standard `.app`.
 
 ### Windows
 
-The Windows host is an unpackaged, self-contained WinUI 3 executable. It uses a node registry and native control map. Grid-based stacks provide the flexible tracks needed by `Spacer` and infinite frames.
+The Windows development host is an unpackaged, self-contained WinUI 3
+executable. It uses a node registry and native control map. Grid-based stacks
+provide the flexible tracks needed by `Spacer` and infinite frames.
 
 WinUI also raises events for programmatic changes, so prop application uses guards and structural equality checks to prevent feedback loops.
 
 The base component set has real-window Node-mode verification. The host also
 embeds V8 for single-process browser bundles through `natui/inproc`.
+
+The reference packager publishes one portable, architecture-specific,
+self-contained EXE containing the application JavaScript and manifest as
+managed resources. The .NET single-file runtime extracts its runtime
+dependencies to a per-user temporary cache at launch.
 
 ## Debug surface
 
@@ -81,14 +92,29 @@ These messages allow end-to-end assertions without general-purpose UI automation
 
 ## Runtime and packaging paths
 
-The implementation is staged:
+NatUI currently has three launch paths:
 
-- **Stage 0, current development mode:** React runs in Node, spawns the native host, and exchanges NDJSON over standard streams. This provides the current watch-and-remount development loop without application packaging.
-- **Stage 1, researched sidecar packaging:** A future native application could invert control and spawn a compiled JavaScript sidecar made with Bun or Node Single Executable Applications. The native application would own the sidecar lifetime. This is not implemented.
-- **Stage 2, in-process execution:** Both hosts can evaluate an esbuild browser bundle in-process, using system JavaScriptCore on macOS and V8 on Windows. React's scheduler uses host-provided timer and microtask support. The bundle and host exchange protocol messages through `__natui_send` and `__natui_recv`, while standard input remains available as a verification debug channel.
+- **Node development:** React runs in Node, spawns the native host, and
+  exchanges NDJSON over standard streams. This path supports the current
+  edit-and-remount development loop.
+- **Raw embedded development:** Both hosts evaluate an esbuild browser bundle
+  in-process, using system JavaScriptCore on macOS and V8 on Windows. The
+  bundle and host exchange protocol messages through `__natui_send` and
+  `__natui_recv`. Standard input remains available as a verification debug
+  channel.
+- **Packaged embedded application:** `pnpm package:demo` builds the same
+  embedded runtime into a macOS `.app` or one Windows self-contained EXE. A
+  generated manifest records identity, platform, architecture, protocol,
+  minimum host API, and the SHA-256 digest of `main.js`.
 
-NatUI does not yet ship the Stage 1 application wrapper, a packaging CLI,
-signing, or installer generation.
+The native package loader validates the manifest before JavaScript evaluation.
+The embedded ready handshake repeats protocol and host API validation at the
+runtime boundary.
+
+`runEmbedded` owns the JavaScript lifecycle. Its controller can update the
+root and exposes an idempotent `quit()` method. Shutdown synchronously unmounts
+React, runs effect cleanup, sends one host quit request, rejects pending bridge
+work, and removes the receive hook. Native window close uses the same path.
 
 ## Current alpha boundaries
 
@@ -99,5 +125,7 @@ Features still outside the current alpha scope include:
 - State-preserving React refresh
 - A public animation or gesture API
 - Multi-window application APIs
-- A packaging CLI or `natui doctor` command
+- Code signing, macOS notarization, installers, and automatic updates
+- Single-instance application orchestration
+- A public package-registry CLI or `natui doctor` command
 Accessibility labels, hints, identifiers, and the native controls' default accessibility behavior are in scope.

@@ -53,6 +53,7 @@ internal static class Ipc
         ["t"] = "ready",
         ["platform"] = "windows",
         ["protocol"] = 1,
+        ["hostApi"] = 1,
     });
 
     public static void Event(int id, string name, JsonObject? payload = null, int? seq = null)

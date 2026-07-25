@@ -11,7 +11,8 @@ description: Build and run the native WinUI 3 host on Windows.
 - Node.js 22 or newer
 - pnpm 11
 
-The project targets `net8.0-windows` and Windows App SDK 1.7. It has been locally verified with a .NET 9 SDK building that .NET 8 target. CI uses the .NET 8 SDK.
+The project targets `net8.0-windows` and Windows App SDK 1.8. CI uses the
+.NET 8 SDK.
 
 ```powershell
 pnpm install
@@ -42,5 +43,47 @@ hosts\windows\NatuiHost\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\Natui
 
 Run `pnpm verify:embedded` to exercise the embedded tree, interactions,
 sequence acknowledgements, screenshot path, and closed-input lifecycle.
+
+## Package a Windows application
+
+From the repository root:
+
+```powershell
+pnpm package:demo
+```
+
+The command reads `examples/demo/natui.app.json` and writes one portable,
+architecture-specific, self-contained EXE:
+
+```text
+examples\demo\dist\package\NatUIDemo-0.1.0-windows-x64.exe
+```
+
+An ARM64 build uses the `windows-arm64.exe` suffix. The one EXE contains the
+application JavaScript, generated manifest, WinUI host, .NET runtime, Windows
+App SDK runtime, and V8 dependencies. It does not need Node or a machine-wide
+.NET installation at runtime.
+
+At launch, the .NET single-file host extracts runtime dependencies to a cache
+under the current user's temporary directory. The cache is runtime-managed and
+is not a machine-wide installation.
+
+Run the packaged lifecycle verification in a real desktop session:
+
+```powershell
+pnpm verify:package
+```
+
+The check launches the EXE from an unrelated working directory, validates the
+protocol and host API handshake, waits for the native tree, requests a normal
+window close, and requires exit code 0.
+
+Headless Windows CI also builds the EXE and inspects its PE header and .NET
+bundle table. It requires exactly one output file and checks that the embedded
+runtime includes WinUI, V8, ICU, `resources.pri`, and the application payload.
+
+The reference packager does not sign the EXE or create an installer,
+automatic updater, single-instance coordinator, or multi-window application.
+See [application bundles](/docs/guides/application-bundles).
 
 See [platform support](/docs/status/platform-support) for component-level differences.

@@ -19,15 +19,24 @@ The JavaScript test suite covers reconciler mutation semantics, prop validation,
 pnpm verify
 pnpm verify:kitchen
 pnpm verify:embedded
+pnpm verify:package
 ```
 
 These commands require a desktop window session and target the host for the
 current operating system. The embedded suite proves JavaScriptCore on macOS
-and V8 on Windows.
+and V8 on Windows. The package suite first runs `pnpm package:demo`, launches
+the resulting native artifact from an unrelated working directory, validates
+its ready handshake and tree, then requests a normal close and requires a
+clean exit.
 
 The base Node-mode and embedded suites have passed locally against a real
-Windows WinUI 3 window. The Windows CI job is a compile check and does not run
-GUI verification.
+Windows WinUI 3 window. The Windows CI job compiles the host, builds the
+portable EXE, and inspects its single-file contents without running a GUI.
+
+The package configuration and generated manifest also have platform-neutral
+unit coverage through `pnpm test`. Those tests validate path containment,
+identity fields, stable manifest content, compatibility gates, SHA-256 shape,
+and macOS native metadata.
 
 ## Debug messages
 

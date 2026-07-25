@@ -12,7 +12,9 @@ NatUI is still in Alpha. Support claims distinguish implementation, compilation,
 | Kitchen-sink app-shell workflow | Real-window verified | Real-window verified |
 | Node process mode | Verified | Verified |
 | Embedded mode | JavaScriptCore verified | V8 verified |
+| Native application package | `.app` | One self-contained EXE |
 | Host build in CI | Yes | Yes |
+| Headless package inspection in CI | Yes | Yes |
 | GUI suites in CI | No | No |
 
 ## Cross-platform component support
@@ -26,6 +28,10 @@ describe platform-native conventions where the operating systems differ.
 
 - Table uses a list-based fallback on macOS 14.0 through 14.3.
 - Embedded execution uses system JavaScriptCore on macOS and V8 on Windows.
+- Packaged applications validate their generated manifest, protocol, minimum
+  host API, architecture, and SHA-256 entry digest before evaluation.
+- The Windows single-file EXE extracts runtime dependencies to a per-user
+  temporary cache at launch.
 - GUI verification runs locally because the hosted CI jobs do not provide a
   normal desktop window session.
 

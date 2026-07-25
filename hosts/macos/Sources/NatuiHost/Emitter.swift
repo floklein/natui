@@ -31,7 +31,7 @@ enum Emitter {
     }
 
     static func ready() {
-        send(["t": "ready", "platform": "macos", "protocol": 1])
+        send(["t": "ready", "platform": "macos", "protocol": 1, "hostApi": 1])
     }
 
     static func event(_ id: Int, _ name: String, payload: [String: Any] = [:], seq: Int? = nil) {

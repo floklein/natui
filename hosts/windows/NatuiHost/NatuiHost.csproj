@@ -35,6 +35,7 @@
          runtime and XamlControlsResources throws "Cannot locate resource
          from 'ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml'". -->
     <AppxGeneratePriEnabled>true</AppxGeneratePriEnabled>
+    <ProjectPriFileName>resources.pri</ProjectPriFileName>
   </PropertyGroup>
 
   <ItemGroup>
@@ -47,7 +48,24 @@
       Include="Microsoft.ClearScript.V8.Native.win-arm64"
       Version="7.5.1"
       Condition="'$(RuntimeIdentifier)' == 'win-arm64'" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.*" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.*" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260505002" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.8249" />
+  </ItemGroup>
+
+  <!-- A packaged application passes NatuiAppDirectory at publish time. Keep
+       its validated manifest and IIFE inside the managed assembly, which in
+       turn is carried by the self-contained single-file app host. Development
+       host builds omit these resources and retain explicit bundle and stdin
+       behavior. -->
+  <ItemGroup Condition="'$(NatuiAppDirectory)' != ''">
+    <EmbeddedResource
+      Include="$(NatuiAppDirectory)\manifest.json"
+      LogicalName="NatuiHost.App.manifest.json" />
+    <EmbeddedResource
+      Include="$(NatuiAppDirectory)\main.js"
+      LogicalName="NatuiHost.App.main.js" />
+    <EmbeddedResource
+      Include="$(MSBuildProjectDirectory)\..\..\..\LICENSE"
+      LogicalName="NatuiHost.App.LICENSE.txt" />
   </ItemGroup>
 </Project>
