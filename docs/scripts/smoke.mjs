@@ -240,6 +240,14 @@ try {
   const llmsIndex = await request(baseUrl, '/llms.txt');
   assert(llmsIndex.response.status === 200, '/llms.txt did not return 200');
   assertPermanentlyCached(llmsIndex, '/llms.txt');
+  const agentsIndexPosition = llmsIndex.text.indexOf('](/docs/agents)');
+  const introductionIndexPosition = llmsIndex.text.indexOf('](/docs):');
+  assert(agentsIndexPosition >= 0, '/llms.txt is missing /docs/agents');
+  assert(introductionIndexPosition >= 0, '/llms.txt is missing /docs');
+  assert(
+    agentsIndexPosition < introductionIndexPosition,
+    '/docs/agents is not the first root documentation page in /llms.txt',
+  );
   assert(/\/docs\/start/.test(llmsIndex.text), '/llms.txt is missing /docs/start');
   assert(/\/docs\/components/.test(llmsIndex.text), '/llms.txt is missing /docs/components');
 
@@ -248,6 +256,7 @@ try {
   assertPermanentlyCached(llmsFull, '/llms-full.txt');
   assert(llmsFull.text.length > 1_000, '/llms-full.txt is unexpectedly small');
   assert(/^# /m.test(llmsFull.text), '/llms-full.txt has no Markdown headings');
+  assert(/^# Agents$/m.test(llmsFull.text), '/llms-full.txt is missing the Agents page');
   assert(/TextEditor/.test(llmsFull.text), '/llms-full.txt is missing TextEditor');
   assert(
     /\| Property \| Type \| Required \| Description \|/.test(llmsFull.text),

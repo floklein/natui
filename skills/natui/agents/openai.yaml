@@ -1,0 +1,4 @@
+interface:
+  display_name: "NatUI"
+  short_description: "Build native desktop apps with React and NatUI"
+  default_prompt: "Use $natui to build and verify a native desktop interface with React and TypeScript."

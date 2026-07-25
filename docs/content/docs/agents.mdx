@@ -1,0 +1,95 @@
+---
+title: Agents
+description: Install the NatUI Agent Skill and connect coding agents to current machine-readable documentation.
+---
+
+NatUI provides an installable Agent Skill and a complete Markdown view of this
+documentation. Use the skill for reusable implementation guidance, then use
+`llms.txt` to find the current pages for the task. They complement each other:
+the skill teaches the workflow, while the documentation supplies the current
+API and platform details. The skill follows the
+[Agent Skills specification](https://agentskills.io/specification). The
+repository's `/skills` directory is a distribution catalog, so install the
+skill into the client that will use it.
+
+## Install the NatUI skill
+
+Install the skill from GitHub with the
+[open `skills` CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add https://github.com/floklein/natui --skill natui
+```
+
+The interactive flow detects compatible agents and lets you choose project or
+global scope. To target Codex directly:
+
+```bash
+npx skills add https://github.com/floklein/natui --skill natui --agent codex
+```
+
+Codex users can also ask the built-in skill installer:
+
+```text
+$skill-installer install https://github.com/floklein/natui/tree/main/skills/natui
+```
+
+That last line is a Codex prompt, not a shell command. Start a new agent task
+after installation so the skill is discovered. Review the
+[skill source](https://github.com/floklein/natui/tree/main/skills/natui)
+before installing it. The NatUI skill contains instructions and references,
+with no executable scripts.
+
+## Give agents current documentation
+
+| Resource | Use |
+| --- | --- |
+| [`https://natui.dev/llms.txt`](/llms.txt) | Start here. It is the compact index of documentation pages and descriptions. |
+| [`https://natui.dev/llms-full.txt`](/llms-full.txt) | Load the complete documentation corpus when a task genuinely spans most of NatUI. |
+| `https://natui.dev/docs/<page>.md` | Fetch one clean Markdown page, such as [`components/inputs`](https://natui.dev/docs/components/inputs.md). |
+| `Accept: text/markdown` | Request Markdown from the normal documentation URL when the client supports content negotiation. |
+
+Resolve relative links from `llms.txt` against `https://natui.dev`. Prefer the
+compact index plus a few targeted pages over loading the full corpus into every
+task. The compact index follows the
+[`llms.txt` proposal](https://llmstxt.org/). `llms-full.txt` is a convenient
+complete export, not a required part of that proposal.
+
+```bash
+curl -H "Accept: text/markdown" \
+  https://natui.dev/docs/guides/controlled-state
+```
+
+Every documentation page also exposes **Copy Markdown** and **View Markdown**
+actions for interactive use.
+
+## Agent workflow
+
+1. Install or invoke the `natui` skill.
+2. Read [`llms.txt`](/llms.txt) and select only the relevant setup, component,
+   guide, and status pages.
+3. Inspect the current checkout before editing. NatUI is in alpha and is not a
+   published registry package.
+4. Implement with React state and NatUI components. Do not introduce DOM
+   elements, CSS, or browser event APIs.
+5. Build the matching native host and validate on the target platform.
+6. Use a real native window before claiming visible or interactive behavior.
+
+Use this bootstrap prompt after installation:
+
+```text
+Use the installed NatUI skill to implement this task. Begin with
+https://natui.dev/llms.txt, fetch only the relevant Markdown pages, inspect the
+current checkout because NatUI is in alpha, and verify the result on the
+requested native platform.
+```
+
+## High-value entry points
+
+- [Source setup](/docs/start/source-setup)
+- [First app](/docs/start/first-app)
+- [Component catalog](/docs/components)
+- [Controlled state](/docs/guides/controlled-state)
+- [Testing and debugging](/docs/guides/testing-and-debugging)
+- [Platform support](/docs/status/platform-support)
+- [Verification status](/docs/status/verification)
