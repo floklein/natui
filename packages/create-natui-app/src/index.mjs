@@ -343,7 +343,17 @@ export async function installDependencies({
 
 async function defaultInstallRunner({ args, command, cwd }) {
   await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const isWindowsCommandScript = (
+      process.platform === 'win32'
+      && path.extname(command).toLowerCase() === '.cmd'
+    );
+    const executable = isWindowsCommandScript
+      ? process.env.ComSpec || 'cmd.exe'
+      : command;
+    const executableArgs = isWindowsCommandScript
+      ? ['/d', '/s', '/c', command, ...args]
+      : args;
+    const child = spawn(executable, executableArgs, {
       cwd,
       shell: false,
       stdio: 'inherit',
@@ -402,9 +412,18 @@ function installCommand(packageManager) {
   return `${packageManager} install`;
 }
 
-function displayPath(cwd, target) {
+function directoryStep(cwd, target) {
   const relative = path.relative(cwd, target) || '.';
-  return /\s/.test(relative) ? `"${relative}"` : relative;
+  const isShellSafe = process.platform === 'win32'
+    ? /^[A-Za-z0-9._/\\ -]+$/.test(relative)
+    : /^[A-Za-z0-9._/ -]+$/.test(relative);
+  if (isShellSafe) {
+    return `  cd "${relative}"\n`;
+  }
+  return (
+    '  Open the project directory shown as a JSON string:\n'
+    + `    ${JSON.stringify(relative)}\n`
+  );
 }
 
 function write(stream, text) {
@@ -468,14 +487,14 @@ export async function runCli(args, {
     } catch (error) {
       write(errorOutput, `\nDependency installation failed: ${error.message}\n`);
       write(errorOutput, 'The project was created successfully. Install dependencies manually:\n\n');
-      write(errorOutput, `  cd ${displayPath(cwd, project.target)}\n`);
+      write(errorOutput, directoryStep(cwd, project.target));
       write(errorOutput, `  ${installCommand(packageManager)}\n`);
       return 1;
     }
   }
 
   write(output, '\nNext steps:\n\n');
-  write(output, `  cd ${displayPath(cwd, project.target)}\n`);
+  write(output, directoryStep(cwd, project.target));
   if (!options.install) write(output, `  ${installCommand(packageManager)}\n`);
   write(output, `  ${runScriptCommand(packageManager, 'dev')}\n`);
   write(output, '\nSee the generated README for native host setup.\n');

@@ -24,6 +24,7 @@ import {
   resolveOutputOverride,
   validateAppConfig,
 } from './package-app.mjs';
+import { writeDemoIcons } from './package-demo.mjs';
 
 const appSchema = JSON.parse(
   await readFile(new URL('../schemas/natui-app.schema.json', import.meta.url), 'utf8'),
@@ -438,6 +439,21 @@ function dibFixture(size) {
   return payload;
 }
 
+function coreDibFixture(size, bitDepth) {
+  const paletteEntries = bitDepth <= 8 ? 2 ** bitDepth : 0;
+  const colorStride = Math.ceil((size * bitDepth) / 32) * 4;
+  const maskStride = Math.ceil(size / 32) * 4;
+  const payload = Buffer.alloc(
+    12 + paletteEntries * 3 + (colorStride + maskStride) * size,
+  );
+  payload.writeUInt32LE(12, 0);
+  payload.writeUInt16LE(size, 4);
+  payload.writeUInt16LE(size * 2, 6);
+  payload.writeUInt16LE(1, 8);
+  payload.writeUInt16LE(bitDepth, 10);
+  return payload;
+}
+
 function macIconFixture(chunkTypes, payloadForType = (_type, size) => pngFixture(size)) {
   const sizeByType = new Map([
     ['is32', 16],
@@ -517,6 +533,23 @@ test('native icon inspection accepts standard representation sets', () => {
     )).sizes,
     [128],
   );
+});
+
+test('Windows icon inspection enforces BITMAPCOREHEADER bit depths', () => {
+  for (const bitDepth of [1, 4, 8, 24]) {
+    const icon = windowsIconFixture([16], () => coreDibFixture(16, bitDepth));
+    icon.writeUInt16LE(bitDepth, 6 + 6);
+    assert.deepEqual(inspectWindowsIcon(icon).sizes, [16]);
+  }
+
+  for (const bitDepth of [16, 32]) {
+    const icon = windowsIconFixture([16], () => coreDibFixture(16, bitDepth));
+    icon.writeUInt16LE(bitDepth, 6 + 6);
+    assert.throws(
+      () => inspectWindowsIcon(icon),
+      /invalid DIB dimensions or pixel format/,
+    );
+  }
 });
 
 test('native icon inspection rejects malformed containers and image bounds', () => {
@@ -687,6 +720,79 @@ test('packaging rejects entry, output, and icon junctions that escape the app', 
       await assert.rejects(
         packageApplication({ configPath }),
         /icons\.windows must stay inside the application directory/,
+      );
+    } finally {
+      await rm(fixture.temporary, { recursive: true, force: true });
+    }
+  });
+});
+
+test('demo icon generation rejects linked destinations before writing', async (t) => {
+  await t.test('icon directory junction', async () => {
+    const fixture = await makeFilesystemFixture();
+    try {
+      const externalIcons = path.join(fixture.external, 'icons');
+      await Promise.all([
+        mkdir(path.join(fixture.app, '.natui'), { recursive: true }),
+        mkdir(externalIcons, { recursive: true }),
+      ]);
+      await createDirectoryLink(externalIcons, path.join(fixture.app, '.natui', 'icons'));
+
+      await assert.rejects(
+        writeDemoIcons({
+          repositoryDirectory: fixture.temporary,
+          applicationDirectory: fixture.app,
+        }),
+        /generated icon directory must stay inside the application directory/,
+      );
+      await assert.rejects(
+        stat(path.join(externalIcons, 'AppIcon.ico')),
+        /ENOENT/,
+      );
+      await assert.rejects(
+        stat(path.join(externalIcons, 'AppIcon.icns')),
+        /ENOENT/,
+      );
+    } finally {
+      await rm(fixture.temporary, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('individual icon symbolic link', async (subtest) => {
+    const fixture = await makeFilesystemFixture();
+    try {
+      const iconDirectory = path.join(fixture.app, '.natui', 'icons');
+      const externalIcon = path.join(fixture.external, 'AppIcon.ico');
+      const sentinel = 'external icon remains unchanged';
+      await mkdir(iconDirectory, { recursive: true });
+      await writeFile(externalIcon, sentinel, 'utf8');
+      try {
+        await symlink(externalIcon, path.join(iconDirectory, 'AppIcon.ico'), 'file');
+      } catch (error) {
+        if (
+          process.platform === 'win32'
+          && error !== null
+          && typeof error === 'object'
+          && 'code' in error
+          && error.code === 'EPERM'
+        ) {
+          subtest.skip('file symbolic links require an unavailable Windows privilege');
+          return;
+        }
+        throw error;
+      }
+
+      await assert.rejects(
+        writeDemoIcons({
+          repositoryDirectory: fixture.temporary,
+          applicationDirectory: fixture.app,
+        }),
+        /generated icon AppIcon\.ico must stay inside the application directory/,
+      );
+      assert.equal(await readFile(externalIcon, 'utf8'), sentinel);
+      await assert.rejects(
+        stat(path.join(iconDirectory, 'AppIcon.icns')),
+        /ENOENT/,
       );
     } finally {
       await rm(fixture.temporary, { recursive: true, force: true });

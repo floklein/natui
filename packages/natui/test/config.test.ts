@@ -24,6 +24,10 @@ const validConfig = {
   },
 };
 
+function loadAppConfigWithDynamicAllowMissing(configPath: string, allowMissing: boolean) {
+  return loadAppConfig(configPath, { allowMissing });
+}
+
 test('NatUI app config resolves entry and platform icons from the config directory', () => {
   const root = path.resolve('fixtures', 'hello-app');
   const config = validateAppConfig(validConfig, root);
@@ -68,7 +72,10 @@ test('NatUI app config loads from disk and can be optional for development', asy
     assert.equal(config?.root, temporary);
     assert.equal(config?.entryPath, path.join(temporary, 'src', 'main.tsx'));
     assert.equal(
-      await loadAppConfig(path.join(temporary, 'missing.json'), { allowMissing: true }),
+      await loadAppConfigWithDynamicAllowMissing(
+        path.join(temporary, 'missing.json'),
+        true,
+      ),
       undefined,
     );
   } finally {

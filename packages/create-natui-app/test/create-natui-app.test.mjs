@@ -10,6 +10,7 @@ import { inflateSync } from 'node:zlib';
 import {
   createProject,
   detectPackageManager,
+  installDependencies,
   packageManagerExecutable,
   parseArgs,
   projectMetadata,
@@ -153,6 +154,22 @@ test('package manager detection follows the invoking user agent', () => {
   assert.equal(packageManagerExecutable('pnpm', 'win32'), 'pnpm.cmd');
   assert.equal(packageManagerExecutable('bun', 'win32'), 'bun.exe');
   assert.equal(packageManagerExecutable('npm', 'darwin'), 'npm');
+});
+
+test('the default install runner launches Windows package manager shims', {
+  skip: process.platform !== 'win32',
+}, async (t) => {
+  const cwd = await fixture(t);
+  await writeFile(
+    path.join(cwd, 'fake-package-manager.cmd'),
+    '@echo off\r\nif not "%1"=="install" exit /b 41\r\nexit /b 0\r\n',
+    'utf8',
+  );
+
+  await installDependencies({
+    packageManager: 'fake-package-manager',
+    target: cwd,
+  });
 });
 
 test('project metadata is portable and produces valid identifiers', () => {
@@ -323,6 +340,21 @@ test('runCli --yes uses the documented default without prompting', async (t) => 
   await stat(path.join(cwd, 'natui-app', 'package.json'));
 });
 
+test('runCli prints non-command JSON for project paths containing metacharacters', async (t) => {
+  const cwd = await fixture(t);
+  const output = captureStream();
+  const projectDirectory = "rock&roll $cash %temp% `tick's";
+  const exitCode = await runCli([projectDirectory, '--no-install'], {
+    cwd,
+    output: output.stream,
+  });
+
+  assert.equal(exitCode, 0);
+  assert.doesNotMatch(output.value(), /\n  cd /);
+  assert.match(output.value(), /Open the project directory shown as a JSON string/);
+  assert.ok(output.value().includes(`    ${JSON.stringify(projectDirectory)}\n`));
+});
+
 test('runCli keeps a generated project when dependency installation fails', async (t) => {
   const cwd = await fixture(t);
   const output = captureStream();
@@ -356,6 +388,7 @@ test('the executable handles help, version, generation, and typed cancellation e
   );
   assert.match(generated.stdout, /yarn install/);
   assert.match(generated.stdout, /yarn dev/);
+  assert.match(generated.stdout, /cd "e2e-app"/);
   await stat(path.join(cwd, 'e2e-app', 'natui.app.json'));
 
   const cancelCwd = path.join(cwd, 'cancel');
@@ -367,11 +400,15 @@ test('the executable handles help, version, generation, and typed cancellation e
     });
     let stdout = '';
     let stderr = '';
+    let sentCancellation = false;
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       stdout += chunk;
-      if (stdout.includes('Project directory')) child.stdin.end('cancel\n');
+      if (!sentCancellation && stdout.includes('Project directory')) {
+        sentCancellation = true;
+        child.stdin.end('cancel\n');
+      }
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;

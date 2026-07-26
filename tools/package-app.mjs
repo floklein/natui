@@ -149,7 +149,7 @@ async function resolveContainedFile(root, candidate, field) {
   return resolved;
 }
 
-async function prepareContainedDirectory(root, candidate, field) {
+export async function prepareContainedDirectory(root, candidate, field) {
   const projected = await resolveFromExistingParent(candidate, field);
   assertContained(root, projected, field);
   await mkdir(projected, { recursive: true });
@@ -165,6 +165,15 @@ async function prepareContainedDirectory(root, candidate, field) {
   const info = await stat(resolved);
   if (!info.isDirectory()) {
     throw configurationError(`${field} is not a directory: ${resolved}`);
+  }
+  return resolved;
+}
+
+export async function resolveContainedWritePath(root, candidate, field) {
+  const resolved = await resolveFromExistingParent(candidate, field);
+  assertContained(root, resolved, field);
+  if (!samePath(resolved, candidate)) {
+    throw configurationError(`${field} resolves through a symbolic link or junction`);
   }
   return resolved;
 }
@@ -935,11 +944,12 @@ function inspectWindowsDib(bytes, expectedWidth, expectedHeight, field) {
   const planes = bytes.readUInt16LE(coreHeader ? 8 : 12);
   const bitDepth = bytes.readUInt16LE(coreHeader ? 10 : 14);
   const compression = coreHeader ? 0 : bytes.readUInt32LE(16);
+  const supportedBitDepths = coreHeader ? [1, 4, 8, 24] : [1, 4, 8, 16, 24, 32];
   if (
     width !== expectedWidth
     || Math.abs(storedHeight) !== expectedHeight * 2
     || planes !== 1
-    || ![1, 4, 8, 16, 24, 32].includes(bitDepth)
+    || !supportedBitDepths.includes(bitDepth)
     || ![0, 3, 6].includes(compression)
     || ((compression === 3 || compression === 6) && bitDepth !== 16 && bitDepth !== 32)
   ) {

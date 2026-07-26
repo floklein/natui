@@ -49,3 +49,8 @@ export function loadAppConfig(
   configPath: string | undefined,
   options: { allowMissing: true },
 ): Promise<ResolvedNatuiAppConfig | undefined>;
+
+export function loadAppConfig(
+  configPath: string | undefined,
+  options: { allowMissing?: boolean },
+): Promise<ResolvedNatuiAppConfig | undefined>;

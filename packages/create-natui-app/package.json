@@ -36,7 +36,7 @@
   "scripts": {
     "typecheck": "node --check src/index.mjs && node --check src/icons.mjs",
     "test": "node --test",
-    "prepack": "node --test"
+    "prepack": "node --test 1>&2"
   },
   "publishConfig": {
     "access": "public"

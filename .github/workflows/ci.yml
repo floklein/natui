@@ -109,6 +109,7 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter create-natui-app test
       - run: node --test tools/package-app.test.mjs
       - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
       - run: pnpm package:demo
