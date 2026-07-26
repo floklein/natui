@@ -23,10 +23,11 @@ jobs:
       - id: version
         run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - run: pnpm lint
-      - run: pnpm test
-      # Build before typecheck: examples/demo resolves the `@natui/core` package types from
-      # packages/natui/dist, which only exists after a build.
+      # Build first: @natui/dev resolves `@natui/core` as a real specifier (so an
+      # installed app gets its own copy), and examples/demo resolves the package
+      # types the same way. Both need packages/natui/dist to exist.
       - run: pnpm build
+      - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm release:check
       - name: Pack npm release
@@ -68,6 +69,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The docs typecheck compiles the packages it documents, which resolve
+      # `@natui/core` through packages/natui/dist.
+      - run: pnpm build
       - run: pnpm docs:check
       - run: pnpm docs:build
       - run: pnpm docs:smoke
@@ -91,8 +95,9 @@ jobs:
       # -sectcreate linker flags, which the test bundle cannot inherit.
       - name: Swift host unit tests
         run: NATUI_PACKAGE_APP=1 swift test --package-path hosts/macos
-      - run: pnpm test
+      # Build before test: @natui/dev resolves @natui/core from packages/natui/dist.
       - run: pnpm build
+      - run: pnpm test
       - run: node --test examples/demo/src/verify-macos-package-static.test.mjs
       - run: pnpm package:demo
       - run: node examples/demo/src/verify-macos-package-static.mjs
@@ -136,8 +141,9 @@ jobs:
       # Windows carries the most path- and spawn-sensitive code (locate.ts,
       # config path handling, the packager) and was the least gated platform:
       # the core suite and typecheck never ran here.
-      - run: pnpm test
+      # Build before test: @natui/dev resolves @natui/core from packages/natui/dist.
       - run: pnpm build
+      - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm --filter create-natui-app test
       - run: node --test tools/package-app.test.mjs

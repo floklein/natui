@@ -4,13 +4,13 @@ import XCTest
 
 @testable import natui_host
 
-private func value(_ json: String) throws -> JSONValue {
+private func decodedJSON(_ json: String) throws -> JSONValue {
     try JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
 }
 
 final class MenuSpecTests: XCTestCase {
     func testParseListReadsDividersItemsAndDefaults() throws {
-        let items = MenuItemSpec.parseList(try value("""
+        let items = MenuItemSpec.parseList(try decodedJSON("""
             [{"divider":true},
              {"id":"save","label":"Save","shortcut":"cmd+s","systemImage":"tray","disabled":true,"checked":false},
              {"id":"plain"},
@@ -33,7 +33,7 @@ final class MenuSpecTests: XCTestCase {
     }
 
     func testParseKeepsNestedChildren() throws {
-        let items = MenuItemSpec.parseList(try value("""
+        let items = MenuItemSpec.parseList(try decodedJSON("""
             [{"id":"file","children":[{"id":"open"},{"divider":true}]}]
             """))
         XCTAssertEqual(items.count, 1)
@@ -42,7 +42,7 @@ final class MenuSpecTests: XCTestCase {
     }
 
     func testParseMenusRequiresAnId() throws {
-        let menus = MenuSpec.parseMenus(try value("""
+        let menus = MenuSpec.parseMenus(try decodedJSON("""
             [{"id":"file","items":[{"id":"open"}]},{"label":"orphan"}]
             """))
         XCTAssertEqual(menus.count, 1)
