@@ -16,6 +16,7 @@ import { defaultHostCommand } from '@natui/core';
 import {
   assertValidPng,
   collect,
+  nextRequestId,
   runningHosts,
   textOf,
   waitForMessage,
@@ -81,7 +82,7 @@ try {
   let tree;
   for (let i = 0; i < 40; i++) {
     const start = messages.length;
-    send({ t: 'dump' });
+    send({ t: 'dump', rid: nextRequestId() });
     tree = (await waitFor((m) => m.t === 'tree', 'tree', start)).root;
     if (collect(tree, 'Toggle').length > 0) break;
     await sleep(100);
@@ -97,7 +98,7 @@ try {
   send({ t: 'emit', id: plus.id, name: 'press' });
   await sleep(400);
   let start = messages.length;
-  send({ t: 'dump' });
+  send({ t: 'dump', rid: nextRequestId() });
   tree = (await waitFor((m) => m.t === 'tree', 'tree after presses', start)).root;
   assert.ok(
     collect(tree, 'Text').some((t) => textOf(t) === '2'),
@@ -110,7 +111,7 @@ try {
   // owns the stdio channel, it can then impersonate the renderer with updates
   // carrying chosen acks: a stale ack must be suppressed, a current ack must win.
   start = messages.length;
-  send({ t: 'dump' });
+  send({ t: 'dump', rid: nextRequestId() });
   tree = (await waitFor((m) => m.t === 'tree', 'tree before seq/ack contract', start)).root;
   const field = collect(tree, 'TextField')[0];
   assert.ok(field, 'demo TextField found');
@@ -119,7 +120,7 @@ try {
   send({ t: 'commit', ops: [{ op: 'update', id: field.id, props: { value: 'STALE' }, ack: 0 }] });
   await sleep(100);
   start = messages.length;
-  send({ t: 'dump' });
+  send({ t: 'dump', rid: nextRequestId() });
   tree = (await waitFor((m) => m.t === 'tree', 'tree after stale update', start)).root;
   assert.equal(
     collect(tree, 'TextField')[0].props?.value,
@@ -129,7 +130,7 @@ try {
   send({ t: 'commit', ops: [{ op: 'update', id: field.id, props: { value: 'CURRENT' }, ack: 1 }] });
   await sleep(100);
   start = messages.length;
-  send({ t: 'dump' });
+  send({ t: 'dump', rid: nextRequestId() });
   tree = (await waitFor((m) => m.t === 'tree', 'tree after authoritative update', start)).root;
   assert.equal(
     collect(tree, 'TextField')[0].props?.value,

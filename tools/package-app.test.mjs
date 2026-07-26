@@ -23,8 +23,27 @@ import {
   renderMacInfoPlist,
   resolveOutputOverride,
   validateAppConfig,
+  HOST_API_VERSION,
+  PROTOCOL_VERSION,
 } from './package-app.mjs';
 import { writeDemoIcons } from './package-demo.mjs';
+
+test('the packager mirrors the renderer protocol constants', async () => {
+  // package-app.mjs cannot import protocol.ts (TypeScript, no build step), so
+  // it keeps its own copies. A silent drift would stamp bundles with a host
+  // API the shipped host does not actually implement.
+  const protocolSource = await readFile(
+    new URL('../packages/natui/src/protocol.ts', import.meta.url),
+    'utf8',
+  );
+  const read = (name) => {
+    const match = protocolSource.match(new RegExp(`export const ${name} = (\\d+)`));
+    assert.ok(match, `${name} is declared in protocol.ts`);
+    return Number(match[1]);
+  };
+  assert.equal(HOST_API_VERSION, read('HOST_API_VERSION'), 'HOST_API_VERSION matches protocol.ts');
+  assert.equal(PROTOCOL_VERSION, read('PROTOCOL_VERSION'), 'PROTOCOL_VERSION matches protocol.ts');
+});
 
 const appSchema = JSON.parse(
   await readFile(new URL('../schemas/natui-app.schema.json', import.meta.url), 'utf8'),
@@ -288,7 +307,7 @@ test('application and bundle schemas match runtime string constraints', () => {
   assert.equal(bundleSchema.properties.buildNumber.pattern, buildNumber.pattern);
   assert.equal(bundleSchema.properties.entry.const, 'main.js');
   assert.equal(bundleSchema.properties.protocolVersion.const, 1);
-  assert.equal(bundleSchema.properties.minHostApi.const, 1);
+  assert.equal(bundleSchema.properties.minHostApi.const, HOST_API_VERSION);
 
   const macIconPattern = appSchema.properties.icons.properties.macos.allOf[1].pattern;
   const windowsIconPattern = appSchema.properties.icons.properties.windows.allOf[1].pattern;
@@ -314,7 +333,7 @@ test('generated bundle manifest is stable and carries compatibility gates', () =
     entry: 'main.js',
     entrySha256: 'a'.repeat(64),
     protocolVersion: 1,
-    minHostApi: 1,
+    minHostApi: 2,
     platform: 'windows',
     architecture: 'x64',
   });

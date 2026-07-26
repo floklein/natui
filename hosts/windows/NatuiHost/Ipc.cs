@@ -53,7 +53,7 @@ internal static class Ipc
         ["t"] = "ready",
         ["platform"] = "windows",
         ["protocol"] = 1,
-        ["hostApi"] = 1,
+        ["hostApi"] = 2,
     });
 
     public static void Event(int id, string name, JsonObject? payload = null, int? seq = null)
@@ -85,23 +85,30 @@ internal static class Ipc
         ["t"] = "quitAck",
     });
 
-    public static void Tree(JsonObject root) => Send(new JsonObject
+    /// <summary>
+    /// Reply to a dump request. <paramref name="rid"/> is the request id the
+    /// renderer sent; replies are paired by id, not by arrival order.
+    /// </summary>
+    public static void Tree(JsonObject root, int rid) => Send(new JsonObject
     {
         ["t"] = "tree",
         ["root"] = root,
+        ["rid"] = rid,
     });
 
     /// <summary>
-    /// Reply to a screenshot request. Hosts must always reply (a silent
-    /// failure would leave the JS-side promise pending forever); on failure
-    /// <paramref name="error"/> says why and no file was written.
+    /// Reply to a screenshot request, echoing its <paramref name="rid"/>.
+    /// Hosts must always reply (a silent failure would leave the JS-side
+    /// promise pending forever); on failure <paramref name="error"/> says why
+    /// and no file was written.
     /// </summary>
-    public static void Shot(string path, string? error = null)
+    public static void Shot(string path, int rid, string? error = null)
     {
         var message = new JsonObject
         {
             ["t"] = "shot",
             ["path"] = path,
+            ["rid"] = rid,
         };
         if (error is not null) message["error"] = error;
         Send(message);

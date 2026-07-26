@@ -161,7 +161,7 @@ export async function verifyMacPackage(appPath = defaultApp, {
   assert.equal(manifest.buildNumber, expectedPlist.CFBundleVersion);
   assert.equal(manifest.entry, 'main.js');
   assert.equal(manifest.protocolVersion, 1);
-  assert.equal(manifest.minHostApi, 1);
+  assert.equal(manifest.minHostApi, 2);
   assert.equal(manifest.platform, 'macos');
   assert.equal(manifest.architecture, expectedArchitecture);
   assert.match(manifest.entrySha256, /^[a-f0-9]{64}$/);

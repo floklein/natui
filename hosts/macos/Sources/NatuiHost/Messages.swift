@@ -12,9 +12,11 @@ struct InMessage: Decodable, Sendable {
     let name: String?
     let payload: [String: JSONValue]?
     let value: JSONValue?
+    /// Request id on dump/screenshot; echoed on the tree/shot reply (host API v2).
+    let rid: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case t, props, ops, path, id, name, payload, value
+        case t, props, ops, path, id, name, payload, value, rid
     }
 
     /// Hand-written so an explicit `"value": null` decodes as `.null` instead
@@ -29,6 +31,7 @@ struct InMessage: Decodable, Sendable {
         id = try container.decodeIfPresent(Int.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         payload = try container.decodeIfPresent([String: JSONValue].self, forKey: .payload)
+        rid = try container.decodeIfPresent(Int.self, forKey: .rid)
         if !container.contains(.value) {
             value = nil
         } else if try container.decodeNil(forKey: .value) {

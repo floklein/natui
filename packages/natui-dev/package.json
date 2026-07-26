@@ -1,14 +1,13 @@
 {
-  "name": "@natui/core",
+  "name": "@natui/dev",
   "version": "0.2.0",
-  "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
+  "description": "Development server with React Fast Refresh for NatUI applications.",
   "license": "MIT",
   "keywords": [
+    "natui",
     "react",
-    "native",
-    "desktop",
-    "swiftui",
-    "winui"
+    "fast-refresh",
+    "dev-server"
   ],
   "homepage": "https://natui.dev",
   "bugs": {
@@ -17,7 +16,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/floklein/natui.git",
-    "directory": "packages/natui"
+    "directory": "packages/natui-dev"
   },
   "type": "module",
   "engines": {
@@ -25,35 +24,13 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "natui": "./bin/natui.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./components": {
-      "types": "./dist/components.d.ts",
-      "import": "./dist/components.js"
-    },
-    "./inproc": {
-      "types": "./dist/inproc.d.ts",
-      "import": "./dist/inproc.js"
-    },
-    "./internal": {
-      "types": "./dist/internal.d.ts",
-      "import": "./dist/internal.js"
-    },
-    "./config": {
-      "types": "./app-config.d.ts",
-      "import": "./app-config.js"
     }
   },
   "files": [
-    "app-config.d.ts",
-    "app-config.js",
-    "bin",
     "dist"
   ],
   "scripts": {
@@ -66,17 +43,23 @@
     "access": "public"
   },
   "dependencies": {
-    "react-reconciler": "0.33.0"
+    "@babel/core": "7.29.7",
+    "esbuild": "^0.28.0",
+    "import-meta-resolve": "4.2.0",
+    "react-refresh": "0.18.0",
+    "rollup": "^4.62.0"
   },
   "peerDependencies": {
+    "@natui/core": "workspace:^",
     "react": "^19.2.0"
   },
   "devDependencies": {
+    "@natui/core": "workspace:*",
+    "@types/babel__core": "7.20.5",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
-    "@types/react-reconciler": "0.33.0",
     "react": "19.2.8",
-    "react-refresh": "0.18.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.5.4"
   }
 }

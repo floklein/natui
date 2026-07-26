@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { assertValidPng, waitForMessage } from '../../shared/probe.mjs';
+import { assertValidPng, nextRequestId, waitForMessage } from '../../shared/probe.mjs';
 
 const defaultApp = fileURLToPath(
   new URL('../dist/package/NatUIDemo.app', import.meta.url),
@@ -270,7 +270,7 @@ export async function verifyMacLaunchServices(
     );
     assert.equal(ready.platform, 'macos');
     assert.equal(ready.protocol, 1);
-    assert.ok(ready.hostApi >= 1);
+    assert.ok(ready.hostApi >= 2);
     verificationPid = await verificationPidPromise;
     assert.ok(
       verificationPid,
@@ -280,7 +280,7 @@ export async function verifyMacLaunchServices(
     let tree;
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const startIndex = messages.length;
-      await send({ t: 'dump' });
+      await send({ t: 'dump', rid: nextRequestId() });
       tree = await waitForProtocolMessage(
         (message) => message.t === 'tree',
         `tree ${attempt + 1}`,

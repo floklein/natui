@@ -38,7 +38,7 @@ async function startEmbedded(
     t: 'ready',
     platform: 'windows',
     protocol: 1,
-    hostApi: 1,
+    hostApi: 2,
   }));
   return { app: await pending, sent, receive };
 }
@@ -68,7 +68,7 @@ test('embedded controller updates, unmounts once, and quits idempotently', async
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
     const app = await pending;
     assert.equal(app.platform, 'windows');
@@ -103,7 +103,7 @@ test('a prepared embedded runtime buffers ready while the entry initializes', as
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
 
@@ -132,7 +132,7 @@ test('a prepared embedded runtime preserves a native close while the entry initi
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
     receive(JSON.stringify({ t: 'window', name: 'close' }));
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
@@ -176,7 +176,7 @@ test('a prepared embedded runtime leaves startup failures for the host fatal pat
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
 
     await assert.rejects(pending, /packaged initial render exploded/);
@@ -270,7 +270,7 @@ test('a synchronous close during window setup never mounts React afterward', asy
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
 
     await assert.rejects(pending, /closed during application startup/);
@@ -305,7 +305,7 @@ test('a native close after the first commit still rejects pending startup', asyn
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
 
     await assert.rejects(pending, /closed during application startup/);
@@ -338,7 +338,7 @@ test('a second embedded application cannot replace the active receive hook', asy
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
     const first = await firstPending;
     first.quit();
@@ -363,7 +363,7 @@ test('embedded startup incompatibility asks the host to quit and detaches', asyn
       hostApi: 0,
     }));
 
-    await assert.rejects(pending, /requires host API v1 or newer/);
+    await assert.rejects(pending, /requires host API v2 or newer/);
     assert.equal(sent.filter((message) => message.t === 'quit').length, 1);
     assert.equal(globals.__natui_recv, undefined);
   } finally {
@@ -393,7 +393,7 @@ test('a fatal initial render rejects startup, quits, and detaches', async () => 
       t: 'ready',
       platform: 'windows',
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }));
 
     await assert.rejects(pending, /initial render exploded/);

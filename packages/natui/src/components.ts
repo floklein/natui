@@ -148,7 +148,8 @@ export interface ProgressViewProps extends CommonProps {
 export interface ButtonProps extends CommonProps {
   children?: ReactNode;
   onPress?: () => void;
-  variant?: 'automatic' | 'bordered' | 'prominent' | 'plain' | 'link';
+  /** Visual style, named `style` to match List, Toggle and Picker. */
+  style?: 'automatic' | 'bordered' | 'prominent' | 'plain' | 'link';
   role?: 'destructive' | 'cancel';
 }
 

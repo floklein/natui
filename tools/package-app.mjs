@@ -27,8 +27,11 @@ import {
 
 export { APP_SCHEMA_VERSION, validateAppConfig };
 export const BUNDLE_SCHEMA_VERSION = 1;
+// Mirrors packages/natui/src/protocol.ts, which cannot be imported here (it is
+// TypeScript and this tool runs without a build). package-app.test.mjs parses
+// that file and fails if these two drift apart.
 export const PROTOCOL_VERSION = 1;
-export const HOST_API_VERSION = 1;
+export const HOST_API_VERSION = 2;
 
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(TOOL_DIR, '..');

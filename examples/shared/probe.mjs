@@ -16,6 +16,19 @@ import { readFileSync, statSync } from 'node:fs';
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
+let requestId = 0;
+
+/**
+ * Next request id for a `dump` / `screenshot` message. Hosts echo it on the
+ * `tree` / `shot` reply (host API v2), so replies pair by id rather than by
+ * arrival order. These probes keep one request outstanding at a time, but
+ * sending a real id keeps them honest against the documented protocol.
+ */
+export function nextRequestId() {
+  requestId += 1;
+  return requestId;
+}
+
 const sleep = (milliseconds) => new Promise((resolve) => {
   setTimeout(resolve, milliseconds);
 });

@@ -31,7 +31,7 @@ enum Emitter {
     }
 
     static func ready() {
-        send(["t": "ready", "platform": "macos", "protocol": 1, "hostApi": 1])
+        send(["t": "ready", "platform": "macos", "protocol": 1, "hostApi": 2])
     }
 
     static func event(_ id: Int, _ name: String, payload: [String: Any] = [:], seq: Int? = nil) {
@@ -44,8 +44,8 @@ enum Emitter {
         send(["t": "window", "name": "close"])
     }
 
-    static func tree(_ root: [String: Any]) {
-        send(["t": "tree", "root": root])
+    static func tree(_ root: [String: Any], rid: Int) {
+        send(["t": "tree", "root": root, "rid": rid])
     }
 
     static func log(_ message: String) {

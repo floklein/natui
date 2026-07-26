@@ -1,17 +1,20 @@
 ---
-title: "@natui/core/dev"
+title: "@natui/dev"
 description: Start and control the NatUI development server programmatically.
 ---
 
-The `@natui/core/dev` entrypoint exposes the same state-preserving development
-server used by the `natui dev` command. The command chooses its entry in this
+The `@natui/dev` package exposes the same state-preserving development
+server used by the `natui dev` command. It is a separate package because it
+owns the rollup / Babel / esbuild toolchain, which a shipped application has no
+reason to install; `natui dev` loads it on demand and tells you to install it if
+it is missing. The command chooses its entry in this
 order: a positional argument, `entry` from `natui.app.json`, then
 `src/main.tsx`. Programmatic callers pass the resolved entry directly.
 
 ## createDevServer
 
 ```ts typecheck
-import { createDevServer } from '@natui/core/dev';
+import { createDevServer } from '@natui/dev';
 
 const server = await createDevServer({
   root: process.cwd(),
@@ -34,7 +37,7 @@ application's local source graph, applies React Fast Refresh after successful
 builds, and keeps the previous native UI mounted after a build or evaluation
 error.
 
-<auto-type-table path="../../../../packages/natui/src/dev/server.ts" name="DevServerOptions" />
+<auto-type-table path="../../../../packages/natui-dev/src/server.ts" name="DevServerOptions" />
 
 | Property | Purpose |
 |---|---|
@@ -44,7 +47,7 @@ error.
 
 ## NatuiDevServer
 
-<auto-type-table path="../../../../packages/natui/src/dev/server.ts" name="NatuiDevServer" />
+<auto-type-table path="../../../../packages/natui-dev/src/server.ts" name="NatuiDevServer" />
 
 `close()` stops the build watcher, unmounts React, asks the native host to quit,
 and removes temporary build output. Calling it more than once is safe.

@@ -23,7 +23,7 @@ export default tseslint.config(
       'packages/create-natui-app/template/**',
       // Scratch fixtures the dev-server integration tests mkdtemp under the
       // package root; present only after a killed run.
-      'packages/natui/natui-dev-*/**',
+      'packages/*/natui-dev-*/**',
       'hosts/**',
       'screenshots/**',
     ],
@@ -69,7 +69,11 @@ export default tseslint.config(
   // Type-aware rules for the published package
   // ---------------------------------------------------------------------
   {
-    files: ['packages/natui/src/**/*.ts', 'packages/natui/src/**/*.tsx'],
+    files: [
+      'packages/natui/src/**/*.ts',
+      'packages/natui/src/**/*.tsx',
+      'packages/natui-dev/src/**/*.ts',
+    ],
     languageOptions: {
       parserOptions: {
         projectService: {

@@ -793,7 +793,10 @@ export async function createDevServer(
     runtimeSession,
     workspaceRoot,
   } = await prepareDevServerResources(root, entry, id);
-  const packageIndexUrl = new URL('../index.js', import.meta.url).href;
+  // `@natui/core` is resolved as a real specifier, not by walking up from this
+  // file: this package sits beside core rather than inside it, and an app's
+  // copy of core is whatever its own dependency tree resolves.
+  const packageIndexUrl = import.meta.resolve('@natui/core');
   const runtimeUrl = new URL('./runtime.js', import.meta.url).href;
 
   let watcher: RollupWatcher | undefined;

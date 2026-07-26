@@ -213,7 +213,7 @@ const program = ts.createProgram(generatedFiles, {
     '@natui/core': ['../packages/natui/src/index.ts'],
     '@natui/core/components': ['../packages/natui/src/components.ts'],
     '@natui/core/inproc': ['../packages/natui/src/inproc.ts'],
-    '@natui/core/dev': ['../packages/natui/src/dev/index.ts'],
+    '@natui/dev': ['../packages/natui-dev/src/index.ts'],
     '@natui/core/config': ['../packages/natui/app-config.d.ts'],
   },
 });

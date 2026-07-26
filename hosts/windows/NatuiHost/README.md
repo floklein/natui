@@ -203,7 +203,7 @@ Status: the blocking `windows-host` CI job compile-checks this expansion, and
 - Table header buttons use native FontIcon sort chevrons.
 - ZStack propagates flexible-space proposals, Image has a paintable box,
   container foreground color cascades, and rounded panels clip children.
-- Button variants map to the corresponding native WinUI styles.
+- Button styles map to the corresponding native WinUI styles.
 
 ## Known gaps and deliberate divergences
 

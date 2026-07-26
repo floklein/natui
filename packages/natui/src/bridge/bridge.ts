@@ -1,6 +1,7 @@
 import type {
   InboundMessage,
   Op,
+  RequestId,
   TreeNode,
   WindowProps,
 } from '../protocol.js';
@@ -38,8 +39,6 @@ interface Waiter<T> {
   resolve: (value: T) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
-  /** Already rejected by timeout; stays in the FIFO as a tombstone. */
-  settled: boolean;
 }
 
 /** Debug requests (dump/screenshot) fail loudly instead of hanging forever. */
@@ -66,8 +65,13 @@ export class Bridge {
    * "React adopted the change" from "React never responded".
    */
   private updatedDuringDispatch = new Set<number>();
-  private dumpWaiters: Array<Waiter<TreeNode>> = [];
-  private shotWaiters: Array<Waiter<string>> = [];
+  /**
+   * Outstanding dump/screenshot requests, keyed by the id echoed on the reply.
+   * A timed-out request simply removes its entry: a late reply then finds no
+   * waiter and is dropped, instead of being handed to the next pending caller.
+   */
+  private pendingRequests = new Map<RequestId, Waiter<never>>();
+  private nextRequestId = 1;
   private readyInfo: ReadyInfo | null = null;
   private readyWaiter: Waiter<ReadyInfo> | null = null;
   private readyPromise: Promise<ReadyInfo> | null = null;
@@ -105,7 +109,7 @@ export class Bridge {
         this.readyWaiter = null;
         reject(new Error(`natui: host did not send ready within ${timeoutMs}ms`));
       }, timeoutMs);
-      this.readyWaiter = { resolve, reject, timer, settled: false };
+      this.readyWaiter = { resolve, reject, timer };
     });
     return this.readyPromise;
   }
@@ -181,52 +185,59 @@ export class Bridge {
     this.transport.send({ t: 'window', props });
   }
 
-  private addWaiter<T>(list: Array<Waiter<T>>, what: string): Promise<T> {
+  /**
+   * Register a waiter and hand back its request id. `send` runs only after the
+   * entry exists, so a synchronous transport cannot reply before it is there.
+   */
+  private request<T>(
+    what: string,
+    send: (rid: RequestId) => void,
+  ): Promise<T> {
     if (this.dead) return Promise.reject(new Error('natui: host is gone'));
-    return new Promise<T>((resolve, reject) => {
-      const waiter: Waiter<T> = {
-        resolve,
-        reject,
-        settled: false,
-        timer: setTimeout(() => {
-          // Reject, but keep the waiter in the FIFO as a tombstone: replies
-          // pair with requests by order, so the host's (late) reply to THIS
-          // request must consume this slot. Removing it would hand the late
-          // reply to the next pending request, silently returning a stale
-          // tree or the wrong screenshot path.
-          waiter.settled = true;
-          reject(
-            new Error(`natui: host did not reply to ${what} within ${this.requestTimeoutMs}ms`),
-          );
-        }, this.requestTimeoutMs),
-      };
+    const rid = this.nextRequestId++;
+    const promise = new Promise<T>((resolve, reject) => {
       // Deliberately ref'd (same as waitForReady): the caller awaits this
       // promise, so the timer must be able to fire even when nothing else
-      // holds the event loop; settle/dispose clears it.
-      list.push(waiter);
+      // holds the event loop; the reply or dispose() clears it.
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(rid);
+        reject(
+          new Error(`natui: host did not reply to ${what} within ${this.requestTimeoutMs}ms`),
+        );
+      }, this.requestTimeoutMs);
+      this.pendingRequests.set(rid, {
+        resolve,
+        reject,
+        timer,
+      } as unknown as Waiter<never>);
     });
+    send(rid);
+    return promise;
   }
 
-  /** Consume the oldest waiter; discard the reply if it already timed out. */
-  private settleWaiter<T>(list: Array<Waiter<T>>, deliver: (w: Waiter<T>) => void): void {
-    const waiter = list.shift();
-    if (!waiter) return;
+  /** Deliver a reply to the request that asked for it, if it is still waiting. */
+  private settleRequest<T>(
+    rid: RequestId | undefined,
+    deliver: (w: Waiter<T>) => void,
+  ): void {
+    if (typeof rid !== 'number') return;
+    const waiter = this.pendingRequests.get(rid) as Waiter<T> | undefined;
+    if (!waiter) return; // late reply for a request that already timed out
+    this.pendingRequests.delete(rid);
     clearTimeout(waiter.timer);
-    if (waiter.settled) return; // late reply for a timed-out request
-    waiter.settled = true;
     deliver(waiter);
   }
 
   requestDump(): Promise<TreeNode> {
-    const promise = this.addWaiter(this.dumpWaiters, 'dump');
-    if (!this.dead) this.transport.send({ t: 'dump' });
-    return promise;
+    return this.request<TreeNode>('dump', (rid) => {
+      if (!this.dead) this.transport.send({ t: 'dump', rid });
+    });
   }
 
   requestScreenshot(path: string): Promise<string> {
-    const promise = this.addWaiter(this.shotWaiters, 'screenshot');
-    if (!this.dead) this.transport.send({ t: 'screenshot', path });
-    return promise;
+    return this.request<string>('screenshot', (rid) => {
+      if (!this.dead) this.transport.send({ t: 'screenshot', path, rid });
+    });
   }
 
   /** Reject all pending request/response waiters; called when the host dies. */
@@ -238,14 +249,11 @@ export class Bridge {
       this.readyWaiter.reject(err);
       this.readyWaiter = null;
     }
-    for (const w of this.dumpWaiters.splice(0)) {
-      clearTimeout(w.timer);
-      if (!w.settled) w.reject(err);
+    for (const waiter of this.pendingRequests.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(err);
     }
-    for (const w of this.shotWaiters.splice(0)) {
-      clearTimeout(w.timer);
-      if (!w.settled) w.reject(err);
-    }
+    this.pendingRequests.clear();
   }
 
   /** Debug: ask the host to synthesize a user event (no optimistic state). */
@@ -339,11 +347,11 @@ export class Bridge {
         break;
       }
       case 'tree': {
-        this.settleWaiter(this.dumpWaiters, (w) => w.resolve(msg.root));
+        this.settleRequest<TreeNode>(msg.rid, (w) => w.resolve(msg.root));
         break;
       }
       case 'shot': {
-        this.settleWaiter(this.shotWaiters, (w) => {
+        this.settleRequest<string>(msg.rid, (w) => {
           if (msg.error) w.reject(new Error(`natui: screenshot failed: ${msg.error}`));
           else w.resolve(msg.path);
         });

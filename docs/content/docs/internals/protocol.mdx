@@ -9,8 +9,8 @@ Receivers ignore unknown message types for forward compatibility.
 
 ## Handshake
 
-1. The host sends `{"t":"ready","platform":"macos","protocol":1,"hostApi":1}`.
-2. JavaScript checks that the protocol is 1, the host API is at least 1, and the platform is known. Node mode also checks that the platform matches the current operating system.
+1. The host sends `{"t":"ready","platform":"macos","protocol":1,"hostApi":2}`.
+2. JavaScript checks that the protocol is 1, the host API is at least 2, and the platform is known. Node mode also checks that the platform matches the current operating system.
 3. JavaScript sends a `window` message, then begins committing the React tree.
 
 A mismatch is a startup failure. JavaScript terminates the incompatible or
@@ -33,8 +33,8 @@ evaluating it.
 |---|---|---|
 | `window` | `{"t":"window","props":{...}}` | Configure and show the main window |
 | `commit` | `{"t":"commit","ops":[...]}` | Apply one atomic React commit |
-| `dump` | `{"t":"dump"}` | Request the native node tree |
-| `screenshot` | `{"t":"screenshot","path":string}` | Render the window to a PNG |
+| `dump` | `{"t":"dump","rid":number}` | Request the native node tree |
+| `screenshot` | `{"t":"screenshot","path":string,"rid":number}` | Render the window to a PNG |
 | `emit` | `{"t":"emit","id":number,"name":string,"payload"?:object}` | Synthesize an event |
 | `edit` | `{"t":"edit","id":number,"value":any}` | Perform an optimistic controlled edit |
 | `requestClose` | `{"t":"requestClose"}` | Verification only: run the native window-close path |
@@ -68,11 +68,16 @@ The host applies every operation in a commit before updating visible UI.
 | `ready` | Report platform, protocol version, and host API level |
 | `event` | Report an interaction on a node |
 | `window` | Report native window close |
-| `tree` | Reply to `dump` |
-| `shot` | Reply to `screenshot`, with optional `error` |
+| `tree` | Reply to `dump`, echoing its `rid` |
+| `shot` | Reply to `screenshot`, echoing its `rid`, with optional `error` |
 | `quitAck` | Debug acknowledgement that the host received `quit` |
 
 The host always replies to `screenshot`. On failure it includes `error` and does not produce a usable file.
+
+Requests carry a `rid` (request id) that the host copies onto its reply. Replies
+pair with requests by that id, never by arrival order. A host that answers out of
+order, or answers late after the requester gave up, therefore can never resolve
+the wrong caller. Echoing `rid` is required from host API 2.
 
 ## Events
 

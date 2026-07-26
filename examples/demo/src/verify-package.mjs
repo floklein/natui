@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { waitForMessage } from '../../shared/probe.mjs';
+import { nextRequestId, waitForMessage } from '../../shared/probe.mjs';
 
 const exampleDirectory = fileURLToPath(new URL('..', import.meta.url));
 // The packaged artifact name carries the version, so read it from the config
@@ -84,12 +84,12 @@ async function shutdown() {
 try {
   const ready = await waitForMessage(messages, (message) => message.t === 'ready', 'ready');
   assert.equal(ready.protocol, 1);
-  assert.ok(ready.hostApi >= 1);
+  assert.ok(ready.hostApi >= 2);
 
   let tree;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const startIndex = messages.length;
-    send({ t: 'dump' });
+    send({ t: 'dump', rid: nextRequestId() });
     tree = await waitForMessage(
       messages,
       (message) => message.t === 'tree',

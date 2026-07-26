@@ -38,7 +38,7 @@ enum AppBundleError: LocalizedError {
 enum AppBundleLoader {
     private static let schemaVersion = 1
     private static let protocolVersion = 1
-    private static let hostApiVersion = 1
+    private static let hostApiVersion = 2
 
     /// Nil means the process is a bare development host, not an .app bundle.
     static func loadIfPackaged() -> Result<PackagedApp, Error>? {

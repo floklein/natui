@@ -6,7 +6,7 @@ import {
   installRefreshRuntime,
   refreshRuntime,
   refreshRuntimeFacade,
-} from '../src/dev/refresh.js';
+} from '../src/refresh.js';
 
 installRefreshRuntime();
 

@@ -381,7 +381,7 @@ export function App() {
                     </Text>
                   </DisclosureGroup>
                   <Popover value={popoverOpen} arrowEdge="bottom" onChange={setPopoverOpen}>
-                    <Button variant="plain" onPress={() => setPopoverOpen(true)}>
+                    <Button style="plain" onPress={() => setPopoverOpen(true)}>
                       What is this?
                     </Button>
                     <PopoverContent padding={12}>
@@ -500,7 +500,7 @@ export function App() {
             >
               Cancel
             </Button>
-            <Button variant="prominent" disabled={draft.trim() === ''} onPress={saveDraft}>
+            <Button style="prominent" disabled={draft.trim() === ''} onPress={saveDraft}>
               Save
             </Button>
           </HStack>

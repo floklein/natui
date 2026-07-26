@@ -62,12 +62,12 @@ final class WindowManager: NSObject, NSWindowDelegate {
     /// Debug: render our own window to a PNG. Needs no screen-recording
     /// permission because it never reads the actual screen. Captures the
     /// frame view (title bar + window background), not just the content: /// otherwise dark-mode text sits on a transparent background.
-    func screenshot(to path: String) {
+    func screenshot(to path: String, rid: Int) {
         // Always reply, even on failure, a silent failure would leave the
         // JS-side requestScreenshot() promise pending forever.
         func fail(_ reason: String) {
             Emitter.log("screenshot: \(reason)")
-            Emitter.send(["t": "shot", "path": path, "error": reason])
+            Emitter.send(["t": "shot", "path": path, "error": reason, "rid": rid])
         }
         guard let contentView = window?.contentView else {
             return fail("no window content view")
@@ -83,7 +83,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
         }
         do {
             try data.write(to: URL(fileURLWithPath: path))
-            Emitter.send(["t": "shot", "path": path])
+            Emitter.send(["t": "shot", "path": path, "rid": rid])
         } catch {
             fail("write failed: \(error)")
         }
@@ -217,9 +217,10 @@ enum Router {
         case "commit":
             Store.shared.apply(ops: msg.ops ?? [])
         case "dump":
-            Emitter.tree(Store.shared.dumpTree())
+            // rid is required from host API v2; 0 keeps an older renderer from hanging.
+            Emitter.tree(Store.shared.dumpTree(), rid: msg.rid ?? 0)
         case "screenshot":
-            WindowManager.shared.screenshot(to: msg.path ?? "/tmp/natui-shot.png")
+            WindowManager.shared.screenshot(to: msg.path ?? "/tmp/natui-shot.png", rid: msg.rid ?? 0)
         case "emit":
             // Debug: synthesize a user event, exercising the full round trip.
             if let id = msg.id, let name = msg.name {

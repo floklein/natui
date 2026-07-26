@@ -20,4 +20,4 @@ hosts/windows/**/obj/
 
 # Scratch fixtures created by the dev-server integration tests (mkdtemp under
 # the package root); normally removed, but left behind by a killed run.
-packages/natui/natui-dev-*/
+packages/*/natui-dev-*/

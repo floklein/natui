@@ -37,6 +37,14 @@ jobs:
           name: npm-package-${{ steps.version.outputs.value }}
           path: packages/natui/natui-core-${{ steps.version.outputs.value }}.tgz
           if-no-files-found: error
+      - name: Pack @natui/dev release
+        working-directory: packages/natui-dev
+        run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-dev-${{ steps.version.outputs.value }}
+          path: packages/natui-dev/natui-dev-${{ steps.version.outputs.value }}.tgz
+          if-no-files-found: error
       - name: Pack create-natui-app release
         working-directory: packages/create-natui-app
         run: npm pack

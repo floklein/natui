@@ -17,7 +17,7 @@ import {
   type NatuiApp,
   type NatuiAppController,
   type RunOptions,
-} from '../run.js';
+} from '@natui/core/internal';
 
 interface PendingRun {
   element: ReactNode;

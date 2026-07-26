@@ -46,11 +46,11 @@ function App() {
     <VStack spacing={12} padding={20} alignment="leading">
       <Text font="largeTitle" weight="bold">Hello, native</Text>
       <HStack spacing={8}>
-        <Button variant="bordered" onPress={() => setCount((value) => value - 1)}>
+        <Button style="bordered" onPress={() => setCount((value) => value - 1)}>
           −
         </Button>
         <Text font="title2" monospaced>{String(count)}</Text>
-        <Button variant="bordered" onPress={() => setCount((value) => value + 1)}>
+        <Button style="bordered" onPress={() => setCount((value) => value + 1)}>
           +
         </Button>
       </HStack>
@@ -355,7 +355,7 @@ The workspace exposes:
 - `@natui/core` for components, `run`, and advanced protocol exports
 - `@natui/core/components` for component-only bundles without Node.js built-ins
 - `@natui/core/inproc` for the embedded host entry point
-- `@natui/core/dev` for programmatic development-server startup
+- `@natui/dev` for programmatic development-server startup
 - `@natui/core/config` for loading and validating `natui.app.json`
 - the `natui dev [entry]` command for state-preserving native development
 - `create-natui-app` for scaffolding a configured TypeScript application

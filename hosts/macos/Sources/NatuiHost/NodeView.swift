@@ -185,7 +185,7 @@ struct NodeView: View {
         } label: {
             NodeLabel(node: node)
         }
-        switch node.str("variant") {
+        switch node.str("style") {
         case "bordered": base.buttonStyle(.bordered)
         case "prominent": base.buttonStyle(.borderedProminent)
         case "plain": base.buttonStyle(.plain)

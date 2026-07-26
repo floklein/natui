@@ -1072,7 +1072,7 @@ internal sealed partial class NodeMapper(
 
     private static void ApplyButtonProps(NatuiNode node, Button button)
     {
-        var style = node.Str("variant") switch
+        var style = node.Str("style") switch
         {
             "bordered" => ButtonStyleResource("DefaultButtonStyle"),
             "prominent" => ButtonStyleResource("AccentButtonStyle"),

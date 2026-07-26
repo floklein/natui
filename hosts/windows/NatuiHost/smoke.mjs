@@ -54,7 +54,7 @@ send({
     { op: 'append', parent: 0, child: 1 },
   ],
 });
-send({ t: 'dump' });
+send({ t: 'dump', rid: 1 });
 const tree = await next();
 console.log('tree:', JSON.stringify(tree));
 if (tree.t !== 'tree') throw new Error('expected tree reply');

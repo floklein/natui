@@ -67,7 +67,7 @@ async function makeFixture() {
     entry: 'main.js',
     entrySha256: createHash('sha256').update(entry).digest('hex'),
     protocolVersion: 1,
-    minHostApi: 1,
+    minHostApi: 2,
     platform: 'macos',
     architecture,
   };
