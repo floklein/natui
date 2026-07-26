@@ -1,0 +1,10 @@
+import { run } from '@natui/core';
+import { App } from './App.js';
+
+await run(<App />, {
+  title: __DISPLAY_NAME_JSON__,
+  width: 520,
+  height: 360,
+  minWidth: 420,
+  minHeight: 280,
+});

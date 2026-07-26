@@ -4,7 +4,9 @@ description: Start and control the NatUI development server programmatically.
 ---
 
 The `@natui/core/dev` entrypoint exposes the same state-preserving development
-server used by the `natui dev` command.
+server used by the `natui dev` command. The command chooses its entry in this
+order: a positional argument, `entry` from `natui.app.json`, then
+`src/main.tsx`. Programmatic callers pass the resolved entry directly.
 
 ## createDevServer
 

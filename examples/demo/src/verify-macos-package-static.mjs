@@ -5,9 +5,12 @@ import { promisify } from 'node:util';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectMacIcon } from '../../../tools/package-app.mjs';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+const demoDirectory = fileURLToPath(new URL('..', import.meta.url));
+const demoConfig = path.join(demoDirectory, 'natui.app.json');
 const defaultApp = fileURLToPath(new URL('../dist/package/NatUIDemo.app', import.meta.url));
 
 function decodeXml(value) {
@@ -51,8 +54,19 @@ function executableArchitecture(bytes) {
   throw new Error(`packaged executable has unsupported Mach-O CPU type 0x${cpuType.toString(16)}`);
 }
 
+async function configuredMacIconPath() {
+  const config = JSON.parse(await readFile(demoConfig, 'utf8'));
+  assert.equal(
+    typeof config.icons?.macos,
+    'string',
+    'natui.app.json must configure icons.macos',
+  );
+  return path.resolve(demoDirectory, config.icons.macos);
+}
+
 export async function verifyMacPackage(appPath = defaultApp, {
   expectedArchitecture = process.arch,
+  expectedIconPath,
   enforceExecutableMode = process.platform !== 'win32',
   lintPlist = process.platform === 'darwin',
 } = {}) {
@@ -66,7 +80,7 @@ export async function verifyMacPackage(appPath = defaultApp, {
   await assertDirectory(absoluteApp, ['Contents'], 'application bundle');
   await assertDirectory(contents, ['Info.plist', 'MacOS', 'Resources'], 'Contents');
   await assertDirectory(macos, ['NatUIDemo'], 'Contents/MacOS');
-  await assertDirectory(resources, ['LICENSE.txt', 'NatUI'], 'Contents/Resources');
+  await assertDirectory(resources, ['AppIcon.icns', 'LICENSE.txt', 'NatUI'], 'Contents/Resources');
   await assertDirectory(
     natuiResources,
     ['main.js', 'manifest.json'],
@@ -98,16 +112,33 @@ export async function verifyMacPackage(appPath = defaultApp, {
   const expectedPlist = {
     CFBundleDisplayName: 'NatUI Demo',
     CFBundleExecutable: 'NatUIDemo',
+    CFBundleIconFile: 'AppIcon',
     CFBundleIdentifier: 'dev.natui.demo',
     CFBundleName: 'NatUI Demo',
     CFBundlePackageType: 'APPL',
-    CFBundleShortVersionString: '0.1.0',
+    CFBundleShortVersionString: '0.2.0',
     CFBundleVersion: '1',
     LSMinimumSystemVersion: '14.0',
   };
   for (const [key, expected] of Object.entries(expectedPlist)) {
     assert.equal(plist.get(key), expected, `Info.plist ${key} is invalid`);
   }
+
+  const packagedIconPath = path.join(resources, 'AppIcon.icns');
+  await assertRegularFile(packagedIconPath, 'packaged macOS icon');
+  const packagedIcon = await readFile(packagedIconPath);
+  const icon = inspectMacIcon(packagedIcon);
+  assert.deepEqual(
+    icon.sizes,
+    [16, 32, 64, 128, 256, 512, 1024],
+    'packaged macOS icon representation set is incomplete',
+  );
+  const configuredIcon = await readFile(expectedIconPath ?? await configuredMacIconPath());
+  assert.deepEqual(
+    packagedIcon,
+    configuredIcon,
+    'packaged AppIcon.icns differs from the configured icon',
+  );
 
   const manifestPath = path.join(natuiResources, 'manifest.json');
   const entryPath = path.join(natuiResources, 'main.js');
@@ -136,6 +167,7 @@ export async function verifyMacPackage(appPath = defaultApp, {
     appPath: absoluteApp,
     architecture: expectedArchitecture,
     entryBytes: entry.length,
+    iconSizes: icon.sizes,
   };
 }
 

@@ -59,13 +59,16 @@ The command reads `examples/demo/natui.app.json` and writes one portable,
 architecture-specific, self-contained EXE:
 
 ```text
-examples\demo\dist\package\NatUIDemo-0.1.0-windows-x64.exe
+examples\demo\dist\package\NatUIDemo-0.2.0-windows-x64.exe
 ```
 
 An ARM64 build uses the `windows-arm64.exe` suffix. The one EXE contains the
 application JavaScript, generated manifest, WinUI host, .NET runtime, Windows
 App SDK runtime, and V8 dependencies. It does not need Node or a machine-wide
 .NET installation at runtime.
+
+When `icons.windows` is configured, packaging requires a valid multi-image
+`.ico` container and embeds it in the executable as the application icon.
 
 At launch, the .NET single-file host extracts runtime dependencies to a cache
 under the current user's temporary directory. The cache is runtime-managed and

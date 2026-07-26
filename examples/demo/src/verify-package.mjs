@@ -12,7 +12,7 @@ const defaultHost = process.platform === 'win32'
       exampleDirectory,
       'dist',
       'package',
-      `NatUIDemo-0.1.0-windows-${architecture}.exe`,
+      `NatUIDemo-0.2.0-windows-${architecture}.exe`,
     )
   : path.join(
       exampleDirectory,

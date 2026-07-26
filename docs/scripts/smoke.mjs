@@ -184,10 +184,30 @@ try {
   );
   assert(/rel="canonical"/.test(home.text), '/ is missing its canonical URL');
   assert(/\/og\/image\.png/.test(home.text), '/ is missing its Open Graph image');
+  assert(
+    /npx create-natui-app@latest/.test(home.text),
+    '/ is missing the create-natui-app command',
+  );
+  assert(
+    /aria-label="Copy npx create-natui-app@latest"/.test(home.text),
+    '/ is missing the accessible create-natui-app copy control',
+  );
+  assert(
+    /role="status"/.test(home.text),
+    '/ is missing the create-natui-app clipboard status region',
+  );
+
+  const appSchema = await request(baseUrl, '/schemas/natui-app.schema.json');
+  assertTextResponse(appSchema, '/schemas/natui-app.schema.json', 'application/json');
+  const appSchemaJson = JSON.parse(appSchema.text);
+  assert(
+    appSchemaJson.$id === 'https://natui.dev/schemas/natui-app.schema.json',
+    '/schemas/natui-app.schema.json has the wrong schema id',
+  );
 
   const start = await request(baseUrl, '/docs/start');
   assertTextResponse(start, '/docs/start', 'text/html');
-  assert(/Set up NatUI from source/.test(start.text), '/docs/start is missing its page content');
+  assert(/Create a NatUI project/.test(start.text), '/docs/start is missing its page content');
   assert(/Copy Markdown/.test(start.text), '/docs/start is missing Copy Markdown');
   assert(/View Markdown/.test(start.text), '/docs/start is missing View Markdown');
   assert(/View source/.test(start.text), '/docs/start is missing View source');

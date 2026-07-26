@@ -23,9 +23,9 @@ builds the native host for the current operating system and architecture.
 Output goes to `examples/demo/dist/package`:
 
 - Windows x64:
-  `NatUIDemo-0.1.0-windows-x64.exe`
+  `NatUIDemo-0.2.0-windows-x64.exe`
 - Windows ARM64:
-  `NatUIDemo-0.1.0-windows-arm64.exe`
+  `NatUIDemo-0.2.0-windows-arm64.exe`
 - macOS:
   `NatUIDemo.app`
 
@@ -34,19 +34,24 @@ architecture. Windows packaging supports x64 and ARM64 targets.
 
 ## Application configuration
 
-The demo configuration is:
+`create-natui-app` writes an Expo-style static config with one shared source
+entry and platform-specific native icon paths:
 
 ```json
 {
-  "$schema": "../../schemas/natui-app.schema.json",
+  "$schema": "https://natui.dev/schemas/natui-app.schema.json",
   "schemaVersion": 1,
-  "id": "dev.natui.demo",
-  "name": "NatUI Demo",
+  "id": "com.example.myapp",
+  "name": "My App",
   "version": "0.1.0",
   "buildNumber": "1",
-  "entry": "src/main-embedded.tsx",
-  "executable": "NatUIDemo",
-  "output": "dist/package"
+  "entry": "src/main.tsx",
+  "executable": "MyApp",
+  "output": "dist/package",
+  "icons": {
+    "macos": "assets/AppIcon.icns",
+    "windows": "assets/AppIcon.ico"
+  }
 }
 ```
 
@@ -57,7 +62,7 @@ The demo configuration is:
 | `name` | Native display name, up to 80 characters |
 | `version` | Three-part application version such as `1.2.3` |
 | `buildNumber` | Positive integer string used by native version metadata |
-| `entry` | Browser-compatible embedded React entry |
+| `entry` | Shared React entry used by development and packaging |
 | `executable` | Native executable name without spaces |
 | `output` | Output directory relative to `natui.app.json` |
 | `icons.macos` | Optional `.icns` path |
@@ -66,9 +71,36 @@ The demo configuration is:
 Entry, output, and icon paths must stay inside the application directory.
 Unknown configuration fields fail packaging instead of being ignored.
 
-The configured entry must call `runEmbedded` from `@natui/core/inproc`. Imports from
-`@natui/core/components` remain free of Node built-ins and can be included in the
-browser-targeted application bundle.
+`natui dev` chooses its entry in this order: a positional CLI argument, the
+configured `entry`, then `src/main.tsx`. All config paths resolve relative to
+`natui.app.json`.
+
+NatUI does not convert source artwork during packaging. Prepare each icon for
+its platform:
+
+- **macOS:** Provide an `.icns` file with complete PNG or JPEG 2000
+  representations. For broad display-quality
+  coverage, it should include 16, 32, 128, 256, and 512 point representations
+  at 1x and 2x, through 1024 pixels. The packager copies it to
+  `Contents/Resources/AppIcon.icns` and writes `CFBundleIconFile` in
+  `Info.plist`. Follow [Apple's app icon
+  guidance](https://developer.apple.com/design/human-interface-guidelines/app-icons/).
+- **Windows:** Provide a valid multi-image `.ico` file. For broad
+  display-quality coverage, it should include 16, 24, 32, 48, and 256 pixel
+  representations. A transparent background is recommended. The packager
+  passes it to MSBuild as `ApplicationIcon`, which embeds it in the
+  executable. Follow [Microsoft's app icon
+  guidance](https://learn.microsoft.com/windows/apps/design/iconography/app-icon-construction).
+
+Packaging rejects an icon with the wrong extension, an invalid or incomplete
+image payload, a missing or non-file path, or a path outside the application
+directory. A valid icon that omits recommended sizes produces a warning.
+
+The configured entry calls the normal `run()` API from `@natui/core`, just as
+it does during development. While bundling, the packager maps that import to
+the Node-free component surface and `runEmbedded`. This lets one
+`src/main.tsx` serve both runtime modes. The packaged source graph must not use
+Node built-ins.
 
 ## Platform artifacts
 
@@ -103,7 +135,7 @@ Each artifact contains a generated manifest shaped like:
   "schemaVersion": 1,
   "id": "dev.natui.demo",
   "name": "NatUI Demo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "buildNumber": "1",
   "entry": "main.js",
   "entrySha256": "<64 lowercase hexadecimal characters>",

@@ -1,0 +1,32 @@
+---
+title: "@natui/core/config"
+description: Load and validate the NatUI application configuration.
+---
+
+The `@natui/core/config` entrypoint exposes the same static
+`natui.app.json` loader used by `natui dev` and the repository packager.
+
+```ts
+import {
+  DEFAULT_CONFIG_FILE,
+  loadAppConfig,
+} from '@natui/core/config';
+
+const config = await loadAppConfig();
+
+if (config) {
+  console.log(config.entryPath);
+  console.log(config.icons.macos);
+}
+```
+
+`loadAppConfig()` resolves entry, output, and icon paths relative to the
+config file. Pass `{ allowMissing: true }` when a missing config should return
+`undefined` instead of throwing.
+
+`validateAppConfig()` validates an already parsed value. Unknown properties,
+absolute paths, and paths that escape the application directory are rejected.
+
+<auto-type-table path="../../../../packages/natui/app-config.d.ts" name="NatuiAppConfig" />
+
+<auto-type-table path="../../../../packages/natui/app-config.d.ts" name="ResolvedNatuiAppConfig" />

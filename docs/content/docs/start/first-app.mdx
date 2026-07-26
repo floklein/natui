@@ -47,16 +47,23 @@ scripts:
 ```json
 {
   "scripts": {
-    "dev": "natui dev src/main.tsx",
+    "dev": "natui dev",
     "start": "tsx src/main.tsx"
   }
 }
 ```
 
-`pnpm dev` watches the application's local source graph and applies React Fast
-Refresh to the existing native window. Compatible edits preserve hook state.
-Syntax and evaluation errors keep the last working UI mounted until the next
-successful edit.
+`natui dev` reads `entry` from `natui.app.json`. A positional entry passed to
+`natui dev` overrides the config, and `src/main.tsx` is the fallback when no
+config exists. The server watches the application's local source graph and
+applies React Fast Refresh to the existing native window. Compatible edits
+preserve hook state. Syntax and evaluation errors keep the last working UI
+mounted until the next successful edit.
+
+The entry calls the normal `run()` API once. The repository packager maps that
+same import to the embedded runtime, so development and packaged builds can
+share one entry file. See [application
+configuration](/docs/guides/application-bundles#application-configuration).
 
 ## Keep inputs controlled
 

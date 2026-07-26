@@ -1,0 +1,11 @@
+{
+  "$schema": "../../schemas/natui-app.schema.json",
+  "schemaVersion": 1,
+  "id": "dev.natui.kitchen-sink",
+  "name": "NatUI Kitchen Sink",
+  "version": "0.2.0",
+  "buildNumber": "1",
+  "entry": "src/main.tsx",
+  "executable": "NatUIKitchenSink",
+  "output": "dist/package"
+}

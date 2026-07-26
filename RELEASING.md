@@ -5,16 +5,27 @@ checkout of `main`.
 
 ## 1. Align release metadata
 
-- Set the same version in the root, `packages/natui`, both examples, the docs,
-  and `examples/demo/natui.app.json`.
+- Set the same NatUI release version in the root, `packages/natui`,
+  `packages/create-natui-app`, both examples, the docs, and both
+  `natui.app.json` example configs.
+- Keep the new application version at `0.1.0` in both `create-natui-app`
+  templates. Set the template's `@natui/core` dependency to the matching
+  compatible NatUI release version.
+- When adding the CLI package for the first time, preserve its executable mode:
+
+  ```bash
+  git add --chmod=+x packages/create-natui-app/bin/create-natui-app.js
+  ```
+
 - Update artifact names that contain the version.
 - Add the release notes to `CHANGELOG.md`.
 - Run `pnpm release:check`. For a tag candidate, also run
-  `pnpm release:check v0.1.0`.
+  `pnpm release:check v0.2.0`.
 
-The release check rebuilds the npm package through its `prepack` hook, confirms
-version alignment, validates provenance metadata, and inspects the exact npm
-tarball file list.
+The release check rebuilds both npm packages through their `prepack` hooks,
+confirms version alignment, validates provenance metadata, checks both
+executable modes, inspects both npm tarballs, and smokes the `natui` and
+`create-natui-app` CLIs.
 
 ## 2. Run portable verification
 
@@ -25,10 +36,11 @@ pnpm build
 pnpm typecheck
 pnpm docs:check
 pnpm docs:build
-pnpm release:check v0.1.0
+pnpm release:check v0.2.0
 ```
 
-The latest `main` CI run must also be green. Its macOS and Windows jobs build
+The latest `main` CI run must also be green. The Linux job uploads the
+`@natui/core` and `create-natui-app` tarballs. Its macOS and Windows jobs build
 the native hosts and inspect the platform package artifacts.
 
 ## 3. Run native verification
@@ -60,27 +72,32 @@ These checks require a normal desktop window session.
 
 ## 4. Inspect publication inputs
 
-From `packages/natui`, inspect npm's final output:
+Inspect npm's final output from both publishable package directories:
 
 ```bash
-npm pack --dry-run
+(cd packages/natui && npm pack --dry-run)
+(cd packages/create-natui-app && npm pack --dry-run)
 ```
 
-Confirm that the registry does not already contain the target version and that
-the Git tag and GitHub release do not already exist.
+Confirm that `packages/create-natui-app/bin/create-natui-app.js` is mode
+`100755` in `git ls-files --stage`. Confirm that the registry does not already
+contain either target package version and that the Git tag and GitHub release
+do not already exist.
 
 ## 5. Publish
 
 Only after both platform checks and the exact release commit are approved:
 
-1. Create the signed `v0.1.0` tag on the approved commit and push the tag.
+1. Create the signed `v0.2.0` tag on the approved commit and push the tag.
 2. Publish `packages/natui` to npm with public access.
-3. Create the GitHub release from the same tag using the matching changelog
+3. Publish `packages/create-natui-app` to npm with public access.
+4. Create the GitHub release from the same tag using the matching changelog
    section.
-4. Attach the macOS archive and Windows executable produced from that commit.
-5. Verify the npm version, remote tag, GitHub release, and both downloaded
-   native artifacts independently.
+5. Attach the macOS archive and Windows executable produced from that commit.
+6. Verify both npm versions, `npx create-natui-app@0.2.0 --version`, the remote
+   tag, the GitHub release, and both downloaded native artifacts independently.
 
-The first npm publication needs an account authorized for the `@natui/core` package.
-After the package exists, configure npm trusted publishing for a dedicated
+Publishing both packages needs an account authorized for `@natui/core` and
+`create-natui-app`. Version 0.2.0 is the first `create-natui-app` publication.
+After both packages exist, configure npm trusted publishing for a dedicated
 GitHub Actions workflow before automating later releases.

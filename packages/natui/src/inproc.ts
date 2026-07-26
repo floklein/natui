@@ -93,6 +93,55 @@ class InProcTransport implements Transport {
   }
 }
 
+let preparedTransport: InProcTransport | undefined;
+
+/**
+ * Install the embedded receive hook before evaluating an application entry.
+ *
+ * The application packager calls this before its dynamic entry import so host
+ * messages can be buffered while the entry performs top-level async work.
+ *
+ * @internal
+ */
+export function prepareEmbeddedRuntime(): void {
+  preparedTransport ??= new InProcTransport();
+}
+
+/** @internal */
+export function assertEmbeddedRuntimeStarted(): void {
+  if (!preparedTransport) return;
+  preparedTransport.close();
+  preparedTransport = undefined;
+  throw new Error(
+    '@natui/core/inproc: application entry completed without calling run()',
+  );
+}
+
+/**
+ * Surface an asynchronous entry failure through the host's normal uncaught
+ * exception path. A rejected Promise alone is not reported consistently by
+ * the embedded JavaScript engines.
+ *
+ * @internal
+ */
+export function deferEmbeddedRuntimeFailure(error: unknown): void {
+  setTimeout(() => {
+    throw error;
+  }, 0);
+}
+
+function takeEmbeddedTransport(): {
+  prepared: boolean;
+  transport: InProcTransport;
+} {
+  const transport = preparedTransport;
+  preparedTransport = undefined;
+  return {
+    prepared: transport !== undefined,
+    transport: transport ?? new InProcTransport(),
+  };
+}
+
 export interface RunEmbeddedOptions extends WindowProps {
   /** Called once when the native window asks the application to close. */
   onClose?: () => void;
@@ -124,7 +173,7 @@ export async function runEmbedded(
   options: RunEmbeddedOptions = {},
 ): Promise<EmbeddedApp> {
   const { onClose, readyTimeoutMs, ...windowProps } = options;
-  const transport = new InProcTransport();
+  const { prepared, transport } = takeEmbeddedTransport();
   // The Bridge subscribes immediately, so no host message can be dropped
   // between the handshake and regular operation.
   const bridge = new Bridge(transport);
@@ -133,7 +182,7 @@ export async function runEmbedded(
   let renderer: ReturnType<typeof createNatuiRenderer> | undefined;
   let rejectInitialRender: ((error: Error) => void) | undefined;
 
-  const quit = () => {
+  const stop = (notifyHost: boolean) => {
     if (state === 'stopping' || state === 'stopped') return;
     state = 'stopping';
     let cleanupError: unknown;
@@ -147,7 +196,7 @@ export async function runEmbedded(
     try {
       const activeRenderer = renderer;
       if (activeRenderer) cleanup(() => activeRenderer.unmount());
-      cleanup(() => bridge.quit());
+      if (notifyHost) cleanup(() => bridge.quit());
       cleanup(() => bridge.dispose('embedded app stopped'));
       cleanup(() => transport.close());
     } finally {
@@ -155,6 +204,7 @@ export async function runEmbedded(
     }
     if (cleanupError) throw cleanupError;
   };
+  const quit = () => stop(true);
 
   let ready: ReadyInfo;
   try {
@@ -195,6 +245,9 @@ export async function runEmbedded(
       }
     });
 
+    if (state !== 'starting') {
+      throw new Error('@natui/core/inproc: embedding host closed during application startup');
+    }
     bridge.sendWindow(windowProps);
     // The embedding host may synchronously deliver a native close while
     // handling the window message. Never mount React after that close path
@@ -217,7 +270,11 @@ export async function runEmbedded(
   } catch (error) {
     rejectInitialRender = undefined;
     try {
-      quit();
+      // The packaging bootstrap converts this rejected startup into an
+      // uncaught host exception. Do not race that fatal path with a normal
+      // quit acknowledgement. Direct in-process callers retain the original
+      // graceful shutdown behavior.
+      stop(!prepared);
     } catch (cleanupError) {
       console.error('@natui/core/inproc: startup cleanup failed:', cleanupError);
     }
