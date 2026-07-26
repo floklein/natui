@@ -21,7 +21,7 @@ async function writeToClipboard(value: string) {
   textarea.style.opacity = '0';
   document.body.append(textarea);
   textarea.select();
-  let copied = false;
+  let copied;
   try {
     copied = document.execCommand('copy');
   } finally {

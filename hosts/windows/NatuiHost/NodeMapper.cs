@@ -233,7 +233,7 @@ internal sealed partial class NodeMapper(
     NatuiStack rootStack,
     StackPanel chromePanel,
     Grid overlayLayer,
-    Action requestQuit)
+    Action requestQuit) : INodeMapper
 {
     public NatuiStack RootStack { get; } = rootStack;
 
@@ -260,7 +260,7 @@ internal sealed partial class NodeMapper(
     private int _applyingRemote;
 
     private static readonly HashSet<string> LabelKinds =
-        ["Text", "Button", "Toggle", "Link", "Label"];
+        ["Text", "Button", "Toggle", "Link", "Label", "Menu"];
 
     private static readonly HashSet<string> ContainerKinds =
     [
@@ -514,21 +514,9 @@ internal sealed partial class NodeMapper(
         return list;
     }
 
-    private static FontFamily IconFontFamily()
-    {
-        try
-        {
-            if (Application.Current.Resources["SymbolThemeFontFamily"] is FontFamily family)
-            {
-                return family;
-            }
-        }
-        catch (Exception)
-        {
-            // Resource lookup throws on a missing key; fall through.
-        }
-        return new FontFamily("Segoe MDL2 Assets");
-    }
+    private static FontFamily IconFontFamily() =>
+        Theme.Resource<FontFamily>("SymbolThemeFontFamily")
+        ?? new FontFamily("Segoe MDL2 Assets");
 
     // -- attach / detach ----------------------------------------------------------
 
@@ -694,6 +682,13 @@ internal sealed partial class NodeMapper(
             if (node.Kind == "Text")
             {
                 RefreshTextContent(node);
+                return;
+            }
+            if (node.Kind == "Menu")
+            {
+                // The Menu label carries an optional systemImage, so it does
+                // not go through the generic ContentControl path.
+                if (node.Inner is DropDownButton menuButton) RefreshMenuLabel(node, menuButton);
                 return;
             }
             // node.Label covers the Label kind (whose Inner is a NatuiStack
@@ -1204,6 +1199,7 @@ internal sealed partial class NodeMapper(
             case "Sheet":
                 _sheetNodes.Remove(node.Id);
                 _pendingSheets.Remove(node.Id);
+                _sheetXamlRootRetries.Remove(node.Id);
                 if (node.Hosted is ContentDialog sheet && _openSheets.Contains(node.Id))
                 {
                     _sheetClosingRemote.Add(node.Id);
@@ -1493,27 +1489,18 @@ internal sealed partial class NodeMapper(
         _ => null,
     };
 
-    private static Brush SecondaryTextBrush()
-    {
-        try
-        {
-            if (Application.Current.Resources["TextFillColorSecondaryBrush"] is Brush brush)
-            {
-                return brush;
-            }
-        }
-        catch (Exception)
-        {
-            // Resource lookup throws on a missing key; fall through.
-        }
-        return new SolidColorBrush(Color.FromArgb(0xFF, 0x6E, 0x6E, 0x6E));
-    }
+    private static Brush SecondaryTextBrush() =>
+        Theme.Resource<Brush>("TextFillColorSecondaryBrush")
+        ?? new SolidColorBrush(Color.FromArgb(0xFF, 0x6E, 0x6E, 0x6E));
+
+    private static Brush? BrushFromHex(string? hex) =>
+        ColorFromHex(hex) is { } color ? new SolidColorBrush(color) : null;
 
     /// <summary>
     /// Protocol colors are #RRGGBB or #RRGGBBAA with alpha LAST, unlike
     /// WinUI's #AARRGGBB convention. Do not reorder.
     /// </summary>
-    private static Brush? BrushFromHex(string? hex)
+    internal static Color? ColorFromHex(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex)) return null;
         var s = hex.Trim().TrimStart('#');
@@ -1537,7 +1524,7 @@ internal sealed partial class NodeMapper(
                 default:
                     return null;
             }
-            return new SolidColorBrush(Color.FromArgb(a, r, g, b));
+            return Color.FromArgb(a, r, g, b);
         }
         catch (FormatException)
         {

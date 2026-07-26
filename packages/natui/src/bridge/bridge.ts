@@ -32,7 +32,7 @@ export interface ReadyInfo {
 }
 
 /** Wraps host-event handler invocation, e.g. to set React update priority. */
-export type PriorityRunner = (kind: string, fn: () => void) => void;
+export type PriorityRunner = (fn: () => void) => void;
 
 interface Waiter<T> {
   resolve: (value: T) => void;
@@ -60,6 +60,12 @@ export class Bridge {
   private createdThisFlush: CreatedRef[] = [];
   private targets = new Map<number, EventTarget>();
   private lastSeq = new Map<number, number>();
+  /**
+   * Node ids that got an `update` op while the current host event was being
+   * dispatched. Cleared per event, so it never grows: it exists only to tell
+   * "React adopted the change" from "React never responded".
+   */
+  private updatedDuringDispatch = new Set<number>();
   private dumpWaiters: Array<Waiter<TreeNode>> = [];
   private shotWaiters: Array<Waiter<string>> = [];
   private readyInfo: ReadyInfo | null = null;
@@ -67,7 +73,7 @@ export class Bridge {
   private readyPromise: Promise<ReadyInfo> | null = null;
   private windowCloseCb: (() => void) | undefined;
   private pendingWindowClose = false;
-  private priorityRunner: PriorityRunner = (_kind, fn) => fn();
+  private priorityRunner: PriorityRunner = (fn) => fn();
   private dead = false;
   private requestTimeoutMs: number;
 
@@ -112,6 +118,7 @@ export class Bridge {
   // -- ops ------------------------------------------------------------------
 
   push(op: Op): void {
+    if (op.op === 'update') this.updatedDuringDispatch.add(op.id);
     this.ops.push(op);
   }
 
@@ -139,9 +146,14 @@ export class Bridge {
         ref.created = false;
         this.unregister(ref.id);
       }
+      // The rollback only restores the shadow tree's agreement with the host
+      // about which nodes exist. It does NOT re-create them: React will not
+      // call appendChild again for an already-mounted fiber, so the dropped
+      // subtree stays missing on the host until something remounts it.
       console.error(
-        '[natui] internal error: commit batch is not serializable; dropped the whole batch ' +
-          '(the native tree keeps its previous state):',
+        '[natui] internal error: commit batch is not serializable; dropped the whole batch. ' +
+          'The nodes in it were never created on the host and will not be retried, ' +
+          'so the native tree is now missing that subtree:',
         err,
       );
     }
@@ -279,8 +291,9 @@ export class Bridge {
         // value directly (e.g. `onChange={(text) => ...}`).
         const arg = 'value' in payload ? payload.value : undefined;
         const handler = target?.handlers[msg.name];
+        this.updatedDuringDispatch.clear();
         if (target && handler) {
-          this.priorityRunner(target.kind, () => handler(arg));
+          this.priorityRunner(() => handler(arg));
         }
         // Controlled-value enforcement: the host applied this change
         // optimistically. If React did not adopt it (handler bailed out,
@@ -295,12 +308,16 @@ export class Bridge {
         // any other event (docs/protocol.md), and a request-semantics event
         // (e.g. sortChange) carrying a value must never be "corrected" into
         // the node's value prop.
+        // If React already committed an update for this node during the
+        // handler, that op carries the authoritative value: a corrective here
+        // would be a byte-identical duplicate.
         if (
           target &&
           target.created &&
           msg.name === 'change' &&
           typeof msg.seq === 'number' &&
           'value' in payload &&
+          !this.updatedDuringDispatch.has(msg.id) &&
           this.lastSeq.get(msg.id) === msg.seq &&
           'value' in target.props &&
           JSON.stringify(target.props.value) !== JSON.stringify(payload.value)

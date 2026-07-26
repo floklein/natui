@@ -213,17 +213,48 @@ function resolvedLocalModuleId(
   return resolvedUrl.href;
 }
 
+/** Files that mark a monorepo root for every package manager, not just pnpm. */
+const WORKSPACE_MARKERS = [
+  'pnpm-workspace.yaml',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'bun.lockb',
+  'lerna.json',
+];
+
+async function hasWorkspacesField(directory: string): Promise<boolean> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(directory, 'package.json'), 'utf8'),
+    ) as { workspaces?: unknown };
+    return manifest.workspaces !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The nearest ancestor that looks like a workspace root. This decides which
+ * modules get bundled rather than externalized, the Fast Refresh family-id
+ * namespace, and `preserveModulesRoot` — so detecting only pnpm silently
+ * degraded cross-package Fast Refresh in npm/yarn/bun monorepos.
+ */
 async function findWorkspaceRoot(root: string): Promise<string> {
   let candidate = root;
   for (;;) {
-    try {
-      await access(join(candidate, 'pnpm-workspace.yaml'));
-      return candidate;
-    } catch {
-      const parent = dirname(candidate);
-      if (parent === candidate) return root;
-      candidate = parent;
+    if (await hasWorkspacesField(candidate)) return candidate;
+    for (const marker of WORKSPACE_MARKERS) {
+      try {
+        await access(join(candidate, marker));
+        return candidate;
+      } catch {
+        // Not this marker; try the next.
+      }
     }
+    const parent = dirname(candidate);
+    if (parent === candidate) return root;
+    candidate = parent;
   }
 }
 
@@ -808,6 +839,33 @@ export async function createDevServer(
   };
   process.once('exit', removeCacheOnExit);
 
+  /**
+   * Artifacts written per committed generation, newest last. Every generation
+   * writes revisioned copies of the edited module and its whole importer chain,
+   * so without pruning `.natui/dev-*` grows for the life of the session. A few
+   * generations are kept because a failed refresh can still roll back onto the
+   * previously committed code.
+   */
+  const artifactGenerations: Array<{ files: readonly string[] }> = [];
+  const ARTIFACT_GENERATIONS_KEPT = 3;
+
+  const pruneArtifacts = async (): Promise<void> => {
+    while (artifactGenerations.length > ARTIFACT_GENERATIONS_KEPT) {
+      const stale = artifactGenerations.shift();
+      if (!stale) return;
+      const live = new Set(artifactGenerations.flatMap((entry) => entry.files));
+      for (const fileName of stale.files) {
+        if (live.has(fileName)) continue;
+        try {
+          await rm(join(cacheDir, fileName), { force: true });
+        } catch {
+          // Best effort: a stale artifact left behind costs disk, not
+          // correctness, and close() removes the whole directory anyway.
+        }
+      }
+    }
+  };
+
   const evaluateGeneration = async ({
     artifactFiles,
     entryFile,
@@ -902,6 +960,8 @@ export async function createDevServer(
       }
 
       mounted = true;
+      artifactGenerations.push({ files: artifactFiles });
+      void pruneArtifacts();
       const elapsed = Math.round(performance.now() - startedAt);
       if (outcome === 'mounted') {
         log(`[natui] mounted ${entry} in ${elapsed}ms`);
@@ -940,7 +1000,6 @@ export async function createDevServer(
       if (previousTransactionPaused) {
         if (closed) previousCommittedTransaction?.retire();
         else previousCommittedTransaction?.resume();
-        previousTransactionPaused = false;
       }
 
       if (!closed && !superseded) {
@@ -1022,6 +1081,16 @@ export async function createDevServer(
       nextGenerationBundle = undefined;
       void event.result.close().catch(() => undefined);
       if (bundle) scheduleEvaluation(bundle);
+      return;
+    }
+    // Settle on END, not BUNDLE_END. Rollup registers its watch targets during
+    // the build, but the run is only complete at END — settling one event
+    // earlier handed back a server whose file subscriptions could still be
+    // going live, so an edit written immediately after createDevServer()
+    // resolved could be absorbed into the baseline and never trigger a rebuild.
+    // Startup deliberately does NOT wait for the first mount: an app whose
+    // initial render suspends forever must still produce a closable server.
+    if (event.code === 'END') {
       settleFirstBuild();
       return;
     }

@@ -118,7 +118,7 @@ internal sealed class NatuiNode(int id, string kind)
 /// update honors ack for echo suppression and skips structurally equal props.
 /// Must only be touched on the UI thread.
 /// </summary>
-internal sealed class NodeStore(NodeMapper mapper)
+internal sealed class NodeStore(INodeMapper mapper)
 {
     public const int RootId = 0;
 
@@ -192,9 +192,11 @@ internal sealed class NodeStore(NodeMapper mapper)
                     // Echo suppression: if the user edited since JS produced
                     // this update, keep the local value (docs/protocol.md).
                     if (Json.Int(op, "ack") is { } ack && node.LastSentSeq > ack
-                        && node.Props["value"] is { } local)
+                        && node.Props.ContainsKey("value"))
                     {
-                        props["value"] = local.DeepClone();
+                        // Presence, not non-nullness: a local JSON null is a
+                        // real value (cleared selection) and must win too.
+                        props["value"] = node.Props["value"]?.DeepClone();
                     }
                     // Skip structurally equal props: rewriting an equal string
                     // into a TextBox still resets the caret and selection.

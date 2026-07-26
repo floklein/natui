@@ -154,31 +154,42 @@ private struct MenuItemEntryView: View {
     var body: some View {
         if item.isDivider {
             Divider()
-        } else if let children = item.children {
-            Menu(item.label) {
+        } else {
+            // Label, enablement and shortcut apply to EVERY item kind, the
+            // way NSMenuBuilder.fill does it, so the same spec renders alike
+            // in a MenuBar/toolbar menu and an in-window Menu/ContextMenu.
+            entry
+                .disabled(item.disabled)
+                .modifier(ShortcutMod(shortcut: ShortcutParser.swiftUI(item.shortcut)))
+        }
+    }
+
+    @ViewBuilder
+    private var entry: some View {
+        if let children = item.children {
+            Menu {
                 MenuItemsView(items: children, onSelect: onSelect)
+            } label: {
+                itemLabel
             }
-            .disabled(item.disabled)
         } else if let selector = MenuCommandRole.selector(for: item.role) {
-            Button(item.label) {
+            Button {
                 NSApp.sendAction(selector, to: nil, from: nil)
+            } label: {
+                itemLabel
             }
-            .disabled(item.disabled)
         } else if let checked = item.checked {
             // Checked rows are prop-driven: the tap only reports the select;
             // the checkmark flips when the app re-renders with the new value.
             Toggle(isOn: Binding(get: { checked }, set: { _ in onSelect(item.id) })) {
                 itemLabel
             }
-            .disabled(item.disabled)
         } else {
             Button(role: item.role == "destructive" ? .destructive : nil) {
                 onSelect(item.id)
             } label: {
                 itemLabel
             }
-            .disabled(item.disabled)
-            .modifier(ShortcutMod(shortcut: ShortcutParser.swiftUI(item.shortcut)))
         }
     }
 

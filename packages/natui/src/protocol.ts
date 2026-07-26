@@ -77,6 +77,13 @@ export type OutboundMessage =
    * change event with seq). Unlike `emit`, this exercises seq/ack end to end.
    */
   | { t: 'edit'; id: number; value: PropValue }
+  /**
+   * Verification only: ask the host to close its window as if the user had,
+   * so a packaged-app lifecycle can be exercised without a GUI session. Unlike
+   * `quit`, the host runs its normal window-close path and reports back with
+   * `{t:'window',name:'close'}`.
+   */
+  | { t: 'requestClose' }
   | { t: 'quit' };
 
 // ---------------------------------------------------------------------------

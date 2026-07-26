@@ -27,6 +27,19 @@ let package = Package(
                     "-Xlinker", "Sources/NatuiHost/Info.plist",
                 ])
             ] : []
+        ),
+        // Tests link the executable target directly (supported since Swift
+        // 5.5) so the pure logic — Store ops, seq/ack, hex colors, menu and
+        // shortcut parsing — stays in one module with the code that uses it.
+        // The test bundle inherits the linker flags above; NATUI_PACKAGE_APP=1
+        // turns them off if that ever gets in the way of `swift test`.
+        .testTarget(
+            name: "NatuiHostTests",
+            dependencies: ["natui-host"],
+            path: "Tests/NatuiHostTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
         )
     ]
 )

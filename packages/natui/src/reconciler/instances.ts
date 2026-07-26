@@ -12,6 +12,12 @@ export interface HostInstance {
   id: number;
   kind: string;
   props: SerializedProps;
+  /**
+   * `JSON.stringify(props)`, cached so a commit compares one freshly
+   * serialized string against a stored one instead of stringifying both sides.
+   * Always assigned together with `props` (see `setProps`).
+   */
+  propsJson: string;
   handlers: Record<string, EventHandler>;
   children: Child[];
   /** True once the native host has been told to create this node. */
@@ -32,7 +38,6 @@ export interface HostTextInstance {
 export type Child = HostInstance | HostTextInstance;
 
 export interface RootContainer {
-  isRoot: true;
   children: Child[];
   nextId: number;
   bridge: Bridge;
@@ -46,7 +51,9 @@ export function isTextInstance(node: Child): node is HostTextInstance {
 // Prop validation and serialization
 // ---------------------------------------------------------------------------
 
-const SKIPPED_PROPS = new Set(['children', 'key', 'ref']);
+// `key` is consumed by React and never reaches host props, so it is not listed.
+// `ref` is a real prop on React 19 function components and must be dropped.
+const SKIPPED_PROPS = new Set(['children', 'ref']);
 
 /** `onPress` -> `press`, `onSubmitEditing` -> `submitEditing`. */
 function eventNameFor(propName: string): string | null {
@@ -165,8 +172,20 @@ export function serializeProps(raw: Record<string, unknown>, kind: string): Seri
   return { props, handlers };
 }
 
-export function propsEqual(a: SerializedProps, b: SerializedProps): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+/**
+ * Store `props` and its serialized form together. Comparison is by JSON text,
+ * so it is key-order sensitive: reordering the same props in JSX produces a
+ * no-op update rather than being elided. That is cheap and harmless (both hosts
+ * skip structurally equal props), and it keeps the comparison in exactly the
+ * form that goes on the wire.
+ */
+export function setProps(
+  instance: HostInstance,
+  props: SerializedProps,
+  propsJson = JSON.stringify(props),
+): void {
+  instance.props = props;
+  instance.propsJson = propsJson;
 }
 
 // ---------------------------------------------------------------------------

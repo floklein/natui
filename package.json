@@ -5,6 +5,8 @@
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
   "scripts": {
     "build": "pnpm --filter @natui/core build",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @natui/core test && node --test tools/package-app.test.mjs && pnpm --filter create-natui-app test",
     "build:host:macos": "swift build -c release --package-path hosts/macos",
@@ -25,9 +27,13 @@
     "docs:smoke": "pnpm --filter natui-docs smoke"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "esbuild": "0.28.0",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.65.0"
   },
   "packageManager": "pnpm@11.1.0"
 }

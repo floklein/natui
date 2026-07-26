@@ -197,7 +197,19 @@ function createIconDib(size) {
   return dib;
 }
 
+/**
+ * The placeholder icons are rasterized rather than committed as binaries: the
+ * npm tarball stays free of opaque assets, and the two non-scaffolder consumers
+ * (tools/package-demo.mjs and the packaged-icns oracle test) get the same bytes
+ * from source. They take no parameters and read no config, so the output never
+ * varies within a process; both containers are memoized because rasterizing
+ * them costs a few hundred milliseconds.
+ */
+let windowsIcon;
+let macIcon;
+
 export function createWindowsIcon() {
+  if (windowsIcon) return windowsIcon;
   const images = ICO_SIZES.map((size) => ({
     size,
     payload: size === 256 ? createPng(size) : createIconDib(size),
@@ -226,10 +238,12 @@ export function createWindowsIcon() {
     payloadOffset += payload.length;
   }
 
+  windowsIcon = output;
   return output;
 }
 
 export function createMacIcon() {
+  if (macIcon) return macIcon;
   const pngBySize = new Map();
   const entries = ICNS_ENTRIES.map(([type, size]) => {
     let payload = pngBySize.get(size);
@@ -251,5 +265,6 @@ export function createMacIcon() {
     entry.copy(output, offset);
     offset += entry.length;
   }
+  macIcon = output;
   return output;
 }

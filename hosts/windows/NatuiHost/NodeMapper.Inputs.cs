@@ -301,8 +301,7 @@ internal sealed partial class NodeMapper
 
     // ALL SelectorBar API usage stays inside these two members so a compile
     // failure has a single fallback point (fallback: a horizontal StackPanel
-    // of ToggleButtons). SelectorBar requires WinAppSDK 1.5+; the repo pins
-    // 1.7.*.
+    // of ToggleButtons). SelectorBar requires WinAppSDK 1.5+.
 
     private FrameworkElement BuildSegmentedPicker(NatuiNode node)
     {

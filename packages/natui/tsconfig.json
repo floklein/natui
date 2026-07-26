@@ -1,7 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    // app-config.js is a published entrypoint ("./config") whose types are
+    // hand-written in app-config.d.ts. Without checkJs nothing ever verified
+    // that the two agree.
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "app-config.js", "app-config.d.ts"]
 }

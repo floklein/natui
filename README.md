@@ -230,14 +230,15 @@ design.
 The current public surface contains 37 typed host components:
 
 - Layout: `VStack`, `HStack`, `ZStack`, `Spacer`, `Divider`, `ScrollView`,
-  `List`, `Section`
+  `List`
 - Content: `Text`, `Label`, `Image`, `ProgressView`, `Link`
 - Inputs: `Button`, `TextField`, `TextEditor`, `SearchField`, `Toggle`,
-  `Slider`, `Stepper`, `Picker`, `DatePicker`, `DisclosureGroup`
+  `Slider`, `Stepper`, `Picker`, `DatePicker`
 - App shell and navigation: `SplitView`, `Sidebar`, `Detail`, `TabView`, `Tab`,
   `MenuBar`, `Toolbar`
-- Menus and data: `Menu`, `ContextMenu`, `Table`
+- Menus: `Menu`, `ContextMenu`
 - Presentation: `Sheet`, `Alert`, `Popover`, `PopoverContent`
+- Data: `Section`, `Table`, `DisclosureGroup`
 
 Common props include selection tags, badges, and accessibility metadata such
 as `accessibilityLabel`, `accessibilityHint`, and
@@ -284,7 +285,8 @@ pnpm verify:package
 
 macOS produces `examples/demo/dist/package/NatUIDemo.app`. Windows produces
 one portable, architecture-specific, self-contained EXE such as
-`NatUIDemo-0.2.0-windows-x64.exe`. The Windows EXE extracts its runtime
+`NatUIDemo-<version>-windows-x64.exe`, where `<version>` comes from
+`natui.app.json`. The Windows EXE extracts its runtime
 dependencies to a per-user temporary cache at launch.
 
 Both artifacts include the minified React entry and a generated manifest with

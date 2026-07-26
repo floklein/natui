@@ -16,6 +16,10 @@ import { createMacIcon } from '../../../packages/create-natui-app/src/icons.mjs'
 import { verifyMacPackage } from './verify-macos-package-static.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+// Same source of truth as the verifier, so a version bump cannot desync them.
+const demoVersion = JSON.parse(
+  await readFile(fileURLToPath(new URL('../natui.app.json', import.meta.url)), 'utf8'),
+).version;
 
 async function makeFixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'natui-macos-package-test-'));
@@ -44,7 +48,7 @@ async function makeFixture() {
   <key>CFBundleIdentifier</key><string>dev.natui.demo</string>
   <key>CFBundleName</key><string>NatUI Demo</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>CFBundleShortVersionString</key><string>${demoVersion}</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
@@ -58,7 +62,7 @@ async function makeFixture() {
     schemaVersion: 1,
     id: 'dev.natui.demo',
     name: 'NatUI Demo',
-    version: '0.2.0',
+    version: demoVersion,
     buildNumber: '1',
     entry: 'main.js',
     entrySha256: createHash('sha256').update(entry).digest('hex'),

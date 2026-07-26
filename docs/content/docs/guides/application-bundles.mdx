@@ -23,11 +23,13 @@ builds the native host for the current operating system and architecture.
 Output goes to `examples/demo/dist/package`:
 
 - Windows x64:
-  `NatUIDemo-0.2.0-windows-x64.exe`
+  `NatUIDemo-<version>-windows-x64.exe`
 - Windows ARM64:
-  `NatUIDemo-0.2.0-windows-arm64.exe`
+  `NatUIDemo-<version>-windows-arm64.exe`
 - macOS:
   `NatUIDemo.app`
+
+`<version>` is the `version` field from `natui.app.json`.
 
 Packaging is platform-specific. Build each macOS architecture on that
 architecture. Windows packaging supports x64 and ARM64 targets.

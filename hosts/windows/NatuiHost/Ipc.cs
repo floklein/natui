@@ -75,6 +75,16 @@ internal static class Ipc
         ["name"] = "close",
     });
 
+    /// <summary>
+    /// Debug-channel acknowledgement of a quit message. A mirrored
+    /// acknowledgement lets external probes distinguish React cleanup from a
+    /// later crash or forced exit.
+    /// </summary>
+    public static void QuitAck() => Send(new JsonObject
+    {
+        ["t"] = "quitAck",
+    });
+
     public static void Tree(JsonObject root) => Send(new JsonObject
     {
         ["t"] = "tree",

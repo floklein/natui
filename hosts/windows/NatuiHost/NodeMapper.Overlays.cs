@@ -34,6 +34,15 @@ internal sealed partial class NodeMapper
     private readonly HashSet<int> _popoverClosingRemote = [];
     private int _alertPresentationCount;
 
+    /// <summary>
+    /// Per sheet node, how many times presentation has been re-enqueued while
+    /// the window still had no XamlRoot. Bounded so a window that never gets
+    /// one cannot spin the dispatcher forever.
+    /// </summary>
+    private readonly Dictionary<int, int> _sheetXamlRootRetries = [];
+
+    private const int MaxSheetXamlRootRetries = 20;
+
     // -- Sheet --------------------------------------------------------------------
 
     private FrameworkElement BuildSheet(NatuiNode node)
@@ -97,13 +106,26 @@ internal sealed partial class NodeMapper
             }
             if (RootStack.XamlRoot is not { } xamlRoot)
             {
+                // The retry is the dispatcher hop below, never this call's
+                // finally; resuming there would bypass the bound entirely.
                 resumeImmediately = false;
+                var attempts = _sheetXamlRootRetries.GetValueOrDefault(node.Id);
+                _sheetXamlRootRetries[node.Id] = attempts + 1;
+                if (attempts >= MaxSheetXamlRootRetries)
+                {
+                    if (attempts == MaxSheetXamlRootRetries)
+                    {
+                        Ipc.Log($"Sheet {node.Id}: no XamlRoot after {attempts} retries; giving up");
+                    }
+                    return;
+                }
                 RootStack.DispatcherQueue.TryEnqueue(
                     DispatcherQueuePriority.Low,
                     ResumePresentedSheets);
                 return;
             }
 
+            _sheetXamlRootRetries.Remove(node.Id);
             dialog.XamlRoot = xamlRoot;
             _openSheets.Add(node.Id);
             try
@@ -139,7 +161,6 @@ internal sealed partial class NodeMapper
         }
         finally
         {
-            _openSheets.Remove(node.Id);
             _contentDialogGate.Release();
             if (resumeImmediately && _alertPresentationCount == 0) ResumePresentedSheets();
         }
@@ -346,7 +367,6 @@ internal sealed partial class NodeMapper
         }
         finally
         {
-            _openAlerts.Remove(node.Id);
             _contentDialogGate.Release();
             _alertPresentationCount = Math.Max(0, _alertPresentationCount - 1);
 

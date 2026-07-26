@@ -169,7 +169,7 @@ test('updates to a Suspense-hidden instance stay hidden until unhide', () => {
   const transport = new FakeTransport();
   const bridge = new Bridge(transport);
   const { hostConfig } = makeHostConfig(bridge);
-  const container: RootContainer = { isRoot: true, children: [], nextId: 1, bridge };
+  const container: RootContainer = { children: [], nextId: 1, bridge };
 
   const instance = hostConfig.createInstance('Text', { color: '#111111' }, container, {}, null) as HostInstance;
   hostConfig.appendChildToContainer!(container, instance);

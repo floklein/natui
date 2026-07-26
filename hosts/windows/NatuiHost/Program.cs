@@ -429,21 +429,9 @@ public sealed class App : Application, IXamlMetadataProvider
         thread.Start();
     }
 
-    private static Brush PageBackground()
-    {
-        try
-        {
-            if (Current.Resources["ApplicationPageBackgroundThemeBrush"] is Brush brush)
-            {
-                return brush;
-            }
-        }
-        catch (Exception)
-        {
-            // Resource lookup throws on a missing key; fall through.
-        }
-        return new SolidColorBrush(Microsoft.UI.Colors.White);
-    }
+    private static Brush PageBackground() =>
+        Theme.Resource<Brush>("ApplicationPageBackgroundThemeBrush")
+        ?? new SolidColorBrush(Microsoft.UI.Colors.White);
 }
 
 /// <summary>Dispatches inbound protocol messages. Runs on the UI thread.</summary>
@@ -495,6 +483,7 @@ internal sealed class Router(
                 app.WindowClosed();
                 break;
             case "quit":
+                Ipc.QuitAck();
                 app.Quit();
                 break;
             default:
@@ -520,8 +509,8 @@ internal sealed class Router(
             && Json.Num(props, "minHeight") is { } minHeight
             && window.AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            // WASDK 1.7 presenter-enforced minimum (WM_GETMINMAXINFO under
-            // the hood), same physical-pixel convention as ResizeClient.
+            // Presenter-enforced minimum (WM_GETMINMAXINFO under the hood),
+            // same physical-pixel convention as ResizeClient.
             // Constrains the whole window frame rather than the client area;
             // close enough to the macOS host's contentMinSize for this alpha.
             presenter.PreferredMinimumWidth = (int)Math.Round(minWidth * scale);

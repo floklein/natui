@@ -37,9 +37,12 @@ evaluating it.
 | `screenshot` | `{"t":"screenshot","path":string}` | Render the window to a PNG |
 | `emit` | `{"t":"emit","id":number,"name":string,"payload"?:object}` | Synthesize an event |
 | `edit` | `{"t":"edit","id":number,"value":any}` | Perform an optimistic controlled edit |
+| `requestClose` | `{"t":"requestClose"}` | Verification only: run the native window-close path |
 | `quit` | `{"t":"quit"}` | Exit cleanly |
 
-Debug messages can be removed from a production host.
+Debug messages can be removed from a production host. `requestClose` asks the
+host to take the same close path as the window close button, so packaging
+verification can exercise shutdown without a user gesture.
 
 ## Commit operations
 

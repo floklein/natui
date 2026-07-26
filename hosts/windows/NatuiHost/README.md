@@ -4,8 +4,8 @@ Native Windows host for the NatUI wire protocol v1 (see `docs/protocol.md`).
 It is the WinUI 3 counterpart of `hosts/macos`: the JS renderer spawns this
 exe, writes NDJSON ops to its stdin, and reads events from its stdout.
 
-Status: the base host is compiled and verified on Windows 11 (WASDK 1.7,
-.NET SDK 9 building net8.0-windows). The full E2E suite (`pnpm verify`)
+Status: the base host is compiled and verified on Windows 11 (.NET SDK 9
+building net8.0-windows). The full E2E suite (`pnpm verify`)
 passes against the real WinUI 3 window: tree dumps, button presses,
 optimistic edits with native seq/ack, screenshots, and the controlled-input
 stress phase. See "First Windows compile: findings" at the bottom for what
@@ -29,7 +29,9 @@ verified locally against real windows.
 ## Build
 
 Requires the .NET 8 SDK on Windows 10 1809+ (Windows 11 recommended for the
-Segoe Fluent Icons font). No Visual Studio needed:
+Segoe Fluent Icons font). The minimum Windows App SDK is 1.8; the exact
+package version the host builds against lives in `NatuiHost.csproj`. No
+Visual Studio needed:
 
 ```
 cd hosts\windows\NatuiHost
@@ -70,6 +72,19 @@ If `dotnet build` complains about AnyCPU, pass the platform explicitly:
 
 Do not use `dotnet run` as the spawn target; it inserts a wrapper process
 between Node and the app, which breaks kill/EOF semantics.
+
+## Test
+
+```
+dotnet test hosts\windows\NatuiHost.Tests -c Release -p:Platform=x64
+```
+
+`NatuiHost.Tests` (xunit) covers the host logic that runs without a XAML
+runtime: the `seq`/`ack` echo-suppression rule, `NodeStore` remove/clear
+bookkeeping, and protocol color parsing. WinUI types *load* in a plain test
+host but cannot be *activated* there, so anything that constructs a control
+stays covered by the E2E suites instead. `NodeStore` talks to the mapper
+through `INodeMapper` for exactly that reason.
 
 ## Run
 
@@ -183,8 +198,8 @@ Status: the blocking `windows-host` CI job compile-checks this expansion, and
   clamps its pane to the requested minimum and maximum widths.
 - Alert keeps every action, maps cancel to native close and Escape behavior,
   and applies critical styling to destructive actions.
-- A Menu label supports `#text` children (joined) or a `systemImage` icon.
-  Element children inside a Menu label are ignored.
+- A Menu label supports `#text` children (joined), a `systemImage` icon, or
+  both (icon then text). Element children inside a Menu label are ignored.
 - Table header buttons use native FontIcon sort chevrons.
 - ZStack propagates flexible-space proposals, Image has a paintable box,
   container foreground color cascades, and rounded panels clip children.
@@ -193,7 +208,7 @@ Status: the blocking `windows-host` CI job compile-checks this expansion, and
 ## Known gaps and deliberate divergences
 
 - `window.minWidth`/`minHeight` use
-  `OverlappedPresenter.PreferredMinimumWidth/Height` (WASDK 1.7), which
+  `OverlappedPresenter.PreferredMinimumWidth/Height`, which
   constrains the whole window frame rather than the client area; the macOS
   host constrains the content size, so the effective minimum differs by the
   title-bar height.

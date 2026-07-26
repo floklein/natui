@@ -8,7 +8,6 @@ import {
   Image,
   List,
   ProgressView,
-  ScrollView,
   Slider,
   Spacer,
   Text,

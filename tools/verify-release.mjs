@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,39 @@ assert.match(version, /^\d+\.\d+\.\d+$/, 'natui package version must be semantic
 
 for (const [path, manifest] of manifests) {
   assert.equal(manifest.version, version, `${path} version must be ${version}`);
+}
+
+const DOCUMENTATION_SOURCES = ['README.md', 'docs/content'];
+const ARTIFACT_VERSION_LITERALS = [
+  /[A-Za-z0-9_.-]*-\d+\.\d+\.\d+-(?:windows|macos)-(?:x64|arm64)\S*/,
+  /[A-Za-z0-9_.-]*-\d+\.\d+\.\d+\.tgz/,
+];
+
+async function documentationFiles(relativePath) {
+  const info = await stat(resolve(root, relativePath));
+  if (!info.isDirectory()) return /\.mdx?$/.test(relativePath) ? [relativePath] : [];
+  const entries = await readdir(resolve(root, relativePath), { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map((entry) => documentationFiles(`${relativePath}/${entry.name}`)),
+  );
+  return nested.flat();
+}
+
+for (const source of DOCUMENTATION_SOURCES) {
+  for (const relativePath of await documentationFiles(source)) {
+    const lines = (await readFile(resolve(root, relativePath), 'utf8')).split('\n');
+    lines.forEach((line, index) => {
+      for (const pattern of ARTIFACT_VERSION_LITERALS) {
+        const match = pattern.exec(line);
+        assert.equal(
+          match,
+          null,
+          `${relativePath}:${index + 1} hardcodes the artifact version literal `
+            + `"${match?.[0]}"; use a <version> placeholder so docs survive a release bump`,
+        );
+      }
+    });
+  }
 }
 
 const packageManifest = manifests.get('packages/natui/package.json');
@@ -111,6 +144,9 @@ if (requestedTag) {
   assert.equal(requestedTag, `v${version}`, `release tag must be v${version}`);
 }
 
+// Windows runs npm-cli.js under the current Node rather than spawning npm.cmd:
+// the shim needs an elevated shell on the maintainer's nvm-windows setup and
+// fails with "Access denied" otherwise. Keep the explicit path.
 const npm =
   process.platform === 'win32'
     ? {

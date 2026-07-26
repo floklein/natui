@@ -60,7 +60,7 @@
     "typecheck": "tsc --noEmit",
     "build": "node --eval \"fs.rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "prepack": "npm run build",
-    "test": "node --import tsx --test --test-concurrency=1 test/config.test.ts test/reconciler.test.tsx test/validation.test.tsx test/bridge.test.ts test/run.test.ts test/inproc.test.tsx test/menus.test.tsx test/presentation.test.tsx test/selection.test.tsx test/refresh.test.tsx test/refresh-transaction.test.ts test/dev-transform.test.ts test/dev-server.integration.test.ts test/dev-server-lifecycle.integration.test.ts"
+    "test": "node --import tsx --test --test-concurrency=1 \"test/**/*.test.ts\" \"test/**/*.test.tsx\""
   },
   "publishConfig": {
     "access": "public"

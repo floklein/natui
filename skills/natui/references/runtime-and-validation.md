@@ -2,8 +2,9 @@
 
 ## Start from a compatible checkout
 
-NatUI currently requires a source checkout. Use Node.js 22 or newer, pnpm 11,
-and the native toolchain for the target platform.
+`@natui/core` and `create-natui-app` come from npm, but the native hosts still
+require a source checkout. Use Node.js 22 or newer, pnpm 11, and the native
+toolchain for the target platform.
 
 ```bash
 git clone https://github.com/floklein/natui.git

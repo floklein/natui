@@ -106,6 +106,7 @@ final class LifecycleCoordinator {
     private var pendingApplicationTermination = false
     private var allowTermination = false
     private var completing = false
+    private var reportedFailure = false
     private var quitWatchdog: DispatchWorkItem?
 
     func configure(embeddedRuntime: Bool) {
@@ -156,7 +157,10 @@ final class LifecycleCoordinator {
     /// unknown state. Report it once, then use the same deferred teardown as
     /// normal quit so the context is never released from its own callback.
     func javascriptFailed(_ message: String) {
-        guard !completing else { return }
+        // Latched before the alert's modal loop: a second exception raised
+        // during the same main-queue drain must not re-enter this report.
+        guard !completing, !reportedFailure else { return }
+        reportedFailure = true
         Emitter.log("embedded runtime failed: \(message)")
         // JSHost dispatches this method after the throwing callback returns,
         // so it is safe to cancel timers before entering an alert's modal loop.

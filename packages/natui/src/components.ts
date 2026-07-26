@@ -53,7 +53,6 @@ export interface CommonProps {
   accessibilityHint?: string;
   /** Stable identifier for UI automation (AX identifier / AutomationId). */
   accessibilityIdentifier?: string;
-  key?: string | number;
 }
 
 export interface ContainerProps extends CommonProps {
@@ -310,7 +309,6 @@ export interface SortDescriptor {
 export interface MenuBarProps {
   menus: MenuSpec[];
   onSelect?: (id: string) => void;
-  key?: string | number;
 }
 
 /**
@@ -322,7 +320,6 @@ export interface ToolbarProps {
   items: ToolbarItemSpec[];
   onAction?: (id: string) => void;
   onSearch?: (value: string) => void;
-  key?: string | number;
 }
 
 /**

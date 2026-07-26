@@ -159,11 +159,11 @@ export function validateAppConfig(
   assertContained(root, entryPath, 'entry');
   assertContained(root, outputPath, 'output');
 
-  const resolvedIcons = {};
+  const iconPaths = {};
   for (const [platform, icon] of Object.entries(icons)) {
     const iconPath = path.resolve(root, icon.replaceAll('\\', '/'));
     assertContained(root, iconPath, `icons.${platform}`);
-    resolvedIcons[platform] = iconPath;
+    iconPaths[platform] = iconPath;
   }
 
   return {
@@ -178,7 +178,10 @@ export function validateAppConfig(
     root,
     entryPath,
     outputPath,
-    icons: resolvedIcons,
+    // Relative as declared; `iconPaths` carries the resolved absolute form,
+    // mirroring entry/entryPath and output/outputPath.
+    icons,
+    iconPaths,
   };
 }
 
