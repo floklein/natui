@@ -32,7 +32,7 @@ await run(<App />, { title: 'my app', width: 480, height: 320 });
 ## Explore the documentation
 
 - [Set up an AI agent](/docs/agents) with the NatUI skill and machine-readable documentation.
-- [Get started](/docs/start) from a source checkout.
+- [Create an application](/docs/start) with `create-natui-app`.
 - Browse all [37 components](/docs/components).
 - Learn how [controlled state](/docs/guides/controlled-state) stays responsive across the native bridge.
 - Choose between [Node and embedded runtime modes](/docs/guides/runtime-modes).
@@ -41,7 +41,9 @@ await run(<App />, { title: 'my app', width: 480, height: 320 });
 
 ## Current status
 
-NatUI is still in Alpha and is not a published registry package. Both hosts
-have real-window verification for the base demo, kitchen-sink app-shell
-workflow, and their embedded JavaScript runtimes. The repository-local
-packager emits a macOS `.app` or one self-contained Windows EXE.
+NatUI is still in alpha. The registry packages provide the JavaScript runtime,
+development tooling, config loader, and project generator. Native hosts are
+still built from the source repository. Both hosts have real-window
+verification for the base demo, kitchen-sink app-shell workflow, and their
+embedded JavaScript runtimes. The repository-local packager emits a macOS
+`.app` or one self-contained Windows EXE.

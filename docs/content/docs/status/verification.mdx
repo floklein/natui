@@ -33,7 +33,7 @@ Local real-window suites cover:
 - Base demo in Node mode
 - Kitchen-sink app-shell and multi-component workflows
 - Embedded JavaScriptCore demo
-- Packaged `.app` lifecycle
+- Packaged `.app` direct and LaunchServices lifecycles
 
 They assert native tree dumps, interaction events, optimistic edits, sequence acknowledgements, and host-rendered PNG files.
 
@@ -62,7 +62,8 @@ pnpm verify:package
 The command packages the demo for the current platform and architecture, then
 launches it from an unrelated working directory. It asserts protocol 1, host
 API 1 or newer, materialization of the demo tree, the native close path, and
-exit code 0.
+exit code 0. On macOS it also launches the `.app` through LaunchServices and
+requires a host-rendered PNG before closing normally.
 
 Before evaluating JavaScript, each packaged host validates its generated
 manifest and SHA-256 entry digest. The manifest also gates bundle schema,

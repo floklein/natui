@@ -65,7 +65,8 @@ export class Bridge {
   private readyInfo: ReadyInfo | null = null;
   private readyWaiter: Waiter<ReadyInfo> | null = null;
   private readyPromise: Promise<ReadyInfo> | null = null;
-  private windowCloseCb: () => void = () => {};
+  private windowCloseCb: (() => void) | undefined;
+  private pendingWindowClose = false;
   private priorityRunner: PriorityRunner = (_kind, fn) => fn();
   private dead = false;
   private requestTimeoutMs: number;
@@ -256,6 +257,10 @@ export class Bridge {
 
   onWindowClose(cb: () => void): void {
     this.windowCloseCb = cb;
+    if (this.pendingWindowClose) {
+      this.pendingWindowClose = false;
+      cb();
+    }
   }
 
   setPriorityRunner(runner: PriorityRunner): void {
@@ -328,7 +333,10 @@ export class Bridge {
         break;
       }
       case 'window': {
-        if (msg.name === 'close') this.windowCloseCb();
+        if (msg.name === 'close') {
+          if (this.windowCloseCb) this.windowCloseCb();
+          else this.pendingWindowClose = true;
+        }
         break;
       }
       case 'ready': {

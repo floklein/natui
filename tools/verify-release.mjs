@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const GENERATED_APP_VERSION = '0.1.0';
 
 async function json(relativePath) {
   return JSON.parse(await readFile(resolve(root, relativePath), 'utf8'));
@@ -13,10 +14,15 @@ async function json(relativePath) {
 const manifests = new Map([
   ['package.json', await json('package.json')],
   ['packages/natui/package.json', await json('packages/natui/package.json')],
+  [
+    'packages/create-natui-app/package.json',
+    await json('packages/create-natui-app/package.json'),
+  ],
   ['examples/demo/package.json', await json('examples/demo/package.json')],
   ['examples/kitchen-sink/package.json', await json('examples/kitchen-sink/package.json')],
   ['docs/package.json', await json('docs/package.json')],
   ['examples/demo/natui.app.json', await json('examples/demo/natui.app.json')],
+  ['examples/kitchen-sink/natui.app.json', await json('examples/kitchen-sink/natui.app.json')],
 ]);
 
 const version = manifests.get('packages/natui/package.json').version;
@@ -35,6 +41,69 @@ assert.equal(
   'repository URL must match the GitHub repository used for npm provenance',
 );
 
+const createPackageManifest = manifests.get('packages/create-natui-app/package.json');
+assert.equal(createPackageManifest.license, 'MIT');
+assert.equal(createPackageManifest.publishConfig?.access, 'public');
+assert.equal(
+  createPackageManifest.repository?.url,
+  'git+https://github.com/floklein/natui.git',
+  'create-natui-app repository URL must match the GitHub repository used for npm provenance',
+);
+assert.equal(
+  createPackageManifest.repository?.directory,
+  'packages/create-natui-app',
+  'create-natui-app repository directory must identify its workspace package',
+);
+assert.equal(
+  createPackageManifest.bin?.['create-natui-app'],
+  './bin/create-natui-app.js',
+  'create-natui-app must map its executable to bin/create-natui-app.js',
+);
+const createBinSource = await readFile(
+  resolve(root, 'packages/create-natui-app/bin/create-natui-app.js'),
+  'utf8',
+);
+assert.match(
+  createBinSource,
+  /^#!\/usr\/bin\/env node\r?\n/,
+  'create-natui-app executable must start with the portable Node shebang',
+);
+
+const createTemplateManifest = JSON.parse(
+  (
+    await readFile(
+      resolve(root, 'packages/create-natui-app/template/package.json.tmpl'),
+      'utf8',
+    )
+  ).replace('__PACKAGE_NAME_JSON__', JSON.stringify('release-check')),
+);
+assert.equal(
+  createTemplateManifest.version,
+  GENERATED_APP_VERSION,
+  `create-natui-app template version must be ${GENERATED_APP_VERSION}`,
+);
+assert.equal(
+  createTemplateManifest.dependencies?.['@natui/core'],
+  `^${version}`,
+  `create-natui-app template must depend on @natui/core@^${version}`,
+);
+const createTemplateConfig = JSON.parse(
+  (
+    await readFile(
+      resolve(root, 'packages/create-natui-app/template/natui.app.json.tmpl'),
+      'utf8',
+    )
+  )
+    .replace('__APP_ID_JSON__', JSON.stringify('dev.example.releasecheck'))
+    .replace('__DISPLAY_NAME_JSON__', JSON.stringify('Release Check'))
+    .replace('__EXECUTABLE_JSON__', JSON.stringify('ReleaseCheck')),
+);
+assert.equal(
+  createTemplateConfig.version,
+  GENERATED_APP_VERSION,
+  `create-natui-app config template version must be ${GENERATED_APP_VERSION}`,
+);
+
 const requestedTag =
   process.argv[2] ??
   (process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : undefined);
@@ -51,22 +120,39 @@ const npm =
         ],
       }
     : { command: 'npm', arguments: [] };
-const packed = spawnSync(npm.command, [...npm.arguments, 'pack', '--dry-run', '--json'], {
-  cwd: resolve(root, 'packages/natui'),
-  encoding: 'utf8',
-});
 
-if (packed.error) throw packed.error;
-assert.equal(packed.status, 0, packed.stderr || 'npm pack failed');
+function packDryRun(relativeDirectory) {
+  const packed = spawnSync(
+    npm.command,
+    [...npm.arguments, 'pack', '--dry-run', '--json'],
+    {
+      cwd: resolve(root, relativeDirectory),
+      encoding: 'utf8',
+    },
+  );
 
-const [tarball] = JSON.parse(packed.stdout);
-assert.equal(tarball.name, '@natui/core');
-assert.equal(tarball.version, version);
+  if (packed.error) throw packed.error;
+  assert.equal(
+    packed.status,
+    0,
+    packed.stderr || `npm pack failed in ${relativeDirectory}`,
+  );
+  const output = JSON.parse(packed.stdout);
+  assert.equal(output.length, 1, `npm pack must produce one tarball in ${relativeDirectory}`);
+  return output[0];
+}
 
-const files = new Set(tarball.files.map(({ path }) => path.replaceAll('\\', '/')));
+const coreTarball = packDryRun('packages/natui');
+assert.equal(coreTarball.name, '@natui/core');
+assert.equal(coreTarball.version, version);
+assert.equal(coreTarball.filename, `natui-core-${version}.tgz`);
+
+const files = new Set(coreTarball.files.map(({ path }) => path.replaceAll('\\', '/')));
 const requiredFiles = [
   'LICENSE',
   'README.md',
+  'app-config.d.ts',
+  'app-config.js',
   'bin/natui.js',
   'dist/cli.js',
   'dist/components.d.ts',
@@ -84,25 +170,71 @@ for (const path of requiredFiles) {
   assert(files.has(path), `release tarball is missing ${path}`);
 }
 
-const packageDirectory = resolve(root, 'packages/natui');
-const indexedBin = spawnSync('git', ['ls-files', '--stage', 'bin/natui.js'], {
-  cwd: packageDirectory,
-  encoding: 'utf8',
-});
-if (indexedBin.error) throw indexedBin.error;
-assert.equal(indexedBin.status, 0, indexedBin.stderr || 'git ls-files failed');
-assert.match(
-  indexedBin.stdout,
-  /^100755 /,
-  'bin/natui.js must be executable in the git index',
+const createTarball = packDryRun('packages/create-natui-app');
+assert.equal(createTarball.name, 'create-natui-app');
+assert.equal(createTarball.version, version);
+assert.equal(createTarball.filename, `create-natui-app-${version}.tgz`);
+
+const createFiles = createTarball.files
+  .map(({ path }) => path.replaceAll('\\', '/'))
+  .sort();
+const expectedCreateFiles = [
+  'LICENSE',
+  'README.md',
+  'bin/create-natui-app.js',
+  'package.json',
+  'src/icons.mjs',
+  'src/index.mjs',
+  'template/_gitignore',
+  'template/natui.app.json.tmpl',
+  'template/package.json.tmpl',
+  'template/pnpm-workspace.yaml',
+  'template/README.md.tmpl',
+  'template/src/App.tsx',
+  'template/src/main.tsx.tmpl',
+  'template/tsconfig.json',
+].sort();
+assert.deepEqual(
+  createFiles,
+  expectedCreateFiles,
+  'create-natui-app release tarball contents must match the reviewed package surface',
 );
 
+function assertIndexedExecutable(relativePath) {
+  const indexedBin = spawnSync(
+    'git',
+    ['ls-files', '--stage', '--', relativePath],
+    {
+      cwd: root,
+      encoding: 'utf8',
+    },
+  );
+  if (indexedBin.error) throw indexedBin.error;
+  assert.equal(indexedBin.status, 0, indexedBin.stderr || 'git ls-files failed');
+  const indexedEntry = indexedBin.stdout.trim();
+  assert.notEqual(
+    indexedEntry,
+    '',
+    `${relativePath} is untracked; run git add --chmod=+x ${relativePath}`,
+  );
+  assert.match(
+    indexedEntry,
+    /^100755 /,
+    `${relativePath} must be executable in the git index; `
+      + `run git add --chmod=+x ${relativePath}`,
+  );
+}
+
+assertIndexedExecutable('packages/natui/bin/natui.js');
+assertIndexedExecutable('packages/create-natui-app/bin/create-natui-app.js');
+
+const packageDirectory = resolve(root, 'packages/natui');
 const exportsSmoke = spawnSync(
   process.execPath,
   [
     '--input-type=module',
     '--eval',
-    "await Promise.all([import('@natui/core'), import('@natui/core/components'), import('@natui/core/inproc'), import('@natui/core/dev')]);",
+    "await Promise.all([import('@natui/core'), import('@natui/core/components'), import('@natui/core/inproc'), import('@natui/core/dev'), import('@natui/core/config')]);",
   ],
   { cwd: packageDirectory, encoding: 'utf8' },
 );
@@ -116,7 +248,46 @@ const cliSmoke = spawnSync(process.execPath, ['bin/natui.js', '--help'], {
 if (cliSmoke.error) throw cliSmoke.error;
 assert.equal(cliSmoke.status, 0, cliSmoke.stderr || 'natui CLI failed to start');
 assert.match(cliSmoke.stdout, /^Usage: natui dev \[entry\]/);
+assert.match(cliSmoke.stdout, /natui\.app\.json/);
+
+const createPackageDirectory = resolve(root, 'packages/create-natui-app');
+const createHelpSmoke = spawnSync(
+  process.execPath,
+  ['bin/create-natui-app.js', '--help'],
+  {
+    cwd: createPackageDirectory,
+    encoding: 'utf8',
+  },
+);
+if (createHelpSmoke.error) throw createHelpSmoke.error;
+assert.equal(
+  createHelpSmoke.status,
+  0,
+  createHelpSmoke.stderr || 'create-natui-app CLI help failed',
+);
+assert.match(
+  createHelpSmoke.stdout,
+  /^Usage: create-natui-app \[project-directory\] \[options\]/,
+);
+assert.match(createHelpSmoke.stdout, /--no-install/);
+
+const createVersionSmoke = spawnSync(
+  process.execPath,
+  ['bin/create-natui-app.js', '--version'],
+  {
+    cwd: createPackageDirectory,
+    encoding: 'utf8',
+  },
+);
+if (createVersionSmoke.error) throw createVersionSmoke.error;
+assert.equal(
+  createVersionSmoke.status,
+  0,
+  createVersionSmoke.stderr || 'create-natui-app CLI version failed',
+);
+assert.equal(createVersionSmoke.stdout.trim(), version);
 
 console.log(
-  `Verified @natui/core@${version}: ${tarball.entryCount} files, ${tarball.size} packed bytes.`,
+  `Verified @natui/core@${version} (${coreTarball.entryCount} files, ${coreTarball.size} packed bytes) and ` +
+    `create-natui-app@${version} (${createTarball.entryCount} files, ${createTarball.size} packed bytes).`,
 );

@@ -28,8 +28,16 @@ jobs:
         run: npm pack
       - uses: actions/upload-artifact@v4
         with:
-          name: npm-package-0.1.0
-          path: packages/natui/natui-core-0.1.0.tgz
+          name: npm-package-0.2.0
+          path: packages/natui/natui-core-0.2.0.tgz
+          if-no-files-found: error
+      - name: Pack create-natui-app release
+        working-directory: packages/create-natui-app
+        run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: create-natui-app-0.2.0
+          path: packages/create-natui-app/create-natui-app-0.2.0.tgz
           if-no-files-found: error
 
   docs:
@@ -72,13 +80,13 @@ jobs:
         shell: bash
         run: |
           package_arch="$(node -p 'process.arch')"
-          archive="examples/demo/dist/package/NatUIDemo-0.1.0-macos-${package_arch}.tar.gz"
+          archive="examples/demo/dist/package/NatUIDemo-0.2.0-macos-${package_arch}.tar.gz"
           tar -czf "$archive" -C examples/demo/dist/package NatUIDemo.app
           echo "architecture=${package_arch}" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: NatUIDemo-0.1.0-macos-${{ steps.mac-package.outputs.architecture }}
+          name: NatUIDemo-0.2.0-macos-${{ steps.mac-package.outputs.architecture }}
           path: ${{ steps.mac-package.outputs.archive }}
           if-no-files-found: error
       # The GUI end-to-end suites, including verify:package, need a real
@@ -101,12 +109,13 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter create-natui-app test
       - run: node --test tools/package-app.test.mjs
       - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
       - run: pnpm package:demo
       - run: node examples/demo/src/verify-windows-package-static.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: NatUIDemo-0.1.0-windows-x64
-          path: examples/demo/dist/package/NatUIDemo-0.1.0-windows-x64.exe
+          name: NatUIDemo-0.2.0-windows-x64
+          path: examples/demo/dist/package/NatUIDemo-0.2.0-windows-x64.exe
           if-no-files-found: error

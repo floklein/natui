@@ -117,6 +117,8 @@ importers:
         specifier: ^5.5.4
         version: 5.9.3
 
+  packages/create-natui-app: {}
+
   packages/natui:
     dependencies:
       '@babel/core':

@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectWindowsIcon } from '../../../tools/package-app.mjs';
 
 if (process.platform !== 'win32') {
   throw new Error('the Windows package inspection must run on Windows');
 }
 
 const exampleDirectory = fileURLToPath(new URL('..', import.meta.url));
-const expectedName = 'NatUIDemo-0.1.0-windows-x64.exe';
+const demoConfig = path.join(exampleDirectory, 'natui.app.json');
+const expectedName = 'NatUIDemo-0.2.0-windows-x64.exe';
 const packageDirectory = path.join(exampleDirectory, 'dist', 'package');
 const artifact = process.argv[2]
   ? path.resolve(process.argv[2])
@@ -74,6 +76,27 @@ assert.ok(
   'bundle header offset is outside the executable',
 );
 
+const config = JSON.parse(await readFile(demoConfig, 'utf8'));
+assert.equal(
+  typeof config.icons?.windows,
+  'string',
+  'natui.app.json must configure icons.windows',
+);
+const configuredIconPath = path.resolve(exampleDirectory, config.icons.windows);
+const configuredIcon = await readFile(configuredIconPath);
+const icon = inspectWindowsIcon(configuredIcon);
+for (const image of icon.images) {
+  const payload = configuredIcon.subarray(
+    image.imageOffset,
+    image.imageOffset + image.byteLength,
+  );
+  const embeddedOffset = bytes.indexOf(payload);
+  assert.ok(
+    embeddedOffset >= 0 && embeddedOffset < headerOffset,
+    `configured ${image.width}x${image.height} icon payload is not embedded in the PE image`,
+  );
+}
+
 const bundleMajorVersion = bytes.readUInt32LE(headerOffset);
 const bundledFileCount = bytes.readUInt32LE(headerOffset + 8);
 assert.ok(bundleMajorVersion >= 6, `unsupported .NET bundle version ${bundleMajorVersion}`);
@@ -106,5 +129,6 @@ for (const entry of requiredBundleEntries) {
 
 console.log(
   `Windows package verified without launching: ${path.basename(artifact)} `
-    + `(${artifactInfo.size} bytes, ${bundledFileCount} bundled files)`,
+    + `(${artifactInfo.size} bytes, ${bundledFileCount} bundled files, `
+    + `${icon.images.length} icon images)`,
 );

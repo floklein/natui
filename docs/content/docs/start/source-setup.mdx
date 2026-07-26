@@ -1,7 +1,11 @@
 ---
 title: Source setup
-description: Clone the NatUI repository and install its pnpm workspace prerequisites.
+description: Clone the NatUI framework repository to build native hosts, examples, and packages.
 ---
+
+Use this path when contributing to NatUI, building a native host, or running
+the repository verification suites. To start an application, use
+[`create-natui-app`](/docs/start) first.
 
 ## Prerequisites
 
@@ -44,16 +48,19 @@ and distribution boundaries.
 
 ## Package exports and CLI
 
-The workspace exposes four package entrypoints:
+The workspace exposes five package entrypoints:
 
-- `natui` for components, `run`, and advanced protocol exports
+- `@natui/core` for components, `run`, and advanced protocol exports
 - `@natui/core/components` for component-only bundles that avoid Node built-ins
 - `@natui/core/inproc` for the embedded host entrypoint
 - `@natui/core/dev` for programmatic development-server startup
+- `@natui/core/config` for loading and validating `natui.app.json`
 
-The package also installs the `natui dev [entry]` command for native
-development with React Fast Refresh.
+The package also installs `natui dev [entry]` for native development with
+React Fast Refresh. Without a positional entry, it reads `entry` from
+`natui.app.json`, then falls back to `src/main.tsx`.
 
-NatUI is not documented as a public registry package. The application
-packager is currently a repository-local reference workflow, so installation
-and examples remain tied to a source checkout.
+`@natui/core` and `create-natui-app` are registry packages, but the 0.2 package
+does not include native hosts. Build the host from this checkout and set
+`NATUI_HOST` when an application lives elsewhere. The application packager
+also remains a repository-local reference workflow.
