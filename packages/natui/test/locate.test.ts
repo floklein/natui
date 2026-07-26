@@ -4,11 +4,20 @@
  * unsupported-platform branch, or its not-found message.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { defaultHostCommand } from '../src/bridge/locate.js';
+
+/**
+ * A temp directory whose path matches what `process.cwd()` will report. On
+ * macOS `/var/folders` is a symlink to `/private/var/folders`, so chdir'ing
+ * into a raw mkdtemp path and reading cwd back gives a different string.
+ */
+function tempRoot(prefix: string): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
 
 function withCwd<T>(directory: string, work: () => T): T {
   const previous = process.cwd();
@@ -43,7 +52,7 @@ test('a planted build is found by walking up from the working directory', (t) =>
     t.skip('no candidate layout for this platform');
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), 'natui-locate-'));
+  const root = tempRoot('natui-locate-');
   const relative =
     process.platform === 'darwin'
       ? join('hosts', 'macos', '.build', 'release', 'natui-host')
@@ -77,7 +86,7 @@ test('an arm64 Windows build is found even though it is not a literal candidate'
     t.skip('Windows-only layout');
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), 'natui-locate-arm-'));
+  const root = tempRoot('natui-locate-arm-');
   const planted = join(
     root,
     'hosts',
@@ -105,7 +114,7 @@ test('a checkout with no build reports that the host has not been built', (t) =>
     t.skip('no candidate layout for this platform');
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), 'natui-locate-empty-'));
+  const root = tempRoot('natui-locate-empty-');
   mkdirSync(join(root, 'hosts'), { recursive: true });
 
   withEnv('NATUI_HOST', undefined, () => {
