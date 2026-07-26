@@ -6,6 +6,7 @@
     "components",
     "inproc",
     "dev",
+    "config",
     "bridge",
     "renderer",
     "transport",

@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createElement } from 'react';
@@ -56,11 +56,87 @@ function silentFakeHost(quitMarkerPath: string): { cmd: string; args: string[] }
   return { cmd: process.execPath, args: ['-e', script] };
 }
 
+function closingFakeHost(messageLogPath: string): { cmd: string; args: string[] } {
+  const script = `
+    const fs = require('node:fs');
+    const readline = require('node:readline');
+    process.stdout.write(
+      JSON.stringify({
+        t: 'ready',
+        platform: ${JSON.stringify(thisPlatform)},
+        protocol: 1,
+        hostApi: 1,
+      }) + '\\n' +
+      JSON.stringify({ t: 'window', name: 'close' }) + '\\n'
+    );
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      try {
+        const message = JSON.parse(line);
+        fs.appendFileSync(${JSON.stringify(messageLogPath)}, JSON.stringify(message) + '\\n');
+        if (message.t === 'quit') process.exit(0);
+      } catch {}
+    });
+  `;
+  return { cmd: process.execPath, args: ['-e', script] };
+}
+
+function closeAfterWindowFakeHost(
+  messageLogPath: string,
+  renderMarkerPath: string,
+): { cmd: string; args: string[] } {
+  const script = `
+    const fs = require('node:fs');
+    const readline = require('node:readline');
+    process.stdout.write(JSON.stringify({
+      t: 'ready',
+      platform: ${JSON.stringify(thisPlatform)},
+      protocol: 1,
+      hostApi: 1,
+    }) + '\\n');
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      try {
+        const message = JSON.parse(line);
+        fs.appendFileSync(${JSON.stringify(messageLogPath)}, JSON.stringify(message) + '\\n');
+        if (message.t === 'window') {
+          const closeWhenRenderingStarts = () => {
+            if (fs.existsSync(${JSON.stringify(renderMarkerPath)})) {
+              process.stdout.write(JSON.stringify({ t: 'window', name: 'close' }) + '\\n');
+            } else {
+              setTimeout(closeWhenRenderingStarts, 5);
+            }
+          };
+          closeWhenRenderingStarts();
+        }
+        if (message.t === 'quit') process.exit(0);
+      } catch {}
+    });
+  `;
+  return { cmd: process.execPath, args: ['-e', script] };
+}
+
 const element = createElement(Text, null, 'hi');
 
 const thisPlatform = process.platform === 'win32' ? 'windows' : 'macos';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function assertLoggedMessageTypes(
+  messageLogPath: string,
+  expected: string[],
+): Promise<void> {
+  let actual: string[] = [];
+  for (let i = 0; i < 40; i += 1) {
+    if (existsSync(messageLogPath)) {
+      actual = readFileSync(messageLogPath, 'utf8')
+        .split('\n')
+        .slice(0, -1)
+        .map((line) => (JSON.parse(line) as { t: string }).t);
+      if (actual.length >= expected.length) break;
+    }
+    await sleep(50);
+  }
+  assert.deepEqual(actual, expected);
+}
 
 test('handshake success: matching protocol and platform mounts and quits cleanly', async () => {
   const marker = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'quit-received');
@@ -80,6 +156,83 @@ test('handshake success: matching protocol and platform mounts and quits cleanly
   // transport's kill() backstop (SIGTERM at 200ms) must not be what ends it.
   for (let i = 0; i < 40 && !existsSync(marker); i++) await sleep(50);
   assert.ok(existsSync(marker), 'host processed the quit message (clean shutdown, not SIGTERM)');
+});
+
+test('a buffered native close rejects startup before sending the window or rendering', async () => {
+  const messageLog = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'messages');
+  let closeCalls = 0;
+  let renders = 0;
+
+  function App() {
+    renders += 1;
+    return createElement(Text, null, 'never mounted');
+  }
+
+  const starting = run(createElement(App), {
+    host: closingFakeHost(messageLog),
+    onClose() {
+      closeCalls += 1;
+    },
+    readyTimeoutMs: 5000,
+  }).then((app) => {
+    app.quit();
+    throw new Error('startup resolved after the native close');
+  });
+
+  await assert.rejects(starting, /host closed during application startup/);
+
+  await assertLoggedMessageTypes(messageLog, ['quit']);
+  assert.equal(closeCalls, 1);
+  assert.equal(renders, 0);
+});
+
+test('a native close rejects an initial render that remains suspended', async () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'natui-run-test-'));
+  const messageLog = join(temporary, 'messages');
+  const renderMarker = join(temporary, 'render-started');
+  const never = new Promise<never>(() => {});
+  let closeCalls = 0;
+  let controller: NatuiAppController | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  function Suspended(): never {
+    writeFileSync(renderMarker, 'started');
+    throw never;
+  }
+
+  const starting = runWithController(
+    createElement(Suspended),
+    {
+      host: closeAfterWindowFakeHost(messageLog, renderMarker),
+      onClose() {
+        closeCalls += 1;
+      },
+      readyTimeoutMs: 5000,
+    },
+    (value) => {
+      controller = value;
+    },
+  );
+  const timeoutFailure = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller?.quit();
+      reject(new Error('startup remained pending after the native close'));
+    }, 3000);
+  });
+
+  try {
+    await assert.rejects(
+      Promise.race([starting, timeoutFailure]),
+      /host closed during application startup/,
+    );
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    controller?.quit();
+  }
+
+  assert.ok(existsSync(renderMarker), 'the initial render suspended before the host closed');
+  await assertLoggedMessageTypes(messageLog, ['window', 'quit']);
+  assert.equal(closeCalls, 1);
 });
 
 test('handshake rejects a protocol version mismatch and terminates the host', async () => {

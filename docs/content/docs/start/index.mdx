@@ -1,13 +1,57 @@
 ---
 title: Getting started
-description: Set up NatUI from source and open your first native desktop window.
+description: Create a NatUI project and open your first native desktop window.
 ---
 
-NatUI is currently used directly from its repository. Clone the source, install the pnpm workspace, build the native host for your platform, then run one of the included examples.
+## Create a project
 
-1. Complete [source setup](/docs/start/source-setup).
-2. Build the [macOS](/docs/start/macos) or [Windows](/docs/start/windows) host.
-3. Read the [first app](/docs/start/first-app) walkthrough.
-4. Explore the [kitchen sink](/docs/start/kitchen-sink) for a working app-shell and multi-component example.
+Run the project generator:
 
-The JavaScript runtime validates the protocol version and platform reported by the host during startup. Build both sides from the same checkout for the simplest known-compatible setup, although any host and renderer that both implement protocol version 1 can interoperate.
+```bash
+npx create-natui-app@latest
+```
+
+With no directory argument, the CLI asks for a project directory and suggests
+`natui-app`. You can also provide the name directly:
+
+```bash
+npx create-natui-app@latest my-app
+```
+
+The generator creates a TypeScript application, installs dependencies with
+the detected package manager, and writes:
+
+- `src/App.tsx` for the React component tree
+- `src/main.tsx` as the shared development and packaging entry
+- `natui.app.json` for application identity, entry, output, and icon paths
+- Native `assets/AppIcon.icns` and multi-image `assets/AppIcon.ico` defaults
+
+Use `--package-manager npm|pnpm|yarn|bun` to select a package manager or
+`--no-install` to create the project without installing dependencies.
+
+## Build the native host
+
+NatUI 0.2 does not include native host binaries in `@natui/core`. Build the
+[macOS](/docs/start/macos) or [Windows](/docs/start/windows) host from the NatUI
+source repository, then set `NATUI_HOST` to that executable when developing
+the generated project outside the framework checkout.
+
+After the host is available:
+
+```bash
+cd my-app
+npm run dev
+```
+
+`natui dev` reads the entry from `natui.app.json`, bundles its local source
+graph, and applies React Fast Refresh to the existing native window.
+
+Continue with the [first app](/docs/start/first-app) walkthrough, then explore
+the [component catalog](/docs/components). Use [source
+setup](/docs/start/source-setup) when contributing to NatUI itself or building
+the included examples.
+
+The JavaScript runtime validates the protocol version and platform reported by
+the host during startup. Build both sides from the same release for the
+simplest known-compatible setup, although any host and renderer that both
+implement protocol version 1 can interoperate.

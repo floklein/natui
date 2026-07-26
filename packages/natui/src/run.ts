@@ -88,6 +88,8 @@ export async function runWithController(
   let phase: 'starting' | 'running' | 'quitting' = 'starting';
   let renderer: ReturnType<typeof createManagedNatuiRenderer> | undefined;
   let startupCancellation: Error | undefined;
+  let startupComplete = false;
+  let startupCloseError: Error | undefined;
   const quit = () => {
     if (phase === 'quitting') return;
     phase = 'quitting';
@@ -158,6 +160,10 @@ export async function runWithController(
   renderer = createManagedNatuiRenderer(bridge, { onUncaughtError, runWork });
 
   const handleWindowClose = () => {
+    if (!startupComplete) {
+      startupCloseError ??= new Error('natui: host closed during application startup');
+      renderer?.cancelPendingRender(startupCloseError);
+    }
     if (onClose) onClose();
     else {
       quit();
@@ -165,15 +171,20 @@ export async function runWithController(
       setTimeout(() => process.exit(0), 250);
     }
   };
-  bridge.onWindowClose(() => {
-    if (runWork) runWork(handleWindowClose);
-    else handleWindowClose();
-  });
-
-  bridge.sendWindow(windowProps);
-  // Resolve once the initial tree is actually committed (and thus flushed).
   try {
+    bridge.onWindowClose(() => {
+      if (runWork) runWork(handleWindowClose);
+      else handleWindowClose();
+    });
+    if (startupCloseError) throw startupCloseError;
+
+    bridge.sendWindow(windowProps);
+    if (startupCloseError) throw startupCloseError;
+
+    // Resolve once the initial tree is actually committed (and thus flushed).
     await renderer.renderAsync(element);
+    if (startupCloseError) throw startupCloseError;
+    startupComplete = true;
   } catch (error) {
     quit();
     throw error;

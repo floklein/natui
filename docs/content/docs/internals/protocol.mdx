@@ -67,6 +67,7 @@ The host applies every operation in a commit before updating visible UI.
 | `window` | Report native window close |
 | `tree` | Reply to `dump` |
 | `shot` | Reply to `screenshot`, with optional `error` |
+| `quitAck` | Debug acknowledgement that the host received `quit` |
 
 The host always replies to `screenshot`. On failure it includes `error` and does not produce a usable file.
 

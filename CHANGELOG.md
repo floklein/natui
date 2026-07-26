@@ -2,6 +2,17 @@
 
 All notable changes to NatUI are documented in this file.
 
+## 0.2.0, 2026-07-26
+
+### Added
+
+- Expo-style `natui.app.json` loading for the development entry point
+- Platform-native macOS ICNS and Windows multi-image ICO validation
+- A shared development and embedded packaging entry
+- The `create-natui-app` project generator with TypeScript starter files and
+  generated native icon assets
+- A copyable `npx create-natui-app@latest` command in the documentation hero
+
 ## 0.1.0, 2026-07-26
 
 Initial alpha release.

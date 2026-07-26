@@ -1,0 +1,44 @@
+{
+  "name": "create-natui-app",
+  "version": "0.2.0",
+  "description": "Create a new NatUI application.",
+  "license": "MIT",
+  "keywords": [
+    "natui",
+    "react",
+    "native",
+    "desktop",
+    "swiftui",
+    "winui",
+    "scaffold"
+  ],
+  "homepage": "https://natui.dev",
+  "bugs": {
+    "url": "https://github.com/floklein/natui/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/floklein/natui.git",
+    "directory": "packages/create-natui-app"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "create-natui-app": "./bin/create-natui-app.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "template"
+  ],
+  "scripts": {
+    "typecheck": "node --check src/index.mjs && node --check src/icons.mjs",
+    "test": "node --test",
+    "prepack": "node --test 1>&2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

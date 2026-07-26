@@ -63,6 +63,11 @@ JavaScript, and a generated manifest with its SHA-256 digest. The loader
 validates bundle schema, protocol, minimum host API, architecture, and entry
 integrity before JavaScriptCore evaluates the application.
 
+When `icons.macos` is configured, packaging requires an `.icns` container with
+complete PNG or JPEG 2000 image payloads, copies it to
+`Contents/Resources/AppIcon.icns`, and records `CFBundleIconFile` in
+`Info.plist`.
+
 macOS packaging targets the architecture of the machine performing the build.
 Build each architecture natively and copy the complete `.app` directory when
 moving the application.

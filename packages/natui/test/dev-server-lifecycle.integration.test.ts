@@ -691,7 +691,12 @@ const app = await run(createElement('Text', null, 'ready'), {
     }
     delete globals[appKey];
     delete globals[resultKey];
-    await rm(fixture, { recursive: true, force: true });
+    await rm(fixture, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
   }
 }
 

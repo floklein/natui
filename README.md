@@ -9,10 +9,31 @@ browser layout engine. The platform owns layout, controls, dark mode, focus,
 and accessibility.
 
 > [!IMPORTANT]
-> NatUI 0.1.0 is an alpha release. The npm package contains the JavaScript
+> NatUI 0.2.0 is an alpha release. The npm package contains the JavaScript
 > renderer and development tooling, while the native hosts are still built
 > from a source checkout. Release signing and stable compatibility policy are
 > still evolving.
+
+## Create an app
+
+Scaffold a TypeScript project with a configured entry and native icon assets:
+
+```bash
+npx create-natui-app@latest
+```
+
+The CLI asks for a project directory, detects npm, pnpm, Yarn, or Bun, installs
+dependencies, and creates `natui.app.json`, `src/main.tsx`,
+`assets/AppIcon.icns`, and `assets/AppIcon.ico`. Pass a project directory
+directly for a non-interactive name:
+
+```bash
+npx create-natui-app@latest my-app
+```
+
+NatUI 0.2 still requires a separately built native host. Follow the platform
+setup below and set `NATUI_HOST` when the application is outside this source
+checkout.
 
 ```tsx
 import { useState } from 'react';
@@ -48,7 +69,7 @@ conditional rendering, and reconciliation.
   <img src="screenshots/03-final.png" width="480" alt="The NatUI demo running as native SwiftUI in dark mode">
 </p>
 
-## Quick start from source
+## Build the framework and native host from source
 
 Shared prerequisites:
 
@@ -112,15 +133,51 @@ Applications can use the same server from a package script:
 ```json
 {
   "scripts": {
-    "dev": "natui dev src/main.tsx",
+    "dev": "natui dev",
     "start": "tsx src/main.tsx"
   }
 }
 ```
 
-The executable entry should call `run()` once. Window startup options are read
-on the first successful generation, so restart the server after changing them.
-The native development server does not open an HTTP port.
+`natui dev` chooses the executable entry from a positional argument, then
+`entry` in `natui.app.json`, then `src/main.tsx`. The entry should call
+`run()` once. Window startup options are read on the first successful
+generation, so restart the server after changing them. The native development
+server does not open an HTTP port.
+
+## Application configuration
+
+`create-natui-app` writes one static configuration for development and native
+packaging:
+
+```json
+{
+  "$schema": "https://natui.dev/schemas/natui-app.schema.json",
+  "schemaVersion": 1,
+  "id": "com.example.myapp",
+  "name": "My App",
+  "version": "0.1.0",
+  "buildNumber": "1",
+  "entry": "src/main.tsx",
+  "executable": "MyApp",
+  "output": "dist/package",
+  "icons": {
+    "macos": "assets/AppIcon.icns",
+    "windows": "assets/AppIcon.ico"
+  }
+}
+```
+
+All paths are relative to `natui.app.json` and must stay inside the
+application directory. macOS uses an `.icns` container with complete PNG or
+JPEG 2000 representations. Windows
+uses a multi-image `.ico` container. The repository packager validates the
+image payloads and warns when recommended platform sizes are missing.
+
+The configured `src/main.tsx` calls the normal `run()` API. During packaging,
+the repository packager maps that import to the embedded runtime, so one entry
+works in both modes. The packager remains repository-local in NatUI 0.2
+because the public package does not include native host sources.
 
 ## Documentation
 
@@ -227,7 +284,7 @@ pnpm verify:package
 
 macOS produces `examples/demo/dist/package/NatUIDemo.app`. Windows produces
 one portable, architecture-specific, self-contained EXE such as
-`NatUIDemo-0.1.0-windows-x64.exe`. The Windows EXE extracts its runtime
+`NatUIDemo-0.2.0-windows-x64.exe`. The Windows EXE extracts its runtime
 dependencies to a per-user temporary cache at launch.
 
 Both artifacts include the minified React entry and a generated manifest with
@@ -260,7 +317,7 @@ shell and most component kinds.
 | `pnpm verify:kitchen` | Verify app-shell and multi-component workflows |
 | `pnpm verify:embedded` | Verify the platform's in-process JavaScript runtime |
 | `pnpm package:demo` | Build the demo as a native `.app` or self-contained EXE |
-| `pnpm verify:package` | Verify the packaged manifest, tree, and close lifecycle |
+| `pnpm verify:package` | Verify the packaged manifest, tree, close lifecycle, and macOS LaunchServices launch |
 | `pnpm test` | Run renderer, bridge, protocol, and component contract tests |
 | `pnpm typecheck` | Typecheck all workspace projects |
 | `pnpm build` | Build the public `@natui/core` package |
@@ -297,7 +354,9 @@ The workspace exposes:
 - `@natui/core/components` for component-only bundles without Node.js built-ins
 - `@natui/core/inproc` for the embedded host entry point
 - `@natui/core/dev` for programmatic development-server startup
+- `@natui/core/config` for loading and validating `natui.app.json`
 - the `natui dev [entry]` command for state-preserving native development
+- `create-natui-app` for scaffolding a configured TypeScript application
 
 ## License
 

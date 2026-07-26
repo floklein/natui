@@ -7,6 +7,8 @@ const docsRoot = path.resolve(scriptsRoot, '..');
 const repoRoot = path.resolve(docsRoot, '..');
 const contentRoot = path.join(docsRoot, 'content', 'docs');
 const publicRoot = path.join(docsRoot, 'public');
+const sourceAppSchema = path.join(repoRoot, 'schemas', 'natui-app.schema.json');
+const publicAppSchema = path.join(publicRoot, 'schemas', 'natui-app.schema.json');
 
 const errors = [];
 const pages = [];
@@ -159,6 +161,20 @@ async function exists(filePath) {
 const allFiles = await walk(contentRoot);
 const contentFiles = allFiles.filter((filePath) => /\.mdx?$/i.test(filePath));
 const metaFiles = allFiles.filter((filePath) => path.basename(filePath) === 'meta.json');
+
+try {
+  const [sourceSchema, publishedSchema] = await Promise.all([
+    readFile(sourceAppSchema, 'utf8'),
+    readFile(publicAppSchema, 'utf8'),
+  ]);
+  if (sourceSchema !== publishedSchema) {
+    errors.push(
+      'docs/public/schemas/natui-app.schema.json must exactly match schemas/natui-app.schema.json',
+    );
+  }
+} catch (error) {
+  errors.push(`cannot compare the published application schema: ${error.message}`);
+}
 
 for (const metaFile of metaFiles) {
   try {

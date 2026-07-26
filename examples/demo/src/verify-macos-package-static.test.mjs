@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { createMacIcon } from '../../../packages/create-natui-app/src/icons.mjs';
 import { verifyMacPackage } from './verify-macos-package-static.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
@@ -39,10 +40,11 @@ async function makeFixture() {
 <dict>
   <key>CFBundleDisplayName</key><string>NatUI Demo</string>
   <key>CFBundleExecutable</key><string>NatUIDemo</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIdentifier</key><string>dev.natui.demo</string>
   <key>CFBundleName</key><string>NatUI Demo</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
@@ -56,7 +58,7 @@ async function makeFixture() {
     schemaVersion: 1,
     id: 'dev.natui.demo',
     name: 'NatUI Demo',
-    version: '0.1.0',
+    version: '0.2.0',
     buildNumber: '1',
     entry: 'main.js',
     entrySha256: createHash('sha256').update(entry).digest('hex'),
@@ -67,7 +69,21 @@ async function makeFixture() {
   };
   await writeFile(path.join(natui, 'manifest.json'), `${JSON.stringify(manifest)}\n`);
   await copyFile(path.join(repoRoot, 'LICENSE'), path.join(resources, 'LICENSE.txt'));
-  return { root, app, architecture, manifestPath: path.join(natui, 'manifest.json') };
+  const configuredIconPath = path.join(root, 'configured-AppIcon.icns');
+  const packagedIconPath = path.join(resources, 'AppIcon.icns');
+  const icon = createMacIcon();
+  await Promise.all([
+    writeFile(configuredIconPath, icon),
+    writeFile(packagedIconPath, icon),
+  ]);
+  return {
+    root,
+    app,
+    architecture,
+    configuredIconPath,
+    manifestPath: path.join(natui, 'manifest.json'),
+    packagedIconPath,
+  };
 }
 
 test('macOS package verifier accepts the complete application layout', async () => {
@@ -75,10 +91,12 @@ test('macOS package verifier accepts the complete application layout', async () 
   try {
     const result = await verifyMacPackage(fixture.app, {
       expectedArchitecture: fixture.architecture,
+      expectedIconPath: fixture.configuredIconPath,
       enforceExecutableMode: false,
       lintPlist: false,
     });
     assert.equal(result.architecture, fixture.architecture);
+    assert.deepEqual(result.iconSizes, [16, 32, 64, 128, 256, 512, 1024]);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }
@@ -93,10 +111,31 @@ test('macOS package verifier rejects an entry integrity mismatch', async () => {
     await assert.rejects(
       verifyMacPackage(fixture.app, {
         expectedArchitecture: fixture.architecture,
+        expectedIconPath: fixture.configuredIconPath,
         enforceExecutableMode: false,
         lintPlist: false,
       }),
       /main\.js SHA-256 does not match/,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('macOS package verifier rejects a corrupt packaged icon', async () => {
+  const fixture = await makeFixture();
+  try {
+    const icon = await readFile(fixture.packagedIconPath);
+    icon[icon.length - 8] ^= 0xff;
+    await writeFile(fixture.packagedIconPath, icon);
+    await assert.rejects(
+      verifyMacPackage(fixture.app, {
+        expectedArchitecture: fixture.architecture,
+        expectedIconPath: fixture.configuredIconPath,
+        enforceExecutableMode: false,
+        lintPlist: false,
+      }),
+      /PNG (?:checksum|chunk type)/,
     );
   } finally {
     await rm(fixture.root, { recursive: true, force: true });

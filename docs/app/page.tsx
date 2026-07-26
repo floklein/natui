@@ -1,6 +1,7 @@
 import { highlight } from 'fumadocs-core/highlight';
 import Image from 'next/image';
 import Link from 'next/link';
+import { CopyCommand } from '@/components/copy-command';
 
 const heroCode = `<VStack spacing={14} padding={20} alignment="leading">
   <HStack spacing={8} alignment="center">
@@ -90,6 +91,7 @@ export default async function HomePage() {
               Build desktop interfaces with React and TypeScript, then render the platform&apos;s
               real controls. No webview, no Electron, no second layout engine.
             </p>
+            <CopyCommand command="npx create-natui-app@latest" />
             <div className="hero-actions">
               <Link className="primary-action" href="/docs/start">
                 Start building
@@ -104,7 +106,11 @@ export default async function HomePage() {
             </div>
           </div>
 
-          <div className="hero-showcase" aria-label="NatUI code and native outputs">
+          <div
+            className="hero-showcase"
+            aria-label="NatUI code and native outputs"
+            role="group"
+          >
             <div className="code-card">
               <div className="code-card-top">
                 <span>App.tsx</span>
@@ -250,7 +256,7 @@ export default async function HomePage() {
 
         <section className="closing-section">
           <div>
-            <p className="eyebrow">Source checkout ready</p>
+            <p className="eyebrow">Project generator ready</p>
             <h2>Build your first native React window.</h2>
           </div>
           <Link className="primary-action" href="/docs/start">

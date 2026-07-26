@@ -3,9 +3,13 @@
   "schemaVersion": 1,
   "id": "dev.natui.demo",
   "name": "NatUI Demo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "buildNumber": "1",
-  "entry": "src/main-embedded.tsx",
+  "entry": "src/main.tsx",
   "executable": "NatUIDemo",
-  "output": "dist/package"
+  "output": "dist/package",
+  "icons": {
+    "macos": ".natui/icons/AppIcon.icns",
+    "windows": ".natui/icons/AppIcon.ico"
+  }
 }

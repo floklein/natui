@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { useEffect } from 'react';
 import { Text } from '../src/components.js';
-import { runEmbedded } from '../src/inproc.js';
+import {
+  assertEmbeddedRuntimeStarted,
+  deferEmbeddedRuntimeFailure,
+  prepareEmbeddedRuntime,
+  runEmbedded,
+} from '../src/inproc.js';
 import type { OutboundMessage } from '../src/protocol.js';
 
 interface EmbeddingGlobals {
@@ -79,6 +84,139 @@ test('embedded controller updates, unmounts once, and quits idempotently', async
     assert.equal(sent.filter((message) => message.t === 'quit').length, 1);
     assert.equal(globals.__natui_recv, undefined, 'receive hook was detached');
     assert.throws(() => app.update(<Text>late</Text>), /stopping or stopped/);
+  } finally {
+    resetEmbeddingGlobals();
+  }
+});
+
+test('a prepared embedded runtime buffers ready while the entry initializes', async () => {
+  const sent: OutboundMessage[] = [];
+  try {
+    globals.__natui_send = (line) => {
+      sent.push(JSON.parse(line) as OutboundMessage);
+    };
+    prepareEmbeddedRuntime();
+    const receive = globals.__natui_recv;
+    assert.ok(receive, 'packaging bootstrap installs the receive hook synchronously');
+
+    receive(JSON.stringify({
+      t: 'ready',
+      platform: 'windows',
+      protocol: 1,
+      hostApi: 1,
+    }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    const app = await runEmbedded(<Text>Delayed entry</Text>, { readyTimeoutMs: 1_000 });
+    assert.equal(app.platform, 'windows');
+    assert.ok(sent.some((message) => message.t === 'window'));
+    app.quit();
+    assert.equal(globals.__natui_recv, undefined);
+  } finally {
+    resetEmbeddingGlobals();
+  }
+});
+
+test('a prepared embedded runtime preserves a native close while the entry initializes', async () => {
+  const sent: OutboundMessage[] = [];
+  let closeCalls = 0;
+  try {
+    globals.__natui_send = (line) => {
+      sent.push(JSON.parse(line) as OutboundMessage);
+    };
+    prepareEmbeddedRuntime();
+    const receive = globals.__natui_recv;
+    assert.ok(receive, 'packaging bootstrap installs the receive hook synchronously');
+
+    receive(JSON.stringify({
+      t: 'ready',
+      platform: 'windows',
+      protocol: 1,
+      hostApi: 1,
+    }));
+    receive(JSON.stringify({ t: 'window', name: 'close' }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    await assert.rejects(
+      runEmbedded(<Text>Delayed entry</Text>, {
+        onClose: () => {
+          closeCalls += 1;
+        },
+        readyTimeoutMs: 1_000,
+      }),
+      /closed during application startup/,
+    );
+    assert.equal(closeCalls, 1);
+    assert.equal(sent.filter((message) => message.t === 'quit').length, 1);
+    assert.equal(globals.__natui_recv, undefined);
+  } finally {
+    resetEmbeddingGlobals();
+  }
+});
+
+test('a prepared embedded runtime leaves startup failures for the host fatal path', async () => {
+  const sent: OutboundMessage[] = [];
+  const originalConsoleError = console.error;
+
+  function BrokenApp(): never {
+    throw new Error('packaged initial render exploded');
+  }
+
+  try {
+    console.error = () => {};
+    globals.__natui_send = (line) => {
+      sent.push(JSON.parse(line) as OutboundMessage);
+    };
+    prepareEmbeddedRuntime();
+    const receive = globals.__natui_recv;
+    assert.ok(receive);
+
+    const pending = runEmbedded(<BrokenApp />, { readyTimeoutMs: 1_000 });
+    receive(JSON.stringify({
+      t: 'ready',
+      platform: 'windows',
+      protocol: 1,
+      hostApi: 1,
+    }));
+
+    await assert.rejects(pending, /packaged initial render exploded/);
+    assert.equal(
+      sent.filter((message) => message.t === 'quit').length,
+      0,
+      'normal quit must not cancel the packaging bootstrap fatal timer',
+    );
+    assert.equal(globals.__natui_recv, undefined);
+  } finally {
+    console.error = originalConsoleError;
+    resetEmbeddingGlobals();
+  }
+});
+
+test('an asynchronous entry failure is rethrown from a host timer callback', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  let scheduled: (() => void) | undefined;
+  try {
+    globalThis.setTimeout = ((callback: () => void) => {
+      scheduled = callback;
+      return 1;
+    }) as unknown as typeof setTimeout;
+    deferEmbeddedRuntimeFailure(new Error('entry exploded'));
+    assert.ok(scheduled);
+    assert.throws(scheduled, /entry exploded/);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('a prepared entry must call run before it finishes', () => {
+  try {
+    globals.__natui_send = () => {};
+    prepareEmbeddedRuntime();
+    assert.throws(
+      () => assertEmbeddedRuntimeStarted(),
+      /application entry completed without calling run/,
+    );
+    assert.equal(globals.__natui_recv, undefined);
   } finally {
     resetEmbeddingGlobals();
   }
