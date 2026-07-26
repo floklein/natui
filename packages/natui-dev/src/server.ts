@@ -842,32 +842,19 @@ export async function createDevServer(
   };
   process.once('exit', removeCacheOnExit);
 
-  /**
-   * Artifacts written per committed generation, newest last. Every generation
-   * writes revisioned copies of the edited module and its whole importer chain,
-   * so without pruning `.natui/dev-*` grows for the life of the session. A few
-   * generations are kept because a failed refresh can still roll back onto the
-   * previously committed code.
-   */
-  const artifactGenerations: Array<{ files: readonly string[] }> = [];
-  const ARTIFACT_GENERATIONS_KEPT = 3;
-
-  const pruneArtifacts = async (): Promise<void> => {
-    while (artifactGenerations.length > ARTIFACT_GENERATIONS_KEPT) {
-      const stale = artifactGenerations.shift();
-      if (!stale) return;
-      const live = new Set(artifactGenerations.flatMap((entry) => entry.files));
-      for (const fileName of stale.files) {
-        if (live.has(fileName)) continue;
-        try {
-          await rm(join(cacheDir, fileName), { force: true });
-        } catch {
-          // Best effort: a stale artifact left behind costs disk, not
-          // correctness, and close() removes the whole directory anyway.
-        }
-      }
-    }
-  };
+  // KNOWN LIMITATION: `<root>/.natui/dev-*` grows for the life of the session.
+  // Every generation writes revisioned artifacts for the edited module and its
+  // importer chain, and only close() removes them.
+  //
+  // Pruning by generation age was tried and reverted, for two reasons:
+  //  - A dynamic import can first reach a module many generations after that
+  //    module was built, so an artifact is not dead just because newer ones
+  //    exist. Deleting one breaks the lazy import that was about to load it.
+  //  - The cache lives inside the watched root and holds the rebuild trigger
+  //    file, so deleting artifacts can invalidate the watcher and produce a
+  //    spurious extra refresh generation.
+  // A correct bound needs the runtime to report which artifacts are still
+  // reachable, which it does not track today.
 
   const evaluateGeneration = async ({
     artifactFiles,
@@ -963,8 +950,6 @@ export async function createDevServer(
       }
 
       mounted = true;
-      artifactGenerations.push({ files: artifactFiles });
-      void pruneArtifacts();
       const elapsed = Math.round(performance.now() - startedAt);
       if (outcome === 'mounted') {
         log(`[natui] mounted ${entry} in ${elapsed}ms`);
