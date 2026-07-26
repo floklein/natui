@@ -16,7 +16,7 @@
     "verify:embedded": "pnpm --filter @natui/core build && pnpm --filter natui-demo build:embedded && node examples/demo/src/verify-embedded.mjs",
     "verify:windows-runtime-failure": "pnpm --filter @natui/core build && node examples/demo/src/verify-windows-runtime-failure.mjs",
     "package:demo": "pnpm --filter @natui/core build && node tools/package-demo.mjs",
-    "verify:package": "pnpm package:demo && node examples/demo/src/verify-package.mjs",
+    "verify:package": "pnpm package:demo && node examples/demo/src/verify-package.mjs && node examples/demo/src/verify-macos-launchservices.mjs",
     "release:check": "node tools/verify-release.mjs",
     "docs:dev": "pnpm --filter natui-docs dev",
     "docs:check": "pnpm --filter natui-docs check",

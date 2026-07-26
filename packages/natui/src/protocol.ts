@@ -109,4 +109,6 @@ export type InboundMessage =
   | { t: 'window'; name: 'close' }
   | { t: 'tree'; root: TreeNode }
   /** Reply to `screenshot`. `error` set (and no file written) on failure. */
-  | { t: 'shot'; path: string; error?: string };
+  | { t: 'shot'; path: string; error?: string }
+  /** Debug-channel acknowledgement that the native host received `quit`. */
+  | { t: 'quitAck' };

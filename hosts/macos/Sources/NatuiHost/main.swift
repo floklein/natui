@@ -238,6 +238,9 @@ enum Router {
             // window close button and native Quit.
             LifecycleCoordinator.shared.windowClosed()
         case "quit":
+            // A mirrored acknowledgement lets external LaunchServices probes
+            // distinguish React cleanup from a later crash or forced exit.
+            Emitter.send(["t": "quitAck"])
             LifecycleCoordinator.shared.completeQuit()
         default:
             Emitter.log("unknown message type: \(msg.t)")

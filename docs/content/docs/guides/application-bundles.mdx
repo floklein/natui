@@ -195,7 +195,9 @@ pnpm verify:package
 This command rebuilds the demo package for the current platform, launches the
 artifact from an unrelated working directory, validates the ready handshake,
 waits for the demo tree, requests a native close, and requires a clean exit.
-It needs a normal desktop window session.
+On macOS it then launches the `.app` through LaunchServices, requires a rendered
+window screenshot, and verifies the same native close path. It needs a normal
+desktop window session.
 
 ## Current boundaries
 

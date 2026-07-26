@@ -120,6 +120,24 @@ const thisPlatform = process.platform === 'win32' ? 'windows' : 'macos';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+async function assertLoggedMessageTypes(
+  messageLogPath: string,
+  expected: string[],
+): Promise<void> {
+  let actual: string[] = [];
+  for (let i = 0; i < 40; i += 1) {
+    if (existsSync(messageLogPath)) {
+      actual = readFileSync(messageLogPath, 'utf8')
+        .split('\n')
+        .slice(0, -1)
+        .map((line) => (JSON.parse(line) as { t: string }).t);
+      if (actual.length >= expected.length) break;
+    }
+    await sleep(50);
+  }
+  assert.deepEqual(actual, expected);
+}
+
 test('handshake success: matching protocol and platform mounts and quits cleanly', async () => {
   const marker = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'quit-received');
   const app = await run(element, {
@@ -163,13 +181,7 @@ test('a buffered native close rejects startup before sending the window or rende
 
   await assert.rejects(starting, /host closed during application startup/);
 
-  for (let i = 0; i < 40 && !existsSync(messageLog); i++) await sleep(50);
-  assert.ok(existsSync(messageLog), 'the closed host received a shutdown message');
-  const sent = readFileSync(messageLog, 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line) as { t: string });
-  assert.deepEqual(sent.map((message) => message.t), ['quit']);
+  await assertLoggedMessageTypes(messageLog, ['quit']);
   assert.equal(closeCalls, 1);
   assert.equal(renders, 0);
 });
@@ -219,13 +231,7 @@ test('a native close rejects an initial render that remains suspended', async ()
   }
 
   assert.ok(existsSync(renderMarker), 'the initial render suspended before the host closed');
-  for (let i = 0; i < 40 && !existsSync(messageLog); i++) await sleep(50);
-  assert.ok(existsSync(messageLog), 'the closed host received startup messages');
-  const sent = readFileSync(messageLog, 'utf8')
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line) as { t: string });
-  assert.deepEqual(sent.map((message) => message.t), ['window', 'quit']);
+  await assertLoggedMessageTypes(messageLog, ['window', 'quit']);
   assert.equal(closeCalls, 1);
 });
 

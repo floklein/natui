@@ -317,7 +317,7 @@ shell and most component kinds.
 | `pnpm verify:kitchen` | Verify app-shell and multi-component workflows |
 | `pnpm verify:embedded` | Verify the platform's in-process JavaScript runtime |
 | `pnpm package:demo` | Build the demo as a native `.app` or self-contained EXE |
-| `pnpm verify:package` | Verify the packaged manifest, tree, and close lifecycle |
+| `pnpm verify:package` | Verify the packaged manifest, tree, close lifecycle, and macOS LaunchServices launch |
 | `pnpm test` | Run renderer, bridge, protocol, and component contract tests |
 | `pnpm typecheck` | Typecheck all workspace projects |
 | `pnpm build` | Build the public `@natui/core` package |
