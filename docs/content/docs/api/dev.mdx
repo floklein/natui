@@ -5,11 +5,11 @@ description: Start and control the NatUI development server programmatically.
 
 The `@natui/dev` package exposes the same state-preserving development
 server used by the `natui dev` command. It is a separate package because it
-owns the rollup / Babel / esbuild toolchain, which a shipped application has no
-reason to install; `natui dev` loads it on demand and tells you to install it if
-it is missing. The command chooses its entry in this
-order: a positional argument, `entry` from `natui.app.json`, then
-`src/main.tsx`. Programmatic callers pass the resolved entry directly.
+owns the rollup, Babel, and esbuild toolchain, which a shipped application has
+no reason to install. `natui dev` loads it on demand and asks you to install it
+when missing. The command chooses its entry in this order: a positional
+argument, `entry` from `natui.app.json`, then `src/main.tsx`. Programmatic
+callers pass the resolved entry directly.
 
 ## createDevServer
 

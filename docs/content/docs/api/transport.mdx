@@ -35,7 +35,7 @@ interface HostCommand {
 function spawnStdioTransport(host: HostCommand): Transport
 ```
 
-Spawns a host process and exchanges newline-delimited JSON over its standard input and output. Host standard error is inherited for diagnostics.
+Spawns a host process and exchanges newline-delimited JSON over its standard input and output. The host process inherits standard error for diagnostics.
 
 ## defaultHostCommand
 

@@ -100,8 +100,8 @@ pnpm verify:package
 
 The configuration lives at `examples/demo/natui.app.json`. Its `entry` is the
 same `src/main.tsx` used by the development server. Packaging maps the normal
-`@natui/core` `run()` import to the embedded runtime, so a second embedded
-entry is not needed.
+`@natui/core` `run()` import to the embedded runtime, so one entry file serves
+both development and packaging.
 
 macOS produces `examples/demo/dist/package/NatUIDemo.app`. Windows produces
 one portable, architecture-specific, self-contained EXE in the same output

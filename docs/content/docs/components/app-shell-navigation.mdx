@@ -42,7 +42,7 @@ Defines native window toolbar items from `ToolbarItemSpec[]`. It must be a direc
 />
 ```
 
-Toolbar search text is host-local and reported through `onSearch`. Both hosts
+The host owns toolbar search text and reports it through `onSearch`. Both hosts
 preserve a surviving search item's text and focus across prop updates.
 
 ## SplitView, Sidebar, and Detail
@@ -84,11 +84,11 @@ visibility controls report changes through `onChange`. `sidebarWidth`,
 </TabView>
 ```
 
-`TabView` is controlled by a child `Tab` id. A tab click updates native
+`TabView` takes its controlled value from a child `Tab` id. A tab click updates native
 selection optimistically, then reports the id through `onChange`. Tab titles,
 system images, and badges render on both hosts.
 
 ## Verification note
 
-These seven app-shell kinds are exercised by the kitchen-sink real-window
-suite on macOS and Windows.
+The kitchen-sink real-window suite exercises these seven app-shell kinds on
+macOS and Windows.
