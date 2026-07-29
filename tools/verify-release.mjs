@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,6 +74,20 @@ assert.equal(
   packageManifest.repository?.url,
   'git+https://github.com/floklein/natui.git',
   'repository URL must match the GitHub repository used for npm provenance',
+);
+
+const devPackageManifest = manifests.get('packages/natui-dev/package.json');
+assert.equal(devPackageManifest.license, 'MIT');
+assert.equal(devPackageManifest.publishConfig?.access, 'public');
+assert.equal(
+  devPackageManifest.repository?.url,
+  'git+https://github.com/floklein/natui.git',
+  '@natui/dev repository URL must match the GitHub repository used for npm provenance',
+);
+assert.equal(
+  devPackageManifest.repository?.directory,
+  'packages/natui-dev',
+  '@natui/dev repository directory must identify its workspace package',
 );
 
 const createPackageManifest = manifests.get('packages/create-natui-app/package.json');
@@ -232,6 +247,46 @@ for (const path of ['dist/index.js', 'dist/index.d.ts', 'dist/server.js', 'packa
   assert(devFiles.has(path), `@natui/dev tarball is missing ${path}`);
 }
 
+// @natui/dev declares its @natui/core peer with the workspace protocol. Only
+// a pnpm pack rewrites that to a real range; a plain npm publish would ship
+// "workspace:^" and break every install of the published package. Pack with
+// pnpm and prove the rewrite, since npm pack --dry-run cannot show it.
+const pnpmExecPath = process.env.npm_execpath;
+const pnpm =
+  pnpmExecPath && /\.[cm]?js$/.test(pnpmExecPath)
+    ? { command: process.execPath, arguments: [pnpmExecPath] }
+    : { command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', arguments: [] };
+const packDestination = await mkdtemp(resolve(tmpdir(), 'natui-release-check-'));
+try {
+  const devPack = spawnSync(
+    pnpm.command,
+    [...pnpm.arguments, 'pack', '--pack-destination', packDestination],
+    { cwd: resolve(root, 'packages/natui-dev'), encoding: 'utf8' },
+  );
+  if (devPack.error) throw devPack.error;
+  assert.equal(devPack.status, 0, devPack.stderr || 'pnpm pack failed in packages/natui-dev');
+  const devManifestText = spawnSync(
+    'tar',
+    ['-xOf', resolve(packDestination, `natui-dev-${version}.tgz`), 'package/package.json'],
+    { encoding: 'utf8' },
+  );
+  if (devManifestText.error) throw devManifestText.error;
+  assert.equal(devManifestText.status, 0, devManifestText.stderr || 'tar failed to read the @natui/dev manifest');
+  const packedDevManifest = JSON.parse(devManifestText.stdout);
+  assert.equal(
+    packedDevManifest.peerDependencies?.['@natui/core'],
+    `^${version}`,
+    `packed @natui/dev must declare its @natui/core peer as ^${version}`,
+  );
+  assert.doesNotMatch(
+    devManifestText.stdout,
+    /workspace:/,
+    'packed @natui/dev manifest must not contain the workspace protocol',
+  );
+} finally {
+  await rm(packDestination, { recursive: true, force: true });
+}
+
 const createTarball = packDryRun('packages/create-natui-app');
 assert.equal(createTarball.name, 'create-natui-app');
 assert.equal(createTarball.version, version);
@@ -352,6 +407,7 @@ assert.equal(
 assert.equal(createVersionSmoke.stdout.trim(), version);
 
 console.log(
-  `Verified @natui/core@${version} (${coreTarball.entryCount} files, ${coreTarball.size} packed bytes) and ` +
+  `Verified @natui/core@${version} (${coreTarball.entryCount} files, ${coreTarball.size} packed bytes), ` +
+    `@natui/dev@${version} (${devTarball.entryCount} files, ${devTarball.size} packed bytes), and ` +
     `create-natui-app@${version} (${createTarball.entryCount} files, ${createTarball.size} packed bytes).`,
 );

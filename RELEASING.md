@@ -6,8 +6,8 @@ checkout of `main`.
 ## 1. Align release metadata
 
 - Set the same NatUI release version in the root, `packages/natui`,
-  `packages/create-natui-app`, both examples, the docs, and both
-  `natui.app.json` example configs.
+  `packages/natui-dev`, `packages/create-natui-app`, both examples, the docs,
+  and both `natui.app.json` example configs.
 - Keep the new application version at `0.1.0` in both `create-natui-app`
   templates. Set the template's `@natui/core` dependency to the matching
   compatible NatUI release version.
@@ -22,9 +22,10 @@ checkout of `main`.
 - Run `pnpm release:check`. For a tag candidate, also run
   `pnpm release:check v0.2.0`.
 
-The release check rebuilds both npm packages through their `prepack` hooks,
+The release check rebuilds the npm packages through their `prepack` hooks,
 confirms version alignment, validates provenance metadata, checks both
-executable modes, inspects both npm tarballs, and smokes the `natui` and
+executable modes, inspects all three npm tarballs, confirms that packing
+rewrites the `@natui/dev` workspace peer range, and smokes the `natui` and
 `create-natui-app` CLIs.
 
 ## 2. Run portable verification
@@ -74,17 +75,18 @@ These checks require a normal desktop window session.
 
 ## 4. Inspect publication inputs
 
-Inspect npm's final output from both publishable package directories:
+Inspect npm's final output from the publishable package directories:
 
 ```bash
 (cd packages/natui && npm pack --dry-run)
+(cd packages/natui-dev && pnpm pack)
 (cd packages/create-natui-app && npm pack --dry-run)
 ```
 
 Confirm that `packages/create-natui-app/bin/create-natui-app.js` is mode
 `100755` in `git ls-files --stage`. Confirm that the registry does not already
-contain either target package version and that the Git tag and GitHub release
-do not already exist.
+contain any target package version and that the Git tag and GitHub release do
+not already exist.
 
 ## 5. Publish
 
@@ -100,14 +102,15 @@ Only after both platform checks and the exact release commit are approved:
       the host archives. This happens before npm so an installed package can
       always download its host.
    3. Re-runs the release check against the tag, then publishes
-      `packages/natui` and `packages/create-natui-app` through npm trusted
-      publishing.
+      `packages/natui`, `packages/natui-dev`, and `packages/create-natui-app`
+      through npm trusted publishing.
 
    Confirm the run succeeds.
 3. Attach the demo application artifacts produced from that commit to the
    release when desired; the host archives are already there.
-4. Verify both npm versions, `npx create-natui-app@<version> --version`, the
-   remote tag, and the GitHub release. In a scratch directory outside any
+4. Verify all three npm versions, `npx create-natui-app@<version> --version`,
+   a generated project install that resolves `@natui/dev` from the registry,
+   the remote tag, and the GitHub release. In a scratch directory outside any
    checkout, verify the download path end to end:
 
    ```bash
@@ -116,8 +119,8 @@ Only after both platform checks and the exact release commit are approved:
 
 The `Publish` workflow authenticates with an OpenID Connect token, so no npm
 account token exists in the repository, and npm generates provenance
-attestations automatically. Both packages must name `publish.yml` in this
-repository as their trusted publisher: on npmjs.com, open each package's
+attestations automatically. All three packages must name `publish.yml` in
+this repository as their trusted publisher: on npmjs.com, open each package's
 Settings, then Trusted Publisher, and select GitHub Actions with this
 repository and that workflow filename. A version already on the registry
 cannot be republished; a failed run after a partial publish needs a new
