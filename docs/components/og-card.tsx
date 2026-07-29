@@ -5,48 +5,18 @@ interface OgCardProps {
   description: string;
 }
 
-function NativeWindowMark() {
+function NatuiGlyph() {
   return (
-    <div
-      style={{
-        display: 'flex',
-        width: 58,
-        height: 58,
-        flexDirection: 'column',
-        overflow: 'hidden',
-        border: '2px solid #e94f37',
-        borderRadius: 12,
-        backgroundColor: '#171717',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          height: 17,
-          alignItems: 'center',
-          gap: 4,
-          paddingLeft: 7,
-          borderBottom: '2px solid rgba(233, 79, 55, 0.45)',
-        }}
-      >
-        <span style={{ width: 5, height: 5, borderRadius: 99, backgroundColor: '#ff5f57' }} />
-        <span style={{ width: 5, height: 5, borderRadius: 99, backgroundColor: '#febc2e' }} />
-        <span style={{ width: 5, height: 5, borderRadius: 99, backgroundColor: '#28c840' }} />
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          flex: 1,
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#e94f37',
-          fontSize: 21,
-          fontWeight: 800,
-        }}
-      >
-        N
-      </div>
-    </div>
+    <svg width={52} height={52} viewBox="0 0 501 490" fill="none">
+      <path
+        d="M45 345.5V145.5C45 89.9954 89.9954 45 145.5 45C201.005 45 246 89.9954 246 145.5V245.5V345.5C246 400.452 290.548 445 345.5 445C400.452 445 445 400.452 445 345.5V245.5"
+        stroke="#e94f37"
+        strokeWidth="90"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="445.5" cy="99.5" r="55" fill="#e94f37" />
+    </svg>
   );
 }
 
@@ -58,7 +28,7 @@ export function OgCard({ title, description }: OgCardProps) {
       site="NatUI"
       primaryColor="rgba(233, 79, 55, 0.38)"
       primaryTextColor="#e94f37"
-      icon={<NativeWindowMark />}
+      icon={<NatuiGlyph />}
     />
   );
 }
