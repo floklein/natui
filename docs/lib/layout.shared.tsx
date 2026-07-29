@@ -1,4 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import { NatuiMark } from '@/components/natui-mark';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -6,7 +7,7 @@ export function baseOptions(): BaseLayoutProps {
       title: (
         <span className="docs-wordmark">
           <span aria-hidden="true" className="docs-wordmark-mark">
-            N
+            <NatuiMark size={13} />
           </span>
           NatUI
         </span>
