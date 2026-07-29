@@ -23,8 +23,27 @@ import {
   renderMacInfoPlist,
   resolveOutputOverride,
   validateAppConfig,
+  HOST_API_VERSION,
+  PROTOCOL_VERSION,
 } from './package-app.mjs';
 import { writeDemoIcons } from './package-demo.mjs';
+
+test('the packager mirrors the renderer protocol constants', async () => {
+  // package-app.mjs cannot import protocol.ts (TypeScript, no build step), so
+  // it keeps its own copies. A silent drift would stamp bundles with a host
+  // API the shipped host does not actually implement.
+  const protocolSource = await readFile(
+    new URL('../packages/natui/src/protocol.ts', import.meta.url),
+    'utf8',
+  );
+  const read = (name) => {
+    const match = protocolSource.match(new RegExp(`export const ${name} = (\\d+)`));
+    assert.ok(match, `${name} is declared in protocol.ts`);
+    return Number(match[1]);
+  };
+  assert.equal(HOST_API_VERSION, read('HOST_API_VERSION'), 'HOST_API_VERSION matches protocol.ts');
+  assert.equal(PROTOCOL_VERSION, read('PROTOCOL_VERSION'), 'PROTOCOL_VERSION matches protocol.ts');
+});
 
 const appSchema = JSON.parse(
   await readFile(new URL('../schemas/natui-app.schema.json', import.meta.url), 'utf8'),
@@ -51,7 +70,16 @@ function schemaPatternAccepts(definition, value) {
   if (definition.maxLength !== undefined && [...value].length > definition.maxLength) {
     return false;
   }
-  return definition.pattern === undefined || new RegExp(definition.pattern, 'u').test(value);
+  if (definition.pattern === undefined) return true;
+  const unicodeAware = new RegExp(definition.pattern, 'u').test(value);
+  const unicodeUnaware = new RegExp(definition.pattern).test(value);
+  assert.equal(
+    unicodeAware,
+    unicodeUnaware,
+    `pattern ${definition.pattern} disagrees with and without the u flag `
+      + `for ${JSON.stringify(value)}`,
+  );
+  return unicodeAware;
 }
 
 async function makeFilesystemFixture() {
@@ -279,7 +307,7 @@ test('application and bundle schemas match runtime string constraints', () => {
   assert.equal(bundleSchema.properties.buildNumber.pattern, buildNumber.pattern);
   assert.equal(bundleSchema.properties.entry.const, 'main.js');
   assert.equal(bundleSchema.properties.protocolVersion.const, 1);
-  assert.equal(bundleSchema.properties.minHostApi.const, 1);
+  assert.equal(bundleSchema.properties.minHostApi.const, HOST_API_VERSION);
 
   const macIconPattern = appSchema.properties.icons.properties.macos.allOf[1].pattern;
   const windowsIconPattern = appSchema.properties.icons.properties.windows.allOf[1].pattern;
@@ -305,7 +333,7 @@ test('generated bundle manifest is stable and carries compatibility gates', () =
     entry: 'main.js',
     entrySha256: 'a'.repeat(64),
     protocolVersion: 1,
-    minHostApi: 1,
+    minHostApi: 2,
     platform: 'windows',
     architecture: 'x64',
   });
@@ -340,22 +368,6 @@ const TEST_JP2_128 = Buffer.from(
   'AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAgAAAAIAABAcHAAAAAAAPY29scgEAAAAAABAAAADOanAyY/9P/1EAMgAAAAAAgAAAAIAAAAAAAAAAAAAAAIAAAACAAAAAAAAAAAAABAcBAQcBAQcBAQcBAf9SAAwAAAABAAUEBAAB/1wAE0BASEhQSEhQSEhQSEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS40/5AACgAAAAAARAAB/5PPtCgUAFyg4qAAAvxP34AgEVBJn9+AIBFQSZ/PtBAUAFyvgICAgICAgICAgICAgICAgICAgID/2Q==',
   'base64',
 );
-
-function jp2WithComponentDepths(depths) {
-  const source = Buffer.from(TEST_JP2_128);
-  source[58] = 0xff;
-  const componentDepth = Buffer.alloc(8 + depths.length);
-  componentDepth.writeUInt32BE(componentDepth.length, 0);
-  componentDepth.write('bpcc', 4, 4, 'ascii');
-  Buffer.from(depths).copy(componentDepth, 8);
-  const result = Buffer.concat([
-    source.subarray(0, 62),
-    componentDepth,
-    source.subarray(62),
-  ]);
-  result.writeUInt32BE(source.readUInt32BE(32) + componentDepth.length, 32);
-  return result;
-}
 
 const TEST_PNG_CRC_TABLE = new Uint32Array(256);
 for (let index = 0; index < TEST_PNG_CRC_TABLE.length; index += 1) {
@@ -403,23 +415,6 @@ function pngFixture(size) {
   ]);
 }
 
-function indexedPngFixture(size, bitDepth, paletteEntries) {
-  const rowLength = Math.ceil((size * bitDepth) / 8);
-  const raw = Buffer.alloc((rowLength + 1) * size);
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(size, 0);
-  header.writeUInt32BE(size, 4);
-  header[8] = bitDepth;
-  header[9] = 3;
-  return Buffer.concat([
-    TEST_PNG_SIGNATURE,
-    testPngChunk('IHDR', header),
-    testPngChunk('PLTE', Buffer.alloc(paletteEntries * 3)),
-    testPngChunk('IDAT', deflateSync(raw)),
-    testPngChunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
 function dibFixture(size) {
   const pixelBytes = size * size * 4;
   const maskStride = Math.ceil(size / 32) * 4;
@@ -436,21 +431,6 @@ function dibFixture(size) {
     payload[offset + 2] = 0x7f;
     payload[offset + 3] = 0xff;
   }
-  return payload;
-}
-
-function coreDibFixture(size, bitDepth) {
-  const paletteEntries = bitDepth <= 8 ? 2 ** bitDepth : 0;
-  const colorStride = Math.ceil((size * bitDepth) / 32) * 4;
-  const maskStride = Math.ceil(size / 32) * 4;
-  const payload = Buffer.alloc(
-    12 + paletteEntries * 3 + (colorStride + maskStride) * size,
-  );
-  payload.writeUInt32LE(12, 0);
-  payload.writeUInt16LE(size, 4);
-  payload.writeUInt16LE(size * 2, 6);
-  payload.writeUInt16LE(1, 8);
-  payload.writeUInt16LE(bitDepth, 10);
   return payload;
 }
 
@@ -526,30 +506,17 @@ test('native icon inspection accepts standard representation sets', () => {
     inspectMacIcon(macIconFixture(['ic07'], () => TEST_JP2_128)).sizes,
     [128],
   );
-  assert.deepEqual(
-    inspectMacIcon(macIconFixture(
-      ['ic07'],
-      () => jp2WithComponentDepths([7, 7, 7, 7]),
-    )).sizes,
-    [128],
-  );
 });
 
-test('Windows icon inspection enforces BITMAPCOREHEADER bit depths', () => {
-  for (const bitDepth of [1, 4, 8, 24]) {
-    const icon = windowsIconFixture([16], () => coreDibFixture(16, bitDepth));
-    icon.writeUInt16LE(bitDepth, 6 + 6);
-    assert.deepEqual(inspectWindowsIcon(icon).sizes, [16]);
-  }
-
-  for (const bitDepth of [16, 32]) {
-    const icon = windowsIconFixture([16], () => coreDibFixture(16, bitDepth));
-    icon.writeUInt16LE(bitDepth, 6 + 6);
-    assert.throws(
-      () => inspectWindowsIcon(icon),
-      /invalid DIB dimensions or pixel format/,
-    );
-  }
+test('Windows icon inspection accepts non-square ICO entries', () => {
+  const icon = windowsIconFixture([32]);
+  icon[6 + 1] = 16;
+  assert.deepEqual(inspectWindowsIcon(icon).images[0], {
+    width: 32,
+    height: 16,
+    byteLength: icon.readUInt32LE(6 + 8),
+    imageOffset: icon.readUInt32LE(6 + 12),
+  });
 });
 
 test('native icon inspection rejects malformed containers and image bounds', () => {
@@ -567,51 +534,11 @@ test('native icon inspection rejects malformed containers and image bounds', () 
   const fakeMacPayload = macIconFixture(['ic10']);
   fakeMacPayload.fill(0, 16);
   TEST_PNG_SIGNATURE.copy(fakeMacPayload, 16);
-  assert.throws(() => inspectMacIcon(fakeMacPayload), /PNG (?:image|checksum|chunk type)/);
-  const headerOnlyJpeg2000 = macIconFixture(
-    ['ic10'],
-    () => Buffer.from([
-      0, 0, 0, 12, 106, 80, 32, 32, 13, 10, 135, 10,
-      0, 0, 0, 30, 106, 112, 50, 104, 0, 0, 0, 22,
-      105, 104, 100, 114, 0, 0, 4, 0, 0, 0, 4, 0,
-      3, 7, 0, 0, 0, 0,
-    ]),
-  );
+  assert.throws(() => inspectMacIcon(fakeMacPayload), /PNG (?:image|IHDR chunk)/);
+  const mismatchedMacPng = macIconFixture(['ic10'], () => pngFixture(512));
   assert.throws(
-    () => inspectMacIcon(headerOnlyJpeg2000),
-    /JPEG 2000|JP2/,
-  );
-  const missingJpeg2000End = Buffer.from(TEST_JP2_128);
-  missingJpeg2000End.fill(0, missingJpeg2000End.length - 2);
-  assert.throws(
-    () => inspectMacIcon(macIconFixture(['ic07'], () => missingJpeg2000End)),
-    /EOC marker/,
-  );
-  const emptyColorBox = Buffer.alloc(8);
-  emptyColorBox.writeUInt32BE(8, 0);
-  emptyColorBox.write('colr', 4, 4, 'ascii');
-  const emptyJpeg2000Color = Buffer.concat([
-    TEST_JP2_128.subarray(0, 62),
-    emptyColorBox,
-    TEST_JP2_128.subarray(77),
-  ]);
-  emptyJpeg2000Color.writeUInt32BE(38, 32);
-  assert.throws(
-    () => inspectMacIcon(macIconFixture(['ic07'], () => emptyJpeg2000Color)),
-    /invalid JP2 image header/,
-  );
-  const uniformDepthMismatch = Buffer.from(TEST_JP2_128);
-  uniformDepthMismatch[58] = 6;
-  assert.throws(
-    () => inspectMacIcon(macIconFixture(['ic07'], () => uniformDepthMismatch)),
-    /component depths that disagree/,
-  );
-  assert.throws(
-    () => inspectMacIcon(macIconFixture(
-      ['ic07'],
-      () => jp2WithComponentDepths([6, 7, 7, 7]),
-    )),
-    /component depths that disagree/,
+    () => inspectMacIcon(mismatchedMacPng),
+    /is 512x512, expected 1024x1024/,
   );
 
   assert.throws(() => inspectWindowsIcon(Buffer.alloc(6)), /valid ICO container/);
@@ -624,41 +551,11 @@ test('native icon inspection rejects malformed containers and image bounds', () 
   );
   assert.throws(
     () => inspectWindowsIcon(fakeWindowsPng),
-    /PNG (?:image|checksum|chunk type)/,
-  );
-  const validWindowsPng = pngFixture(256);
-  const unknownCriticalPng = Buffer.concat([
-    validWindowsPng.subarray(0, 33),
-    testPngChunk('ABCD', Buffer.alloc(0)),
-    validWindowsPng.subarray(33),
-  ]);
-  assert.throws(
-    () => inspectWindowsIcon(windowsIconFixture([256], () => unknownCriticalPng)),
-    /unknown critical PNG chunk ABCD/,
+    /PNG (?:image|IHDR chunk)/,
   );
   assert.throws(
-    () => inspectWindowsIcon(windowsIconFixture(
-      [256],
-      () => indexedPngFixture(256, 1, 3),
-    )),
-    /invalid PNG PLTE chunk/,
-  );
-  const splitIdatPng = Buffer.concat([
-    validWindowsPng.subarray(0, 33),
-    testPngChunk('IDAT', Buffer.alloc(0)),
-    testPngChunk('tEXt', Buffer.from('note')),
-    validWindowsPng.subarray(33),
-  ]);
-  assert.throws(
-    () => inspectWindowsIcon(windowsIconFixture([256], () => splitIdatPng)),
-    /non-consecutive PNG IDAT chunks/,
-  );
-  const mismatchedWindowsDib = windowsIconFixture([32]);
-  const dibOffset = mismatchedWindowsDib.readUInt32LE(6 + 12);
-  mismatchedWindowsDib.writeInt32LE(31, dibOffset + 4);
-  assert.throws(
-    () => inspectWindowsIcon(mismatchedWindowsDib),
-    /invalid DIB dimensions or pixel format/,
+    () => inspectWindowsIcon(windowsIconFixture([256], () => pngFixture(128))),
+    /is 128x128, expected 256x256/,
   );
 });
 

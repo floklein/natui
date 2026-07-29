@@ -5,17 +5,16 @@ import {
   NoEventPriority,
 } from 'react-reconciler/constants.js';
 import type { Bridge } from '../bridge/bridge.js';
-import { ROOT_ID } from '../protocol.js';
+import { ROOT_ID, type SerializedProps } from '../protocol.js';
 import {
   type Child,
   type HostInstance,
   type HostTextInstance,
   type RootContainer,
-  isTextInstance,
   markDestroyed,
   materialize,
-  propsEqual,
   serializeProps,
+  setProps,
   shadowAppend,
   shadowInsertBefore,
   shadowRemove,
@@ -62,6 +61,23 @@ export function makeHostConfig(
 ): HostConfigHandle {
   let currentUpdatePriority: number = NoEventPriority;
 
+  /**
+   * Push an `update` for an already-created instance. `ack` rides every update
+   * (`JSON.stringify` drops it when undefined, so the wire bytes are identical
+   * either way), and a Suspense-hidden instance re-asserts `hidden` because
+   * updates replace props wholesale — `instance.props` deliberately stays
+   * un-hidden so unhideInstance can restore it.
+   */
+  const pushUpdate = (instance: HostInstance, props: SerializedProps): void => {
+    if (!instance.created) return;
+    bridge.push({
+      op: 'update',
+      id: instance.id,
+      props: instance.suspenseHidden ? { ...props, hidden: true } : props,
+      ack: bridge.latestSeqFor(instance.id),
+    });
+  };
+
   const hostConfig: NatuiHostConfig = {
     rendererVersion: reactVersion,
     rendererPackageName: '@natui/core',
@@ -81,6 +97,7 @@ export function makeHostConfig(
         id: rootContainer.nextId++,
         kind: type,
         props: serialized,
+        propsJson: JSON.stringify(serialized),
         handlers,
         children: [],
         created: false,
@@ -178,19 +195,10 @@ export function makeHostConfig(
     commitUpdate(instance, type, _prevProps, nextProps) {
       const { props, handlers } = serializeProps(nextProps, type);
       instance.handlers = handlers;
-      if (!propsEqual(props, instance.props)) {
-        instance.props = props;
-        if (instance.created) {
-          const ack = bridge.latestSeqFor(instance.id);
-          // A Suspense-hidden instance must stay hidden through updates;
-          // instance.props stays un-hidden so unhideInstance restores it.
-          const wireProps = instance.suspenseHidden ? { ...props, hidden: true } : props;
-          bridge.push(
-            ack === undefined
-              ? { op: 'update', id: instance.id, props: wireProps }
-              : { op: 'update', id: instance.id, props: wireProps, ack },
-          );
-        }
+      const propsJson = JSON.stringify(props);
+      if (propsJson !== instance.propsJson) {
+        setProps(instance, props, propsJson);
+        pushUpdate(instance, props);
       }
     },
 
@@ -209,27 +217,12 @@ export function makeHostConfig(
 
     hideInstance(instance) {
       instance.suspenseHidden = true;
-      if (instance.created) {
-        const ack = bridge.latestSeqFor(instance.id);
-        const props = { ...instance.props, hidden: true };
-        bridge.push(
-          ack === undefined
-            ? { op: 'update', id: instance.id, props }
-            : { op: 'update', id: instance.id, props, ack },
-        );
-      }
+      pushUpdate(instance, instance.props);
     },
 
     unhideInstance(instance) {
       instance.suspenseHidden = false;
-      if (instance.created) {
-        const ack = bridge.latestSeqFor(instance.id);
-        bridge.push(
-          ack === undefined
-            ? { op: 'update', id: instance.id, props: instance.props }
-            : { op: 'update', id: instance.id, props: instance.props, ack },
-        );
-      }
+      pushUpdate(instance, instance.props);
     },
 
     hideTextInstance(textInstance) {

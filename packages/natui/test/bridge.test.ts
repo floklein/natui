@@ -43,11 +43,23 @@ test('flush is all-or-nothing: an unserializable batch sends nothing and rolls b
   }
 });
 
+/** The rid the bridge put on its most recent request of this type. */
+function ridOf(transport: FakeTransport, type: 'dump' | 'screenshot'): number {
+  const sent = [...transport.sent].reverse().find((msg) => msg.t === type);
+  assert.ok(sent && 'rid' in sent, `a ${type} request was sent with a rid`);
+  return sent.rid;
+}
+
 test('screenshot reply with error rejects the pending promise', async () => {
   const transport = new FakeTransport();
   const bridge = new Bridge(transport);
   const pending = bridge.requestScreenshot('/tmp/out.png');
-  transport.emit({ t: 'shot', path: '/tmp/out.png', error: 'no window content view' });
+  transport.emit({
+    t: 'shot',
+    path: '/tmp/out.png',
+    error: 'no window content view',
+    rid: ridOf(transport, 'screenshot'),
+  });
   await assert.rejects(pending, /screenshot failed: no window content view/);
 });
 
@@ -62,13 +74,42 @@ test('a late reply for a timed-out request never resolves the next request', asy
   const transport = new FakeTransport();
   const bridge = new Bridge(transport, { requestTimeoutMs: 40 });
   // First request times out; the host is slow, not dead.
-  await assert.rejects(bridge.requestScreenshot('/tmp/a.png'), /did not reply/);
+  const firstRequest = bridge.requestScreenshot('/tmp/a.png');
+  const firstRid = ridOf(transport, 'screenshot');
+  await assert.rejects(firstRequest, /did not reply/);
+
   const second = bridge.requestScreenshot('/tmp/b.png');
-  // The host finally replies to BOTH requests, in order. The late first
-  // reply must be discarded, not delivered to the second request.
-  transport.emit({ t: 'shot', path: '/tmp/a.png' });
-  transport.emit({ t: 'shot', path: '/tmp/b.png' });
+  const secondRid = ridOf(transport, 'screenshot');
+  assert.notEqual(firstRid, secondRid, 'each request gets its own id');
+
+  // The host finally answers BOTH. The late first reply must be discarded.
+  transport.emit({ t: 'shot', path: '/tmp/a.png', rid: firstRid });
+  transport.emit({ t: 'shot', path: '/tmp/b.png', rid: secondRid });
   assert.equal(await second, '/tmp/b.png', 'second request got its own reply');
+});
+
+test('replies are matched by id, not by arrival order', async () => {
+  const transport = new FakeTransport();
+  const bridge = new Bridge(transport);
+  const first = bridge.requestScreenshot('/tmp/first.png');
+  const firstRid = ridOf(transport, 'screenshot');
+  const second = bridge.requestScreenshot('/tmp/second.png');
+  const secondRid = ridOf(transport, 'screenshot');
+
+  // A host that renders screenshots concurrently can answer out of order.
+  transport.emit({ t: 'shot', path: '/tmp/second.png', rid: secondRid });
+  transport.emit({ t: 'shot', path: '/tmp/first.png', rid: firstRid });
+
+  assert.equal(await first, '/tmp/first.png');
+  assert.equal(await second, '/tmp/second.png');
+});
+
+test('a reply carrying an unknown id is ignored rather than resolving someone else', async () => {
+  const transport = new FakeTransport();
+  const bridge = new Bridge(transport, { requestTimeoutMs: 40 });
+  const pending = bridge.requestDump();
+  transport.emit({ t: 'tree', root: { id: 0, kind: '#root' }, rid: 9999 });
+  await assert.rejects(pending, /did not reply to dump/);
 });
 
 test('enforcement keeps a Suspense-hidden control hidden', () => {
@@ -156,9 +197,9 @@ test('dispose rejects pending waiters and later requests fail fast', async () =>
 test('ready arriving before waitForReady still resolves (no dropped handshake)', async () => {
   const transport = new FakeTransport();
   const bridge = new Bridge(transport);
-  transport.emit({ t: 'ready', platform: 'macos', protocol: 1, hostApi: 1 });
+  transport.emit({ t: 'ready', platform: 'macos', protocol: 1, hostApi: 2 });
   const ready = await bridge.waitForReady(50);
-  assert.deepEqual(ready, { platform: 'macos', protocol: 1, hostApi: 1 });
+  assert.deepEqual(ready, { platform: 'macos', protocol: 1, hostApi: 2 });
 });
 
 // ---------------------------------------------------------------------------
@@ -169,7 +210,7 @@ test('updates to a Suspense-hidden instance stay hidden until unhide', () => {
   const transport = new FakeTransport();
   const bridge = new Bridge(transport);
   const { hostConfig } = makeHostConfig(bridge);
-  const container: RootContainer = { isRoot: true, children: [], nextId: 1, bridge };
+  const container: RootContainer = { children: [], nextId: 1, bridge };
 
   const instance = hostConfig.createInstance('Text', { color: '#111111' }, container, {}, null) as HostInstance;
   hostConfig.appendChildToContainer!(container, instance);

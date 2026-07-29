@@ -19,13 +19,13 @@ export function App() {
         This React tree is rendered with native platform controls.
       </Text>
       <HStack spacing={12} alignment="center">
-        <Button variant="bordered" onPress={() => setCount((value) => value - 1)}>
+        <Button style="bordered" onPress={() => setCount((value) => value - 1)}>
           Decrement
         </Button>
         <Text font="title2" monospaced>
           {String(count)}
         </Text>
-        <Button variant="prominent" onPress={() => setCount((value) => value + 1)}>
+        <Button style="prominent" onPress={() => setCount((value) => value + 1)}>
           Increment
         </Button>
         <Spacer />

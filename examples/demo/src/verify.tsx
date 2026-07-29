@@ -13,87 +13,35 @@
  * Exits non-zero on any failure.
  */
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, statSync, readFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { useState } from 'react';
-import { run, Slider, Text, TextField, VStack, type TreeNode } from '@natui/core';
+import { run, Slider, Text, TextField, VStack } from '@natui/core';
+import { assertValidPng, collect, runningHosts, textOf } from '../../shared/probe.mjs';
 import { App } from './App.js';
 
+// Verification output is throwaway: it goes to this example's own ignored dist
+// (never the tracked docs assets under screenshots/), split per platform so a
+// Windows run cannot clobber a macOS one.
 // fileURLToPath, not URL.pathname: the latter yields "/C:/…" on Windows.
-const OUT_DIR = fileURLToPath(new URL('../../../screenshots/', import.meta.url));
+const OUT_DIR = fileURLToPath(
+  new URL(
+    `../dist/screenshots/${process.platform === 'win32' ? 'windows' : 'macos'}/`,
+    import.meta.url,
+  ),
+);
 mkdirSync(OUT_DIR, { recursive: true });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Another running host would grab focus and confuse window-level checks;
 // refuse to run next to one (e.g. a forgotten `pnpm demo`).
-function runningHosts(): string {
-  try {
-    if (process.platform === 'win32') {
-      const out = execFileSync(
-        'tasklist',
-        ['/FI', 'IMAGENAME eq NatuiHost.exe', '/NH'],
-        { encoding: 'utf8' },
-      ).trim();
-      return out.includes('NatuiHost.exe') ? out : '';
-    }
-    // pgrep exits 1 when nothing matches; that is the good case.
-    return execFileSync('pgrep', ['-lf', 'natui-host'], { encoding: 'utf8' }).trim();
-  } catch {
-    return '';
-  }
-}
 const existingHosts = runningHosts();
 if (existingHosts) {
   console.error(
     `[verify] another NatUI host is already running; close it first:\n${existingHosts}`,
   );
   process.exit(1);
-}
-
-function collect(root: TreeNode, kind: string): TreeNode[] {
-  const out: TreeNode[] = [];
-  const walk = (n: TreeNode) => {
-    if (n.kind === kind) out.push(n);
-    n.children?.forEach(walk);
-  };
-  walk(root);
-  return out;
-}
-
-function textOf(node: TreeNode): string {
-  if (node.kind === '#text') return node.text ?? '';
-  return (node.children ?? []).map(textOf).join('');
-}
-
-/** The screenshot must exist, be non-empty, and decode as a real PNG. */
-function assertValidPng(path: string): void {
-  assert.ok(statSync(path).size > 1000, `${path} is suspiciously small`);
-  const header = readFileSync(path).subarray(0, 8);
-  assert.deepEqual(
-    [...header],
-    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-    `${path} lacks a PNG signature`,
-  );
-  if (process.platform === 'win32') {
-    // System.Drawing decodes the image; a corrupt file makes FromFile throw
-    // and the script exit non-zero (the Windows counterpart of sips below).
-    const width = execFileSync(
-      'powershell',
-      [
-        '-NoProfile',
-        '-Command',
-        `Add-Type -AssemblyName System.Drawing; $i = [System.Drawing.Image]::FromFile('${path.replace(/'/g, "''")}'); "pixelWidth: $($i.Width)"; $i.Dispose()`,
-      ],
-      { encoding: 'utf8' },
-    );
-    assert.match(width, /pixelWidth: \d+/, `${path} did not decode`);
-    return;
-  }
-  // sips decodes the image; a corrupt file makes it exit non-zero.
-  const width = execFileSync('sips', ['-g', 'pixelWidth', path], { encoding: 'utf8' });
-  assert.match(width, /pixelWidth: \d+/, `${path} did not decode`);
 }
 
 // === Phase 1: demo app =======================================================

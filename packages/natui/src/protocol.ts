@@ -11,8 +11,11 @@ export const PROTOCOL_VERSION = 1;
  * which renderer capabilities a host implements while keeping the same wire
  * format. A renderer may run on a host whose API is newer than this value,
  * but never on an older one.
+ *
+ * v2: `dump` and `screenshot` carry a request id that the host must echo on
+ * its `tree` / `shot` reply.
  */
-export const HOST_API_VERSION = 1;
+export const HOST_API_VERSION = 2;
 
 /** JSON-serializable prop values. Functions never cross the wire. */
 export type PropValue =
@@ -65,11 +68,18 @@ export interface WindowProps {
   minHeight?: number;
 }
 
+/**
+ * Correlates a request with its reply. Replies are matched by id rather than
+ * by arrival order, so a host that answers out of order (or late, after the
+ * requester timed out) can never resolve the wrong caller.
+ */
+export type RequestId = number;
+
 export type OutboundMessage =
   | { t: 'window'; props: WindowProps }
   | { t: 'commit'; ops: Op[] }
-  | { t: 'dump' }
-  | { t: 'screenshot'; path: string }
+  | { t: 'dump'; rid: RequestId }
+  | { t: 'screenshot'; path: string; rid: RequestId }
   | { t: 'emit'; id: number; name: string; payload?: Record<string, PropValue> }
   /**
    * Debug: perform a real optimistic user edit on node `id`, through the same
@@ -77,6 +87,13 @@ export type OutboundMessage =
    * change event with seq). Unlike `emit`, this exercises seq/ack end to end.
    */
   | { t: 'edit'; id: number; value: PropValue }
+  /**
+   * Verification only: ask the host to close its window as if the user had,
+   * so a packaged-app lifecycle can be exercised without a GUI session. Unlike
+   * `quit`, the host runs its normal window-close path and reports back with
+   * `{t:'window',name:'close'}`.
+   */
+  | { t: 'requestClose' }
   | { t: 'quit' };
 
 // ---------------------------------------------------------------------------
@@ -107,8 +124,12 @@ export type InboundMessage =
       seq?: number;
     }
   | { t: 'window'; name: 'close' }
-  | { t: 'tree'; root: TreeNode }
-  /** Reply to `screenshot`. `error` set (and no file written) on failure. */
-  | { t: 'shot'; path: string; error?: string }
+  /** Reply to `dump`; echoes the request's `rid`. */
+  | { t: 'tree'; root: TreeNode; rid: RequestId }
+  /**
+   * Reply to `screenshot`; echoes the request's `rid`. `error` set (and no
+   * file written) on failure.
+   */
+  | { t: 'shot'; path: string; error?: string; rid: RequestId }
   /** Debug-channel acknowledgement that the native host received `quit`. */
   | { t: 'quitAck' };

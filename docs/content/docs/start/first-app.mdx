@@ -21,7 +21,7 @@ function App() {
         onChange={setName}
         frame={{ width: 260 }}
       />
-      <Button variant="prominent" disabled={!name}>
+      <Button style="prominent" disabled={!name}>
         {name ? `Continue as ${name}` : 'Continue'}
       </Button>
     </VStack>

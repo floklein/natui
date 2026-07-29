@@ -363,8 +363,8 @@ internal sealed partial class NodeMapper
             if (_menuRebuildPending.Remove(node.Id)) RebuildMenuItems(flyout, node, "select");
         };
         button.Flyout = flyout;
-        // Menu is not a LabelKind, so #text children never trigger
-        // RefreshLabel; Loaded fires after the initial commit attached them.
+        // Belt and braces: RefreshLabel already refreshes the label whenever
+        // a #text child is attached, detached, or edited.
         button.Loaded += (_, _) => RefreshMenuLabel(node, button);
         return button;
     }
@@ -381,13 +381,25 @@ internal sealed partial class NodeMapper
 
     private static void RefreshMenuLabel(NatuiNode node, DropDownButton button)
     {
-        // Text label from #text children; icon-only menus fall back to
-        // systemImage. Element children inside a Menu label are not supported
-        // on Windows (documented divergence).
+        // Text label from #text children plus an optional systemImage icon
+        // ahead of it, laid out like the Label kind (see BuildLabel). Element
+        // children inside a Menu label are not supported on Windows
+        // (documented divergence).
         var text = node.JoinedText();
-        if (text.Length == 0 && node.Str("systemImage") is { } icon)
+        if (node.Str("systemImage") is { } icon)
         {
-            button.Content = new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) };
+            var glyph = new FontIcon { FontFamily = IconFontFamily(), Glyph = GlyphFor(icon) };
+            if (text.Length == 0)
+            {
+                button.Content = glyph;
+                return;
+            }
+            glyph.FontSize = 14;
+            var stack = new NatuiStack { Orientation = Orientation.Horizontal, Spacing = 6 };
+            stack.Children.Add(glyph);
+            stack.Children.Add(new TextBlock { Text = text });
+            stack.RebuildLayout();
+            button.Content = stack;
         }
         else if (node.Children.All(c => c.Kind == "#text"))
         {

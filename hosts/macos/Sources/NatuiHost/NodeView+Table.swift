@@ -54,22 +54,16 @@ struct TableRowItem: Identifiable, Hashable {
     }
 }
 
-/// The comparator type behind the sortOrder binding. Its compare result is
-/// never used to actually order anything (the host never sorts); it exists
-/// so SwiftUI's header-click machinery has a SortComparator to flip.
+/// The comparator type behind the sortOrder binding. Ordering is performed by
+/// the app, never by the host, so `compare` is deliberately a no-op: only
+/// `key` and `order` are read back, and the type exists so SwiftUI's
+/// header-click machinery has a SortComparator to flip.
 struct CellComparator: SortComparator, Hashable {
     var key: String
     var order: SortOrder = .forward
 
     func compare(_ lhs: TableRowItem, _ rhs: TableRowItem) -> ComparisonResult {
-        let l = lhs.cells[key] ?? ""
-        let r = rhs.cells[key] ?? ""
-        let result: ComparisonResult = l == r ? .orderedSame : (l < r ? .orderedAscending : .orderedDescending)
-        switch (order, result) {
-        case (.reverse, .orderedAscending): return .orderedDescending
-        case (.reverse, .orderedDescending): return .orderedAscending
-        default: return result
-        }
+        .orderedSame
     }
 }
 
@@ -116,38 +110,43 @@ private struct DynamicTableView: View {
         let rows = node.tableRows
         if node.props["value"] == nil {
             Table(of: TableRowItem.self, sortOrder: node.sortOrderBinding) {
-                TableColumnForEach(columns, id: \.key) { column in
-                    TableColumn(column.label, sortUsing: CellComparator(key: column.key)) { row in
-                        Text(row.cells[column.key] ?? "")
-                    }
-                    .width(column.width)
-                }
+                columnContent(columns)
             } rows: {
-                ForEach(rows) { TableRow($0) }
+                rowContent(rows)
             }
         } else if node.str("selectionMode") == "multiple" {
             Table(of: TableRowItem.self, selection: node.stringSetBinding, sortOrder: node.sortOrderBinding) {
-                TableColumnForEach(columns, id: \.key) { column in
-                    TableColumn(column.label, sortUsing: CellComparator(key: column.key)) { row in
-                        Text(row.cells[column.key] ?? "")
-                    }
-                    .width(column.width)
-                }
+                columnContent(columns)
             } rows: {
-                ForEach(rows) { TableRow($0) }
+                rowContent(rows)
             }
         } else {
             Table(of: TableRowItem.self, selection: node.optionalStringBinding, sortOrder: node.sortOrderBinding) {
-                TableColumnForEach(columns, id: \.key) { column in
-                    TableColumn(column.label, sortUsing: CellComparator(key: column.key)) { row in
-                        Text(row.cells[column.key] ?? "")
-                    }
-                    .width(column.width)
-                }
+                columnContent(columns)
             } rows: {
-                ForEach(rows) { TableRow($0) }
+                rowContent(rows)
             }
         }
+    }
+
+    // The three Table literals differ only in `selection:`, so columns and
+    // rows are built once here (same split as ListStyleMod for list styles).
+
+    @TableColumnBuilder<TableRowItem, CellComparator>
+    private func columnContent(
+        _ columns: [TableColumnSpec]
+    ) -> some TableColumnContent<TableRowItem, CellComparator> {
+        TableColumnForEach(columns, id: \.key) { column in
+            TableColumn(column.label, sortUsing: CellComparator(key: column.key)) { row in
+                Text(row.cells[column.key] ?? "")
+            }
+            .width(column.width)
+        }
+    }
+
+    @TableRowBuilder<TableRowItem>
+    private func rowContent(_ rows: [TableRowItem]) -> some TableRowContent<TableRowItem> {
+        ForEach(rows) { TableRow($0) }
     }
 }
 

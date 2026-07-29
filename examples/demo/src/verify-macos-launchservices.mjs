@@ -7,18 +7,17 @@ import {
   open,
   readFile,
   rm,
-  stat,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { assertValidPng, nextRequestId, waitForMessage } from '../../shared/probe.mjs';
 
 const defaultApp = fileURLToPath(
   new URL('../dist/package/NatUIDemo.app', import.meta.url),
 );
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const execFileAsync = promisify(execFile);
 
 const sleep = (milliseconds) => new Promise((resolve) => {
@@ -80,7 +79,10 @@ function isProcessRunning(pid) {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    if (error?.code === 'ESRCH') return false;
+    // ESRCH: gone. EPERM: the pid was reused by another user's process, so it
+    // is not ours either. Rethrowing EPERM from the `finally` below would mask
+    // the original failure.
+    if (error?.code === 'ESRCH' || error?.code === 'EPERM') return false;
     throw error;
   }
 }
@@ -245,47 +247,30 @@ export async function verifyMacLaunchServices(
       return output.join('\n') || '(no stderr output)';
     }
 
-    async function waitForMessage(
-      predicate,
-      label,
-      startIndex = 0,
-      timeoutMs = 15_000,
-    ) {
-      const deadline = Date.now() + timeoutMs;
-      for (;;) {
-        await collectMessages();
-        const message = messages
-          .slice(startIndex)
-          .find((candidate) => predicate(candidate));
-        if (message) return message;
-        if (launcherResult) {
-          throw new Error(
-            `LaunchServices exited before ${label}: `
-              + `${launcherResult.code ?? launcherResult.signal}\n`
-              + await diagnostics(),
-          );
-        }
-        if (Date.now() >= deadline) {
-          throw new Error(
-            `LaunchServices app did not send ${label} within ${timeoutMs}ms\n`
-              + await diagnostics(),
-          );
-        }
-        await sleep(25);
-      }
+    // The shared probe helper reads an append-only array; this transport is
+    // file-backed and can die under us, so it gets a refresh and an exit check.
+    function waitForProtocolMessage(predicate, label, startIndex = 0) {
+      return waitForMessage(messages, predicate, label, {
+        startIndex,
+        refresh: collectMessages,
+        ended: () => (launcherResult
+          ? `LaunchServices exited (${launcherResult.code ?? launcherResult.signal})`
+          : undefined),
+        diagnose: diagnostics,
+      });
     }
 
     async function send(message) {
       await input.write(`${JSON.stringify(message)}\n`);
     }
 
-    const ready = await waitForMessage(
+    const ready = await waitForProtocolMessage(
       (message) => message.t === 'ready',
       'ready',
     );
     assert.equal(ready.platform, 'macos');
     assert.equal(ready.protocol, 1);
-    assert.ok(ready.hostApi >= 1);
+    assert.ok(ready.hostApi >= 2);
     verificationPid = await verificationPidPromise;
     assert.ok(
       verificationPid,
@@ -295,8 +280,8 @@ export async function verifyMacLaunchServices(
     let tree;
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const startIndex = messages.length;
-      await send({ t: 'dump' });
-      tree = await waitForMessage(
+      await send({ t: 'dump', rid: nextRequestId() });
+      tree = await waitForProtocolMessage(
         (message) => message.t === 'tree',
         `tree ${attempt + 1}`,
         startIndex,
@@ -311,36 +296,24 @@ export async function verifyMacLaunchServices(
 
     const shotStart = messages.length;
     await send({ t: 'screenshot', path: screenshotPath });
-    const shot = await waitForMessage(
+    const shot = await waitForProtocolMessage(
       (message) => message.t === 'shot',
       'screenshot reply',
       shotStart,
     );
     assert.equal(shot.path, screenshotPath);
     assert.equal(shot.error, undefined, `screenshot failed: ${shot.error}`);
-    assert.ok(
-      (await stat(screenshotPath)).size > 1000,
-      'LaunchServices screenshot is suspiciously small',
-    );
+    assertValidPng(screenshotPath);
     const screenshot = await readFile(screenshotPath);
-    assert.deepEqual(
-      [...screenshot.subarray(0, PNG_SIGNATURE.length)],
-      PNG_SIGNATURE,
-      'LaunchServices screenshot lacks a PNG signature',
-    );
-    assert.ok(
-      screenshot.readUInt32BE(16) > 0 && screenshot.readUInt32BE(20) > 0,
-      'LaunchServices screenshot has invalid dimensions',
-    );
 
     const closeStart = messages.length;
     await send({ t: 'requestClose' });
-    await waitForMessage(
+    await waitForProtocolMessage(
       (message) => message.t === 'window' && message.name === 'close',
       'native close event',
       closeStart,
     );
-    await waitForMessage(
+    await waitForProtocolMessage(
       (message) => message.t === 'quitAck',
       'native quit acknowledgement',
       closeStart,

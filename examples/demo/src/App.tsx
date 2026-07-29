@@ -8,7 +8,6 @@ import {
   Image,
   List,
   ProgressView,
-  ScrollView,
   Slider,
   Spacer,
   Text,
@@ -68,17 +67,17 @@ export function App() {
       <Divider />
 
       <HStack spacing={10} alignment="center">
-        <Button variant="bordered" onPress={() => setCount((c) => c - 1)}>
+        <Button style="bordered" onPress={() => setCount((c) => c - 1)}>
           −
         </Button>
         <Text font="title2" monospaced>
           {String(count)}
         </Text>
-        <Button variant="bordered" onPress={() => setCount((c) => c + 1)}>
+        <Button style="bordered" onPress={() => setCount((c) => c + 1)}>
           +
         </Button>
         {count !== 0 && (
-          <Button variant="plain" onPress={() => setCount(0)}>
+          <Button style="plain" onPress={() => setCount(0)}>
             Reset
           </Button>
         )}
@@ -96,7 +95,7 @@ export function App() {
           onSubmit={addTodo}
           frame={{ maxWidth: 'infinity' }}
         />
-        <Button variant="prominent" onPress={addTodo} disabled={draft.trim() === ''}>
+        <Button style="prominent" onPress={addTodo} disabled={draft.trim() === ''}>
           Add
         </Button>
       </HStack>
@@ -108,7 +107,7 @@ export function App() {
               {todo.label}
             </Toggle>
             <Spacer />
-            <Button variant="plain" role="destructive" onPress={() => removeTodo(todo.id)}>
+            <Button style="plain" role="destructive" onPress={() => removeTodo(todo.id)}>
               <Image systemName="trash" size={13} />
             </Button>
           </HStack>

@@ -28,10 +28,17 @@ export interface ResolvedNatuiAppConfig {
   entry: string;
   executable: string;
   output: string;
+  /** Relative icon paths exactly as declared in the config file. */
+  icons: NatuiAppIconConfig;
   root: string;
   entryPath: string;
   outputPath: string;
-  icons: NatuiAppIconConfig;
+  /**
+   * Absolute, root-contained icon paths. Named `*Path` like `entryPath` and
+   * `outputPath` rather than reusing `icons`, so the resolved form is never
+   * mistaken for the relative one the config file declares.
+   */
+  iconPaths: NatuiAppIconConfig;
 }
 
 export function validateAppConfig(

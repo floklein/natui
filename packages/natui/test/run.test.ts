@@ -65,7 +65,7 @@ function closingFakeHost(messageLogPath: string): { cmd: string; args: string[] 
         t: 'ready',
         platform: ${JSON.stringify(thisPlatform)},
         protocol: 1,
-        hostApi: 1,
+        hostApi: 2,
       }) + '\\n' +
       JSON.stringify({ t: 'window', name: 'close' }) + '\\n'
     );
@@ -91,7 +91,7 @@ function closeAfterWindowFakeHost(
       t: 'ready',
       platform: ${JSON.stringify(thisPlatform)},
       protocol: 1,
-      hostApi: 1,
+      hostApi: 2,
     }) + '\\n');
     readline.createInterface({ input: process.stdin }).on('line', (line) => {
       try {
@@ -142,7 +142,7 @@ test('handshake success: matching protocol and platform mounts and quits cleanly
   const marker = join(mkdtempSync(join(tmpdir(), 'natui-run-test-')), 'quit-received');
   const app = await run(element, {
     host: fakeHost(
-      { t: 'ready', platform: thisPlatform, protocol: 1, hostApi: 1 },
+      { t: 'ready', platform: thisPlatform, protocol: 1, hostApi: 2 },
       marker,
     ),
     readyTimeoutMs: 5000,
@@ -256,14 +256,14 @@ test('handshake rejects a host API older than the renderer requires', async () =
       }),
       readyTimeoutMs: 5000,
     }),
-    /requires host API v1 or newer/,
+    /requires host API v2 or newer/,
   );
 });
 
 test('handshake rejects an unknown platform', async () => {
   await assert.rejects(
     run(element, {
-      host: fakeHost({ t: 'ready', platform: 'beos', protocol: 1, hostApi: 1 }),
+      host: fakeHost({ t: 'ready', platform: 'beos', protocol: 1, hostApi: 2 }),
       readyTimeoutMs: 5000,
     }),
     /unknown platform "beos"/,
@@ -274,7 +274,7 @@ test('handshake rejects the wrong platform for this OS', { skip: !['darwin', 'wi
   const wrong = process.platform === 'darwin' ? 'windows' : 'macos';
   await assert.rejects(
     run(element, {
-      host: fakeHost({ t: 'ready', platform: wrong, protocol: 1, hostApi: 1 }),
+      host: fakeHost({ t: 'ready', platform: wrong, protocol: 1, hostApi: 2 }),
       readyTimeoutMs: 5000,
     }),
     /but this OS requires/,
@@ -334,7 +334,7 @@ test('the early controller rejects a suspended initial render with the exact rea
     createElement(Suspended),
     {
       host: fakeHost(
-        { t: 'ready', platform: thisPlatform, protocol: 1, hostApi: 1 },
+        { t: 'ready', platform: thisPlatform, protocol: 1, hostApi: 2 },
         marker,
       ),
       readyTimeoutMs: 5000,

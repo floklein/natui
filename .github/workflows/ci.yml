@@ -17,10 +17,17 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-      # Build before typecheck: examples/demo resolves the `@natui/core` package types from
-      # packages/natui/dist, which only exists after a build.
+      # Read the release version once. Hardcoding it in artifact names meant a
+      # version bump failed here, in the macOS plist assertion and in the
+      # Windows static verifier as three unrelated-looking errors.
+      - id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - run: pnpm lint
+      # Build first: @natui/dev resolves `@natui/core` as a real specifier (so an
+      # installed app gets its own copy), and examples/demo resolves the package
+      # types the same way. Both need packages/natui/dist to exist.
       - run: pnpm build
+      - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm release:check
       - name: Pack npm release
@@ -28,16 +35,24 @@ jobs:
         run: npm pack
       - uses: actions/upload-artifact@v4
         with:
-          name: npm-package-0.2.0
-          path: packages/natui/natui-core-0.2.0.tgz
+          name: npm-package-${{ steps.version.outputs.value }}
+          path: packages/natui/natui-core-${{ steps.version.outputs.value }}.tgz
+          if-no-files-found: error
+      - name: Pack @natui/dev release
+        working-directory: packages/natui-dev
+        run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package-dev-${{ steps.version.outputs.value }}
+          path: packages/natui-dev/natui-dev-${{ steps.version.outputs.value }}.tgz
           if-no-files-found: error
       - name: Pack create-natui-app release
         working-directory: packages/create-natui-app
         run: npm pack
       - uses: actions/upload-artifact@v4
         with:
-          name: create-natui-app-0.2.0
-          path: packages/create-natui-app/create-natui-app-0.2.0.tgz
+          name: create-natui-app-${{ steps.version.outputs.value }}
+          path: packages/create-natui-app/create-natui-app-${{ steps.version.outputs.value }}.tgz
           if-no-files-found: error
 
   docs:
@@ -54,6 +69,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The docs typecheck compiles the packages it documents, which resolve
+      # `@natui/core` through packages/natui/dist.
+      - run: pnpm build
       - run: pnpm docs:check
       - run: pnpm docs:build
       - run: pnpm docs:smoke
@@ -69,9 +87,17 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - run: pnpm build:host:macos
-      - run: pnpm test
+      # Unit tests for the host's pure logic (seq/ack, Store.apply, colour and
+      # menu-spec parsing). NATUI_PACKAGE_APP=1 drops the executable's
+      # -sectcreate linker flags, which the test bundle cannot inherit.
+      - name: Swift host unit tests
+        run: NATUI_PACKAGE_APP=1 swift test --package-path hosts/macos
+      # Build before test: @natui/dev resolves @natui/core from packages/natui/dist.
       - run: pnpm build
+      - run: pnpm test
       - run: node --test examples/demo/src/verify-macos-package-static.test.mjs
       - run: pnpm package:demo
       - run: node examples/demo/src/verify-macos-package-static.mjs
@@ -80,13 +106,13 @@ jobs:
         shell: bash
         run: |
           package_arch="$(node -p 'process.arch')"
-          archive="examples/demo/dist/package/NatUIDemo-0.2.0-macos-${package_arch}.tar.gz"
+          archive="examples/demo/dist/package/NatUIDemo-${{ steps.version.outputs.value }}-macos-${package_arch}.tar.gz"
           tar -czf "$archive" -C examples/demo/dist/package NatUIDemo.app
           echo "architecture=${package_arch}" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: NatUIDemo-0.2.0-macos-${{ steps.mac-package.outputs.architecture }}
+          name: NatUIDemo-${{ steps.version.outputs.value }}-macos-${{ steps.mac-package.outputs.architecture }}
           path: ${{ steps.mac-package.outputs.archive }}
           if-no-files-found: error
       # The GUI end-to-end suites, including verify:package, need a real
@@ -109,13 +135,25 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - run: pnpm install --frozen-lockfile
+      - id: version
+        shell: bash
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      # Windows carries the most path- and spawn-sensitive code (locate.ts,
+      # config path handling, the packager) and was the least gated platform:
+      # the core suite and typecheck never ran here.
+      # Build before test: @natui/dev resolves @natui/core from packages/natui/dist.
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm typecheck
       - run: pnpm --filter create-natui-app test
       - run: node --test tools/package-app.test.mjs
       - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
+      # No .sln, so the test project must be named explicitly.
+      - run: dotnet test hosts/windows/NatuiHost.Tests -c Release -p:Platform=x64
       - run: pnpm package:demo
       - run: node examples/demo/src/verify-windows-package-static.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: NatUIDemo-0.2.0-windows-x64
-          path: examples/demo/dist/package/NatUIDemo-0.2.0-windows-x64.exe
+          name: NatUIDemo-${{ steps.version.outputs.value }}-windows-x64
+          path: examples/demo/dist/package/NatUIDemo-${{ steps.version.outputs.value }}-windows-x64.exe
           if-no-files-found: error

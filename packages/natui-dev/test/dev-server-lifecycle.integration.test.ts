@@ -15,9 +15,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type {
   DevServerOptions,
   NatuiDevServer,
-} from '../src/dev/server.js';
-import type { TreeNode } from '../src/protocol.js';
-import type { NatuiApp } from '../src/run.js';
+} from '../src/server.js';
+import type { TreeNode } from '@natui/core';
+import type { NatuiApp } from '@natui/core';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const WAIT_TIMEOUT_MS = 10_000;
@@ -31,7 +31,7 @@ const SOURCE_RESOLUTION_TEST_NAME =
 async function createDevServer(
   options: DevServerOptions,
 ): Promise<NatuiDevServer> {
-  const serverModule = await import('../src/dev/server.js');
+  const serverModule = await import('../src/server.js');
   return serverModule.createDevServer(options);
 }
 
@@ -136,7 +136,7 @@ function dump(id) {
 }
 
 const platform = process.platform === 'win32' ? 'windows' : 'macos';
-send({ t: 'ready', platform, protocol: 1, hostApi: 1 });
+send({ t: 'ready', platform, protocol: 1, hostApi: 2 });
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   let message;
@@ -151,7 +151,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       for (const op of message.ops) apply(op);
       break;
     case 'dump':
-      send({ t: 'tree', root: dump(0) });
+      send({ t: 'tree', root: dump(0), rid: message.rid });
       break;
     case 'emit':
       send({
@@ -561,7 +561,7 @@ const app = await run(createElement('Text', null, 'ready'), {
       )
     ).default as SourceResolutionResult;
 
-    const resolution = await import('../src/dev/resolution.js');
+    const resolution = await import('../src/resolution.js');
     const canonicalMainUrl = resolution.canonicalSourceUrl(
       pathToFileURL(linkedMainPath),
       true,

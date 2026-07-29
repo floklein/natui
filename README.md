@@ -50,11 +50,11 @@ function App() {
     <VStack spacing={12} padding={20} alignment="leading">
       <Text font="largeTitle" weight="bold">Hello, native</Text>
       <HStack spacing={8}>
-        <Button variant="bordered" onPress={() => setCount((value) => value - 1)}>
+        <Button style="bordered" onPress={() => setCount((value) => value - 1)}>
           −
         </Button>
         <Text font="title2" monospaced>{String(count)}</Text>
-        <Button variant="bordered" onPress={() => setCount((value) => value + 1)}>
+        <Button style="bordered" onPress={() => setCount((value) => value + 1)}>
           +
         </Button>
       </HStack>
@@ -234,14 +234,15 @@ design.
 The current public surface contains 37 typed host components:
 
 - Layout: `VStack`, `HStack`, `ZStack`, `Spacer`, `Divider`, `ScrollView`,
-  `List`, `Section`
+  `List`
 - Content: `Text`, `Label`, `Image`, `ProgressView`, `Link`
 - Inputs: `Button`, `TextField`, `TextEditor`, `SearchField`, `Toggle`,
-  `Slider`, `Stepper`, `Picker`, `DatePicker`, `DisclosureGroup`
+  `Slider`, `Stepper`, `Picker`, `DatePicker`
 - App shell and navigation: `SplitView`, `Sidebar`, `Detail`, `TabView`, `Tab`,
   `MenuBar`, `Toolbar`
-- Menus and data: `Menu`, `ContextMenu`, `Table`
+- Menus: `Menu`, `ContextMenu`
 - Presentation: `Sheet`, `Alert`, `Popover`, `PopoverContent`
+- Data: `Section`, `Table`, `DisclosureGroup`
 
 Common props include selection tags, badges, and accessibility metadata such
 as `accessibilityLabel`, `accessibilityHint`, and
@@ -288,7 +289,8 @@ pnpm verify:package
 
 macOS produces `examples/demo/dist/package/NatUIDemo.app`. Windows produces
 one portable, architecture-specific, self-contained EXE such as
-`NatUIDemo-0.2.0-windows-x64.exe`. The Windows EXE extracts its runtime
+`NatUIDemo-<version>-windows-x64.exe`, where `<version>` comes from
+`natui.app.json`. The Windows EXE extracts its runtime
 dependencies to a per-user temporary cache at launch.
 
 Both artifacts include the minified React entry and a generated manifest with
@@ -357,7 +359,7 @@ The workspace exposes:
 - `@natui/core` for components, `run`, and advanced protocol exports
 - `@natui/core/components` for component-only bundles without Node.js built-ins
 - `@natui/core/inproc` for the embedded host entry point
-- `@natui/core/dev` for programmatic development-server startup
+- `@natui/dev` for programmatic development-server startup
 - `@natui/core/config` for loading and validating `natui.app.json`
 - the `natui dev [entry]` command for state-preserving native development
 - `create-natui-app` for scaffolding a configured TypeScript application

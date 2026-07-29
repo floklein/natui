@@ -38,6 +38,7 @@ class HostTransport implements Transport {
   private exitCb: (code: number | null) => void = () => {};
   private buffered: InboundMessage[] = [];
   private closed = false;
+  private reader: { close(): void } | undefined;
 
   constructor(
     private child: ChildProcess,
@@ -54,7 +55,15 @@ class HostTransport implements Transport {
     });
   }
 
+  /** @internal Let close() tear the reader down with the process. */
+  attachReader(reader: { close(): void }): void {
+    this.reader = reader;
+  }
+
   bufferOrHandle(msg: InboundMessage): void {
+    // Lines can still arrive between kill() and process death; dispatching them
+    // into an already-disposed Bridge is pointless and confusing.
+    if (this.closed) return;
     if (this.messageCb === undefined) this.buffered.push(msg);
     else this.messageCb(msg);
   }
@@ -75,7 +84,10 @@ class HostTransport implements Transport {
 
   close(): void {
     this.closed = true;
-    if (!this.child.killed) this.child.kill();
+    this.messageCb = undefined;
+    this.buffered.length = 0;
+    this.reader?.close();
+    this.child.kill();
   }
 }
 
@@ -86,10 +98,15 @@ export function spawnStdioTransport(host: HostCommand): Transport {
   });
   // A commit racing host shutdown must not crash Node with EPIPE.
   child.stdin!.on('error', () => {});
+  // readline re-emits stdout errors on the Interface, which has no handler, so
+  // without this a read error becomes an uncaught exception instead of the
+  // graceful onExit path.
+  child.stdout!.on('error', () => {});
   const transport = new HostTransport(child, (line) => {
     if (child.stdin?.writable) child.stdin.write(line);
   });
   const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity });
   rl.on('line', (line) => parseLine(line, (m) => transport.bufferOrHandle(m)));
+  transport.attachReader(rl);
   return transport;
 }

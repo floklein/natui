@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { defaultHostCommand } from '@natui/core';
 import { buildJavaScript } from '../../../tools/package-app.mjs';
 
 if (process.platform !== 'win32') {
@@ -12,15 +12,7 @@ if (process.platform !== 'win32') {
 }
 
 const demoRoot = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
-const repoRoot = path.resolve(demoRoot, '../..');
-const hostCandidates = [
-  'hosts/windows/NatuiHost/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
-  'hosts/windows/NatuiHost/bin/x64/Debug/net8.0-windows10.0.19041.0/win-x64/NatuiHost.exe',
-];
-const host = hostCandidates
-  .map((candidate) => path.join(repoRoot, candidate))
-  .find(existsSync);
-assert.ok(host, 'Windows NatUI host is not built');
+const host = defaultHostCommand().cmd;
 
 const fixture = await mkdtemp(path.join(demoRoot, '.natui-runtime-failure-'));
 const entry = path.join(fixture, 'main.tsx');
