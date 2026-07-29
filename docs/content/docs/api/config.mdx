@@ -22,8 +22,8 @@ as the second argument, as in
 `loadAppConfig(undefined, { allowMissing: true })`, when a missing config
 should return `undefined` instead of throwing.
 
-`validateAppConfig()` validates an already parsed value. Unknown properties,
-absolute paths, and paths that escape the application directory are rejected.
+`validateAppConfig()` validates an already parsed value. It rejects unknown
+properties, absolute paths, and paths that escape the application directory.
 
 <auto-type-table path="../../../../packages/natui/app-config.d.ts" name="NatuiAppConfig" />
 

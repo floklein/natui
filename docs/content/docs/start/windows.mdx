@@ -30,7 +30,7 @@ $env:NATUI_HOST = "C:\path\to\NatuiHost.exe"
 pnpm demo
 ```
 
-Do not use `dotnet run` as the spawn target. Its wrapper process breaks the parent-child lifetime and standard-stream semantics expected by NatUI.
+Do not use `dotnet run` as the spawn target. Its wrapper process breaks the parent-child lifetime and standard-stream semantics that NatUI expects.
 
 ## Verification status
 

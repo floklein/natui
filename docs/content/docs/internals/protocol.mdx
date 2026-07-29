@@ -140,9 +140,9 @@ Presentation hosts can optimistically set only `false`, representing native dism
 
 Sheet and popover content materializes eagerly whether or not it is presented.
 
-Alert children are ignored because its content is data-driven. A button press emits `select` first and dismissal `change(false)` second. The ordering lets the select handler close state without re-presenting the alert between events.
+The host ignores alert children because alert content is data-driven. A button press emits `select` first and dismissal `change(false)` second. The ordering lets the select handler close state without re-presenting the alert between events.
 
-A popover's ordinary children form its anchor. Its first `PopoverContent` child forms the presented body; extra content slots are ignored with a diagnostic.
+A popover's ordinary children form its anchor. Its first `PopoverContent` child forms the presented body; the host ignores extra content slots and reports a diagnostic.
 
 ## Menu and toolbar specifications
 
@@ -164,7 +164,7 @@ Toolbar items can be spacers, flexible spaces, buttons, toggles, menus, or searc
 
 A `List` becomes selectable when its props include `value`, including null. Rows use the common `tag` prop as identity.
 
-Single selection is a string or null. Multiple selection is a sorted string array, and an empty selection is `[]`, not null. Rows without tags should not be used in selectable lists.
+Single selection is a string or null. Multiple selection is a sorted string array, and an empty selection is `[]`, not null. Give every row in a selectable list a tag.
 
 Table selection uses row ids and the same value shapes.
 

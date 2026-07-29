@@ -37,7 +37,7 @@ const capabilities = [
   {
     number: '03',
     title: 'React state, native events',
-    text: 'Hooks and reconciliation work as expected while protocol-level sequence acknowledgements keep controlled inputs stable.',
+    text: 'Hooks and reconciliation work as expected, and protocol-level sequence acknowledgements keep controlled inputs stable.',
   },
   {
     number: '04',
@@ -103,7 +103,7 @@ export default async function HomePage() {
             </div>
             <div className="runtime-note">
               <span className="status-dot" aria-hidden="true" />
-              NatUI is still in alpha release, and might be subject to breaking changes.
+              NatUI is in alpha. Expect breaking changes.
             </div>
           </div>
 
@@ -184,7 +184,7 @@ export default async function HomePage() {
             <p className="eyebrow">One React tree, two honest platforms</p>
             <h2>Shared intent, native results.</h2>
             <p>
-              The API stays consistent while SwiftUI and WinUI preserve their own typography,
+              The API stays consistent; SwiftUI and WinUI preserve their own typography,
               spacing, controls, and interaction language.
             </p>
           </div>

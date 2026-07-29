@@ -48,4 +48,4 @@ Action items support `id`, `label`, `systemImage`, `role`, `shortcut`, `disabled
 
 Selection events fire only for enabled leaf actions. Checkmarks are prop-driven, so update the source data after selection. Command roles do not emit a selection event. Most invoke a platform command, while the Windows `about` role is currently inert.
 
-On Windows, element children inside a `Menu` label are ignored. Use text children or `systemImage`.
+Windows ignores element children inside a `Menu` label. Use text children or `systemImage`.
