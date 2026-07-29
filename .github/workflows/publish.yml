@@ -6,7 +6,7 @@ on:
 
 # id-token lets npm authenticate this workflow run through OpenID Connect.
 # There is no npm token anywhere; npmjs.com must list this workflow file as
-# the trusted publisher for both packages.
+# the trusted publisher for all three packages.
 permissions:
   contents: read
   id-token: write
@@ -29,11 +29,19 @@ jobs:
       - run: pnpm build
       - run: pnpm test
       # Confirms the workspace versions match the pushed tag and re-validates
-      # both tarballs before anything reaches the registry.
+      # all three tarballs before anything reaches the registry.
       - run: pnpm release:check "$GITHUB_REF_NAME"
       - name: Publish @natui/core
         working-directory: packages/natui
         run: npm publish
+      # @natui/dev declares its @natui/core peer with the workspace protocol,
+      # which only pnpm rewrites to a real version range. Pack with pnpm, then
+      # let npm publish the tarball so OIDC trusted publishing still applies.
+      - name: Publish @natui/dev
+        working-directory: packages/natui-dev
+        run: |
+          pnpm pack
+          npm publish "natui-dev-$(node -p "require('./package.json').version").tgz"
       - name: Publish create-natui-app
         working-directory: packages/create-natui-app
         run: npm publish
