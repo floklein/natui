@@ -144,14 +144,16 @@ export async function runWithController(
     if (ready.protocol !== PROTOCOL_VERSION) {
       throw new Error(
         `natui: host speaks protocol v${ready.protocol} but this renderer requires ` +
-          `v${PROTOCOL_VERSION}; rebuild the host to match`,
+          `v${PROTOCOL_VERSION}. Rebuild the host to match, or if it was downloaded ` +
+          'automatically, re-download with: npx natui host install --force',
       );
     }
     if (!Number.isInteger(ready.hostApi) || ready.hostApi < HOST_API_VERSION) {
       const reported = Number.isInteger(ready.hostApi) ? `v${ready.hostApi}` : 'no API level';
       throw new Error(
         `natui: host reports ${reported} but this renderer requires host API ` +
-          `v${HOST_API_VERSION} or newer; rebuild the host to match`,
+          `v${HOST_API_VERSION} or newer. Rebuild the host to match, or if it was ` +
+          'downloaded automatically, re-download with: npx natui host install --force',
       );
     }
     if (!KNOWN_PLATFORMS.has(ready.platform)) {

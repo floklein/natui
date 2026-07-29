@@ -4,10 +4,11 @@
  * unsupported-platform branch, or its not-found message.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { hostRelease, packageVersion } from '../src/bridge/host-cache.js';
 import { defaultHostCommand } from '../src/bridge/locate.js';
 
 /**
@@ -109,6 +110,17 @@ test('an arm64 Windows build is found even though it is not a literal candidate'
   });
 });
 
+/** Fabricate a completed download-cache entry; returns its executable path. */
+function plantCompletedCacheEntry(cacheRoot: string): string {
+  const release = hostRelease(packageVersion(), process.platform, process.arch, {
+    NATUI_HOST_CACHE_DIR: cacheRoot,
+  });
+  mkdirSync(release.directory, { recursive: true });
+  writeFileSync(release.executable, '');
+  writeFileSync(join(release.directory, '.natui-host-ok'), 'test\n');
+  return release.executable;
+}
+
 test('a completed download-cache entry is found when no checkout build exists', (t) => {
   if (process.platform !== 'darwin' && process.platform !== 'win32') {
     t.skip('no candidate layout for this platform');
@@ -116,20 +128,32 @@ test('a completed download-cache entry is found when no checkout build exists', 
   }
   const cacheRoot = tempRoot('natui-locate-cache-');
   const workDir = tempRoot('natui-locate-cwd-');
-  const version = JSON.parse(
-    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-  ).version as string;
-  const target = process.platform === 'darwin' ? 'macos-universal' : `windows-${process.arch}`;
-  const executable = process.platform === 'darwin' ? 'natui-host' : 'NatuiHost.exe';
-  const entry = join(cacheRoot, version, target);
-  mkdirSync(entry, { recursive: true });
-  writeFileSync(join(entry, executable), '');
-  writeFileSync(join(entry, '.natui-host-ok'), 'test\n');
+  const executable = plantCompletedCacheEntry(cacheRoot);
 
   withEnv('NATUI_HOST', undefined, () => {
     withEnv('NATUI_HOST_CACHE_DIR', cacheRoot, () => {
       withCwd(workDir, () => {
-        assert.equal(defaultHostCommand().cmd, join(entry, executable));
+        assert.equal(defaultHostCommand().cmd, executable);
+      });
+    });
+  });
+});
+
+test('an unrelated entry named hosts does not disable the download cache', (t) => {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    t.skip('no candidate layout for this platform');
+    return;
+  }
+  const cacheRoot = tempRoot('natui-locate-unrelated-cache-');
+  const workDir = tempRoot('natui-locate-unrelated-cwd-');
+  // An Ansible-style inventory file: named hosts, but not a NatUI checkout.
+  writeFileSync(join(workDir, 'hosts'), '[web]\n');
+  const executable = plantCompletedCacheEntry(cacheRoot);
+
+  withEnv('NATUI_HOST', undefined, () => {
+    withEnv('NATUI_HOST_CACHE_DIR', cacheRoot, () => {
+      withCwd(workDir, () => {
+        assert.equal(defaultHostCommand().cmd, executable);
       });
     });
   });
@@ -141,7 +165,9 @@ test('a checkout with no build reports that the host has not been built', (t) =>
     return;
   }
   const root = tempRoot('natui-locate-empty-');
-  mkdirSync(join(root, 'hosts'), { recursive: true });
+  // Real checkout markers: a bare hosts/ directory alone must not count.
+  mkdirSync(join(root, 'hosts', 'macos'), { recursive: true });
+  writeFileSync(join(root, 'hosts', 'macos', 'Package.swift'), '');
 
   withEnv('NATUI_HOST', undefined, () => {
     withCwd(root, () => {
