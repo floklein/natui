@@ -117,7 +117,7 @@ jobs:
           if-no-files-found: error
       # Build and package the universal host binary exactly as the Publish
       # workflow will, so a release tag never hits a broken host asset build.
-      - run: swift build -c release --arch arm64 --arch x86_64 --package-path hosts/macos
+      - run: node tools/build-host-macos-universal.mjs
       - run: node tools/package-host.mjs macos-universal
       - uses: actions/upload-artifact@v4
         with:
