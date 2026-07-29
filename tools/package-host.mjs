@@ -65,7 +65,7 @@ function resolveInput(target, override) {
     return full;
   }
   if (target === 'macos-universal') {
-    // `swift build --arch arm64 --arch x86_64` writes the universal binary
+    // tools/build-host-macos-universal.mjs writes the universal binary
     // under .build/apple; a plain release build is a single-arch fallback for
     // local experiments and gets a loud warning.
     const universal = join(
@@ -77,8 +77,7 @@ function resolveInput(target, override) {
     if (existsSync(singleArch)) {
       console.error(
         'package-host: WARNING: using a single-architecture macOS build; ' +
-          'release archives must come from: ' +
-          'swift build -c release --arch arm64 --arch x86_64 --package-path hosts/macos',
+          'release archives must come from: node tools/build-host-macos-universal.mjs',
       );
       return singleArch;
     }
