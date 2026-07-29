@@ -55,8 +55,9 @@ actions for interactive use.
 1. Install or invoke the `natui` skill.
 2. Read [`llms.txt`](/llms.txt) and select only the relevant setup, component,
    guide, and status pages.
-3. Inspect the current checkout before editing. NatUI is in alpha, and the
-   registry package does not include native host binaries.
+3. Inspect the current checkout before editing. NatUI is in alpha. The
+   registry package downloads a prebuilt native host on first launch; inside
+   the framework repository, the host builds from source.
 4. Implement with React state and NatUI components. Do not introduce DOM
    elements, CSS, or browser event APIs.
 5. Build the matching native host and validate on the target platform.

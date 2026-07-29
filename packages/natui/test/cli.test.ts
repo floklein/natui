@@ -14,7 +14,10 @@ const run = promisify(execFile);
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(PACKAGE_ROOT, 'src', 'cli.ts');
 
-async function natui(args: string[]): Promise<{
+async function natui(
+  args: string[],
+  env?: Record<string, string>,
+): Promise<{
   code: number;
   stdout: string;
   stderr: string;
@@ -23,7 +26,7 @@ async function natui(args: string[]): Promise<{
     const { stdout, stderr } = await run(
       process.execPath,
       ['--import', 'tsx', CLI, ...args],
-      { cwd: PACKAGE_ROOT },
+      { cwd: PACKAGE_ROOT, env: env ? { ...process.env, ...env } : undefined },
     );
     return { code: 0, stdout, stderr };
   } catch (error) {
@@ -39,20 +42,20 @@ async function natui(args: string[]): Promise<{
 test('no arguments prints usage and succeeds', async () => {
   const { code, stdout } = await natui([]);
   assert.equal(code, 0);
-  assert.match(stdout, /Usage: natui dev \[entry\]/);
+  assert.match(stdout, /Usage: natui <command>/);
 });
 
 test('--help prints usage and succeeds', async () => {
   const { code, stdout } = await natui(['--help']);
   assert.equal(code, 0);
-  assert.match(stdout, /Usage: natui dev \[entry\]/);
+  assert.match(stdout, /Usage: natui <command>/);
 });
 
 test('an unknown command reports the command and shows usage, without a stack', async () => {
   const { code, stderr } = await natui(['bogus']);
   assert.equal(code, 1);
   assert.match(stderr, /unknown command "bogus"/);
-  assert.match(stderr, /Usage: natui dev \[entry\]/);
+  assert.match(stderr, /Usage: natui <command>/);
   assert.doesNotMatch(stderr, /at ModuleJob|at async|\.ts:\d+:\d+/);
 });
 
@@ -73,5 +76,31 @@ test('a second positional argument is reported as unexpected', async () => {
   const { code, stderr } = await natui(['dev', 'a.tsx', 'b.tsx']);
   assert.equal(code, 1);
   assert.match(stderr, /unexpected argument "b.tsx"/);
-  assert.match(stderr, /Usage: natui dev \[entry\]/);
+  assert.match(stderr, /Usage: natui <command>/);
+});
+
+test('host path prints the resolved executable', async () => {
+  const { code, stdout } = await natui(['host', 'path'], {
+    NATUI_HOST: '/custom/host-binary',
+  });
+  assert.equal(code, 0);
+  assert.equal(stdout.trim(), '/custom/host-binary');
+});
+
+test('host without an action explains the choices', async () => {
+  const { code, stderr } = await natui(['host']);
+  assert.equal(code, 1);
+  assert.match(stderr, /"host" needs an action: install or path/);
+});
+
+test('an unknown host action is rejected', async () => {
+  const { code, stderr } = await natui(['host', 'bogus']);
+  assert.equal(code, 1);
+  assert.match(stderr, /unknown host action "bogus"/);
+});
+
+test('host install rejects unknown options before touching the network', async () => {
+  const { code, stderr } = await natui(['host', 'install', '--offline']);
+  assert.equal(code, 1);
+  assert.match(stderr, /unknown option "--offline"/);
 });

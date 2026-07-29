@@ -309,7 +309,9 @@ const cliSmoke = spawnSync(process.execPath, ['bin/natui.js', '--help'], {
 });
 if (cliSmoke.error) throw cliSmoke.error;
 assert.equal(cliSmoke.status, 0, cliSmoke.stderr || 'natui CLI failed to start');
-assert.match(cliSmoke.stdout, /^Usage: natui dev \[entry\]/);
+assert.match(cliSmoke.stdout, /^Usage: natui <command>/);
+assert.match(cliSmoke.stdout, /dev \[entry\]/);
+assert.match(cliSmoke.stdout, /host install/);
 assert.match(cliSmoke.stdout, /natui\.app\.json/);
 
 const createPackageDirectory = resolve(root, 'packages/create-natui-app');

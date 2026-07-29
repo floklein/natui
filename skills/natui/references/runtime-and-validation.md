@@ -2,9 +2,10 @@
 
 ## Start from a compatible checkout
 
-`@natui/core` and `create-natui-app` come from npm, but the native hosts still
-require a source checkout. Use Node.js 22 or newer, pnpm 11, and the native
-toolchain for the target platform.
+`@natui/core` and `create-natui-app` come from npm. Standalone applications
+download a prebuilt native host on first launch, so a source checkout is only
+needed when working on NatUI itself. For that, use Node.js 22 or newer, pnpm
+11, and the native toolchain for the target platform.
 
 ```bash
 git clone https://github.com/floklein/natui.git
@@ -47,8 +48,10 @@ pnpm build:host:macos
 dotnet build hosts/windows/NatuiHost -p:Platform=x64
 ```
 
-The bridge searches known build outputs. Set `NATUI_HOST` to the exact
-executable when the desired host is elsewhere or several artifacts exist. Do
+The bridge prefers `NATUI_HOST`, then known checkout build outputs, then the
+per-user download cache (never inside a checkout, where the source build is
+the only acceptable host). Set `NATUI_HOST` to the exact executable when the
+desired host is elsewhere or several artifacts exist. Do
 not use `dotnet run` as the Windows spawn target because its wrapper breaks the
 expected process and standard-stream lifecycle.
 

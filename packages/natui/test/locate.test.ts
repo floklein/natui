@@ -4,7 +4,7 @@
  * unsupported-platform branch, or its not-found message.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -105,6 +105,32 @@ test('an arm64 Windows build is found even though it is not a literal candidate'
   withEnv('NATUI_HOST', undefined, () => {
     withCwd(root, () => {
       assert.equal(defaultHostCommand().cmd, planted);
+    });
+  });
+});
+
+test('a completed download-cache entry is found when no checkout build exists', (t) => {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    t.skip('no candidate layout for this platform');
+    return;
+  }
+  const cacheRoot = tempRoot('natui-locate-cache-');
+  const workDir = tempRoot('natui-locate-cwd-');
+  const version = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  ).version as string;
+  const target = process.platform === 'darwin' ? 'macos-universal' : `windows-${process.arch}`;
+  const executable = process.platform === 'darwin' ? 'natui-host' : 'NatuiHost.exe';
+  const entry = join(cacheRoot, version, target);
+  mkdirSync(entry, { recursive: true });
+  writeFileSync(join(entry, executable), '');
+  writeFileSync(join(entry, '.natui-host-ok'), 'test\n');
+
+  withEnv('NATUI_HOST', undefined, () => {
+    withEnv('NATUI_HOST_CACHE_DIR', cacheRoot, () => {
+      withCwd(workDir, () => {
+        assert.equal(defaultHostCommand().cmd, join(entry, executable));
+      });
     });
   });
 });

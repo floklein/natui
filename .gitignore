@@ -16,6 +16,9 @@ hosts/macos/.swiftpm/
 hosts/windows/**/bin/
 hosts/windows/**/obj/
 
+# Host release archives from tools/package-host.mjs
+dist-host/
+
 # scratch
 .natui-build/
 *.log

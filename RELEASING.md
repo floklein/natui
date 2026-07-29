@@ -41,7 +41,9 @@ pnpm release:check v0.2.0
 
 The latest `main` CI run must also be green. The Linux job uploads the
 `@natui/core` and `create-natui-app` tarballs. Its macOS and Windows jobs build
-the native hosts and inspect the platform package artifacts.
+the native hosts, inspect the platform package artifacts, and package the
+prebuilt host release archives with `tools/package-host.mjs`, exactly as the
+`Publish` workflow will.
 
 ## 3. Run native verification
 
@@ -89,16 +91,28 @@ do not already exist.
 Only after both platform checks and the exact release commit are approved:
 
 1. Create the signed release tag on the approved commit and push the tag.
-2. The tag push starts the `Publish` workflow. It re-runs the release check
-   against the tag, then publishes `packages/natui` and
-   `packages/create-natui-app` through npm trusted publishing. Confirm the run
-   succeeds.
-3. Create the GitHub release from the same tag using the matching changelog
-   section.
-4. Attach the macOS archive and Windows executable produced from that commit.
-5. Verify both npm versions, `npx create-natui-app@<version> --version`, the
-   remote tag, the GitHub release, and both downloaded native artifacts
-   independently.
+2. The tag push starts the `Publish` workflow, which runs in this order:
+   1. Builds the prebuilt host release archives: a universal macOS binary and
+      the self-contained x64 and arm64 Windows folders, each with a `.sha256`
+      sibling.
+   2. Creates the GitHub release from the tag with the matching `CHANGELOG.md`
+      section (the workflow fails when the section is missing) and attaches
+      the host archives. This happens before npm so an installed package can
+      always download its host.
+   3. Re-runs the release check against the tag, then publishes
+      `packages/natui` and `packages/create-natui-app` through npm trusted
+      publishing.
+
+   Confirm the run succeeds.
+3. Attach the demo application artifacts produced from that commit to the
+   release when desired; the host archives are already there.
+4. Verify both npm versions, `npx create-natui-app@<version> --version`, the
+   remote tag, and the GitHub release. In a scratch directory outside any
+   checkout, verify the download path end to end:
+
+   ```bash
+   npx --yes --package @natui/core@<version> natui host install
+   ```
 
 The `Publish` workflow authenticates with an OpenID Connect token, so no npm
 account token exists in the repository, and npm generates provenance

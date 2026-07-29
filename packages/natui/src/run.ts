@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Bridge } from './bridge/bridge.js';
-import { defaultHostCommand } from './bridge/locate.js';
+import { ensureHostCommand } from './bridge/locate.js';
 import { type HostCommand, spawnStdioTransport } from './bridge/transport.js';
 import {
   HOST_API_VERSION,
@@ -86,7 +86,7 @@ export async function runWithController(
   } = options;
 
   const hostCmd: HostCommand =
-    typeof host === 'string' ? { cmd: host } : (host ?? defaultHostCommand());
+    typeof host === 'string' ? { cmd: host } : (host ?? (await ensureHostCommand()));
 
   const transport = spawnStdioTransport(hostCmd);
   // The Bridge subscribes immediately: no message can fall between the

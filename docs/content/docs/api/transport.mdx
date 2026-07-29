@@ -39,6 +39,26 @@ Spawns a host process and exchanges newline-delimited JSON over its standard inp
 
 ## defaultHostCommand
 
-Checks `NATUI_HOST` first, then searches upward from the current directory for known macOS or Windows build outputs.
+Checks `NATUI_HOST` first, then searches upward from the current directory for known macOS or Windows build outputs, then the per-user download cache. Synchronous; it never downloads.
+
+## ensureHostCommand
+
+```ts
+async function ensureHostCommand(): Promise<HostCommand>
+```
+
+Resolves like `defaultHostCommand`, but when nothing local matches and the process is not inside a NatUI source checkout, it downloads the release's prebuilt host into the per-user cache and returns that. `run()` uses this resolver, so applications installed from npm work without a source checkout.
+
+## installHost
+
+```ts
+async function installHost(options?: {
+  version?: string;
+  force?: boolean;
+  log?: (message: string) => void;
+}): Promise<string>
+```
+
+Downloads the prebuilt host archive for this release from its GitHub release, verifies the published SHA-256 checksum, extracts it into the per-user cache, and returns the executable path. Returns the cached executable without downloading when the cache is already complete, unless `force` is set. The `natui host install` CLI command wraps this function.
 
 The shipped host process protocol uses standard streams. `@natui/core/inproc` provides a separate internal transport for an embedding host.
