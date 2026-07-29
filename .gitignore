@@ -5,6 +5,8 @@ dist/
 .DS_Store
 docs/.next/
 docs/.source/
+# fumadocs output when the docs dev server runs from the repo root
+.source/
 
 # Swift
 hosts/macos/.build/

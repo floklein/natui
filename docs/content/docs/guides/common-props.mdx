@@ -47,7 +47,7 @@ All dimensions use logical points. A frame participates in native layout and is 
 
 Props that cross to the host must contain strings, finite numbers, booleans, null, arrays, or plain objects made from those values. Event-handler functions stay in JavaScript and are never serialized.
 
-Invalid values such as `BigInt`, circular objects, class instances, nested functions, or non-finite numbers are reported with their component kind and prop path, then omitted.
+When a prop contains an invalid value such as a `BigInt`, a circular object, a class instance, a nested function, or a non-finite number, NatUI reports the component kind and prop path, then omits the value.
 
 ## Platform details
 

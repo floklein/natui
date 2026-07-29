@@ -64,7 +64,7 @@ A native window close invokes `onClose` once and then uses the same shutdown
 path. A startup compatibility failure also requests host shutdown and detaches
 the receive hook.
 
-The entrypoint contains no Node built-ins and is intended for browser-platform
+The entrypoint contains no Node built-ins and targets browser-platform
 bundling. The repository implements this embedding contract with JavaScriptCore
 on macOS and V8 on Windows. Packaged applications use this same API. See
 [application bundles](/docs/guides/application-bundles).

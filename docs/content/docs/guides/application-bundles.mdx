@@ -71,7 +71,7 @@ entry and platform-specific native icon paths:
 | `icons.windows` | Optional `.ico` path |
 
 Entry, output, and icon paths must stay inside the application directory.
-Unknown configuration fields fail packaging instead of being ignored.
+Packaging fails on unknown configuration fields rather than ignoring them.
 
 `natui dev` chooses its entry in this order: a positional CLI argument, the
 configured `entry`, then `src/main.tsx`. All config paths resolve relative to
@@ -89,7 +89,7 @@ its platform:
   guidance](https://developer.apple.com/design/human-interface-guidelines/app-icons/).
 - **Windows:** Provide a valid multi-image `.ico` file. For broad
   display-quality coverage, it should include 16, 24, 32, 48, and 256 pixel
-  representations. A transparent background is recommended. The packager
+  representations. Prefer a transparent background. The packager
   passes it to MSBuild as `ApplicationIcon`, which embeds it in the
   executable. Follow [Microsoft's app icon
   guidance](https://learn.microsoft.com/windows/apps/design/iconography/app-icon-construction).
@@ -114,9 +114,9 @@ manifest, WinUI host, .NET runtime, Windows App SDK runtime, and V8
 dependencies.
 
 The .NET single-file host extracts its runtime dependencies into a cache under
-the current user's temporary directory at launch. This extraction is managed
-by the runtime and does not install machine-wide dependencies. Copy the one
-EXE to ship the application.
+the current user's temporary directory at launch. The runtime manages the
+extraction and installs nothing machine-wide. Copy the one EXE to ship the
+application.
 
 ### macOS
 

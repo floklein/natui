@@ -29,9 +29,9 @@ There is no Yoga or browser layout layer. The tradeoff is intentional: applicati
 
 `packages/natui` uses react-reconciler mutation mode with a JavaScript shadow tree. Each instance records its id, kind, props, handlers, children, and materialization state.
 
-Render-phase methods only construct or rearrange the shadow tree. Protocol operations are emitted during commit work after a node attaches to a materialized parent.
+Render-phase methods only construct or rearrange the shadow tree. Commit work emits protocol operations after a node attaches to a materialized parent.
 
-All operations from one React commit are buffered and sent as one `commit` message. A host applies the complete batch on its UI thread before one render pass, so it never displays an intermediate commit state.
+The bridge buffers all operations from one React commit and sends them as one `commit` message. A host applies the complete batch on its UI thread before one render pass, so it never displays an intermediate commit state.
 
 React may discard render-phase instances. Deferring protocol creation until attachment prevents abandoned nodes from leaking into the native tree.
 
@@ -39,7 +39,7 @@ React may discard render-phase instances. Deferring protocol creation until atta
 
 Event-handler functions remain in a JavaScript registry. The host emits an event with the node id and event name, then the bridge locates and invokes the current handler.
 
-Other props are validated and deep-copied into documented JSON values before serialization. Invalid nested values are reported with their component kind and path. A commit is all-or-nothing, so serialization failure cannot partially mutate the native tree.
+NatUI validates other props and deep-copies them into documented JSON values before serialization. It reports invalid nested values with their component kind and path. A commit is all-or-nothing, so serialization failure cannot partially mutate the native tree.
 
 ## Controlled inputs
 

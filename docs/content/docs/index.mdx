@@ -3,9 +3,9 @@ title: NatUI documentation
 description: Build real SwiftUI and WinUI 3 desktop interfaces with React and TypeScript.
 ---
 
-NatUI is an alpha React 19 renderer for real native desktop controls. Your TypeScript and React state stay in JavaScript while SwiftUI on macOS or WinUI 3 on Windows owns layout, theming, focus, and accessibility.
+NatUI is an alpha React 19 renderer for real native desktop controls. Your TypeScript and React state stay in JavaScript; SwiftUI on macOS or WinUI 3 on Windows owns layout, theming, focus, and accessibility.
 
-There is no webview, Electron runtime, or browser layout engine.
+No webview, no Electron runtime, no browser layout engine.
 
 ```tsx typecheck
 import { useState } from 'react';
@@ -42,8 +42,8 @@ await run(<App />, { title: 'my app', width: 480, height: 320 });
 ## Current status
 
 NatUI is still in alpha. The registry packages provide the JavaScript runtime,
-development tooling, config loader, and project generator. Native hosts are
-still built from the source repository. Both hosts have real-window
+development tooling, config loader, and project generator. You still build
+native hosts from the source repository. Both hosts have real-window
 verification for the base demo, kitchen-sink app-shell workflow, and their
 embedded JavaScript runtimes. The repository-local packager emits a macOS
 `.app` or one self-contained Windows EXE.
