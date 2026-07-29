@@ -30,7 +30,7 @@ because NatUI is in alpha.
 - Use ordinary React state, effects, keys, and conditional rendering.
 - Build the interface from NatUI components. Do not emit HTML, DOM elements,
   CSS, browser events, or React DOM APIs.
-- Import `run` from `natui` for the Node development path. Prefer
+- Import `run` from `@natui/core` for the Node development path. Prefer
   `@natui/core/components` for component modules that must remain free of Node.js
   built-ins, especially embedded bundles.
 - Keep editable controls and presentations controlled with `value` and
@@ -48,7 +48,7 @@ because NatUI is in alpha.
 
 ## Validate the result
 
-1. Build the `natui` package before workspace typechecking when examples resolve
+1. Build the `@natui/core` package before workspace typechecking when examples resolve
    generated package declarations.
 2. Run the relevant contract tests and TypeScript checks.
 3. Build the matching SwiftUI or WinUI 3 host from the same checkout.
@@ -62,8 +62,10 @@ because NatUI is in alpha.
 
 ## Preserve alpha boundaries
 
-- Do not claim that NatUI is available from a public package registry. The
-  documented workflow currently uses a source checkout.
+- `@natui/core` and `create-natui-app` are published npm packages, but they
+  ship only the JavaScript side. Do not claim that an installed package
+  provides a native host; the SwiftUI and WinUI 3 hosts are still built from a
+  source checkout.
 - Do not promise stable packaging or permanent component behavior.
 - Do not treat a successful host build or JavaScript test as a real-window UI
   result.

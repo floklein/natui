@@ -4,16 +4,13 @@ import { forwardRef, memo } from 'react';
 import {
   beginRefreshTransaction,
   installRefreshRuntime,
-  REFRESH_RUNTIME_GLOBAL,
   refreshRuntime,
-  type ReactRefreshRuntime,
-} from '../src/dev/refresh.js';
+  refreshRuntimeFacade,
+} from '../src/refresh.js';
 
 installRefreshRuntime();
 
-const facade = (globalThis as Record<string, unknown>)[
-  REFRESH_RUNTIME_GLOBAL
-] as ReactRefreshRuntime;
+const facade = refreshRuntimeFacade;
 
 test('refresh transaction rolls memo families back recursively', () => {
   const id = 'natui/test/transaction-memo';

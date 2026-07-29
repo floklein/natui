@@ -84,6 +84,26 @@ const exampleContextNames = [
   'volume',
 ];
 
+function typecheckFences(source) {
+  const found = [];
+  let fence;
+
+  for (const [index, line] of source.split(/\r?\n/).entries()) {
+    const marker = /^[ \t]*(`{3,})[ \t]*(.*)$/.exec(line);
+    if (!marker) continue;
+
+    const [, ticks, info] = marker;
+    if (!fence) {
+      fence = ticks.length;
+      if (/\btypecheck\b/.test(info)) found.push({ info: info.trim(), line: index + 1 });
+    } else if (ticks.length >= fence && info.trim() === '') {
+      fence = undefined;
+    }
+  }
+
+  return found;
+}
+
 function wrapComponentExample(code) {
   const indented = code
     .trim()
@@ -105,12 +125,14 @@ function wrapComponentExample(code) {
   ].join('\n');
 }
 
+const skipped = [];
+
 for (const filePath of await walk(contentRoot)) {
   const source = await readFile(filePath, 'utf8');
   let index = 0;
 
   for (const match of source.matchAll(
-    /^[ \t]*```tsx[ \t]+typecheck[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gm,
+    /^[ \t]*```(?:ts|tsx)[ \t]+typecheck[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gm,
   )) {
     index += 1;
     examples.push({
@@ -119,6 +141,20 @@ for (const filePath of await walk(contentRoot)) {
       generatedName: `${relativePath(filePath).replaceAll('/', '__')}__${index}.tsx`,
       kind: 'standalone',
     });
+  }
+
+  const fences = typecheckFences(source);
+  if (fences.length !== index) {
+    const mislabeled = fences.filter((fence) => !/^(?:ts|tsx)[ \t]+typecheck$/.test(fence.info));
+    if (mislabeled.length > 0) {
+      for (const fence of mislabeled) {
+        skipped.push(`${relativePath(filePath)}:${fence.line} \`\`\`${fence.info}`);
+      }
+    } else {
+      skipped.push(
+        `${relativePath(filePath)} declares ${fences.length} typecheck fences but ${index} were collected`,
+      );
+    }
   }
 
   if (path.dirname(filePath) !== componentContentRoot) continue;
@@ -137,8 +173,14 @@ for (const filePath of await walk(contentRoot)) {
   }
 }
 
+if (skipped.length > 0) {
+  throw new Error(
+    `Typecheck examples were declared but not collected:\n${skipped.join('\n')}\nUse \`\`\`ts typecheck or \`\`\`tsx typecheck.`,
+  );
+}
+
 if (examples.length === 0) {
-  throw new Error('No ```tsx typecheck examples were found.');
+  throw new Error('No ```ts typecheck or ```tsx typecheck examples were found.');
 }
 
 await rm(generatedRoot, { recursive: true, force: true });
@@ -171,7 +213,8 @@ const program = ts.createProgram(generatedFiles, {
     '@natui/core': ['../packages/natui/src/index.ts'],
     '@natui/core/components': ['../packages/natui/src/components.ts'],
     '@natui/core/inproc': ['../packages/natui/src/inproc.ts'],
-    '@natui/core/dev': ['../packages/natui/src/dev/index.ts'],
+    '@natui/dev': ['../packages/natui-dev/src/index.ts'],
+    '@natui/core/config': ['../packages/natui/app-config.d.ts'],
   },
 });
 

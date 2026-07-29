@@ -134,7 +134,10 @@ export function projectMetadata(directoryName) {
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-');
   if (!packageName) {
-    throw new CliUsageError('project directory must contain at least one letter or number');
+    throw new CliUsageError(
+      'the directory name must contain ASCII letters or digits, because the generated '
+      + 'npm package name is derived from it',
+    );
   }
   if (packageName.length > 214) {
     throw new CliUsageError('generated package name must be 214 characters or fewer');

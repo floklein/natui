@@ -135,9 +135,10 @@ internal static class AppBundle
         {
             var actualHash = Convert.ToHexString(
                 SHA256.HashData(sourceBytes)).ToLowerInvariant();
-            if (!CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(expectedHash),
-                Convert.FromHexString(actualHash)))
+            // The digest and the entry it covers ship in the same embedded
+            // resource set, so this catches a stale or partial publish rather
+            // than tampering; an ordinary comparison is what it calls for.
+            if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
             {
                 error = "App entry integrity check failed.";
                 return false;

@@ -213,17 +213,48 @@ function resolvedLocalModuleId(
   return resolvedUrl.href;
 }
 
+/** Files that mark a monorepo root for every package manager, not just pnpm. */
+const WORKSPACE_MARKERS = [
+  'pnpm-workspace.yaml',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'package-lock.json',
+  'bun.lockb',
+  'lerna.json',
+];
+
+async function hasWorkspacesField(directory: string): Promise<boolean> {
+  try {
+    const manifest = JSON.parse(
+      await readFile(join(directory, 'package.json'), 'utf8'),
+    ) as { workspaces?: unknown };
+    return manifest.workspaces !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The nearest ancestor that looks like a workspace root. This decides which
+ * modules get bundled rather than externalized, the Fast Refresh family-id
+ * namespace, and `preserveModulesRoot` — so detecting only pnpm silently
+ * degraded cross-package Fast Refresh in npm/yarn/bun monorepos.
+ */
 async function findWorkspaceRoot(root: string): Promise<string> {
   let candidate = root;
   for (;;) {
-    try {
-      await access(join(candidate, 'pnpm-workspace.yaml'));
-      return candidate;
-    } catch {
-      const parent = dirname(candidate);
-      if (parent === candidate) return root;
-      candidate = parent;
+    if (await hasWorkspacesField(candidate)) return candidate;
+    for (const marker of WORKSPACE_MARKERS) {
+      try {
+        await access(join(candidate, marker));
+        return candidate;
+      } catch {
+        // Not this marker; try the next.
+      }
     }
+    const parent = dirname(candidate);
+    if (parent === candidate) return root;
+    candidate = parent;
   }
 }
 
@@ -762,7 +793,10 @@ export async function createDevServer(
     runtimeSession,
     workspaceRoot,
   } = await prepareDevServerResources(root, entry, id);
-  const packageIndexUrl = new URL('../index.js', import.meta.url).href;
+  // `@natui/core` is resolved as a real specifier, not by walking up from this
+  // file: this package sits beside core rather than inside it, and an app's
+  // copy of core is whatever its own dependency tree resolves.
+  const packageIndexUrl = import.meta.resolve('@natui/core');
   const runtimeUrl = new URL('./runtime.js', import.meta.url).href;
 
   let watcher: RollupWatcher | undefined;
@@ -807,6 +841,20 @@ export async function createDevServer(
     }
   };
   process.once('exit', removeCacheOnExit);
+
+  // KNOWN LIMITATION: `<root>/.natui/dev-*` grows for the life of the session.
+  // Every generation writes revisioned artifacts for the edited module and its
+  // importer chain, and only close() removes them.
+  //
+  // Pruning by generation age was tried and reverted, for two reasons:
+  //  - A dynamic import can first reach a module many generations after that
+  //    module was built, so an artifact is not dead just because newer ones
+  //    exist. Deleting one breaks the lazy import that was about to load it.
+  //  - The cache lives inside the watched root and holds the rebuild trigger
+  //    file, so deleting artifacts can invalidate the watcher and produce a
+  //    spurious extra refresh generation.
+  // A correct bound needs the runtime to report which artifacts are still
+  // reachable, which it does not track today.
 
   const evaluateGeneration = async ({
     artifactFiles,
@@ -940,7 +988,6 @@ export async function createDevServer(
       if (previousTransactionPaused) {
         if (closed) previousCommittedTransaction?.retire();
         else previousCommittedTransaction?.resume();
-        previousTransactionPaused = false;
       }
 
       if (!closed && !superseded) {
@@ -1022,6 +1069,16 @@ export async function createDevServer(
       nextGenerationBundle = undefined;
       void event.result.close().catch(() => undefined);
       if (bundle) scheduleEvaluation(bundle);
+      return;
+    }
+    // Settle on END, not BUNDLE_END. Rollup registers its watch targets during
+    // the build, but the run is only complete at END — settling one event
+    // earlier handed back a server whose file subscriptions could still be
+    // going live, so an edit written immediately after createDevServer()
+    // resolved could be absorbed into the baseline and never trigger a rebuild.
+    // Startup deliberately does NOT wait for the first mount: an app whose
+    // initial render suspends forever must still produce a closable server.
+    if (event.code === 'END') {
       settleFirstBuild();
       return;
     }

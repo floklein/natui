@@ -17,6 +17,13 @@ export interface RunOptions extends WindowProps {
   onClose?: () => void;
   /** Called when React cannot recover from a render error. */
   onUncaughtError?: (error: Error) => void;
+  /**
+   * Called when the host process exits on its own while the app is running.
+   * Default: log and terminate this process with the host's exit code. Provide
+   * this to keep the embedding process alive — the dev server does, so a host
+   * crash does not take down the watcher and HMR clients with it.
+   */
+  onHostExit?: (code: number | null) => void;
   /** Startup handshake timeout override (mainly for tests). */
   readyTimeoutMs?: number;
 }
@@ -73,6 +80,7 @@ export async function runWithController(
     host,
     onClose,
     onUncaughtError,
+    onHostExit,
     readyTimeoutMs,
     ...windowProps
   } = options;
@@ -86,6 +94,10 @@ export async function runWithController(
   const bridge = new Bridge(transport);
 
   let phase: 'starting' | 'running' | 'quitting' = 'starting';
+  // Must stay `let`: quit() closes over this and can run before the assignment
+  // below, where `const` would throw on the temporal dead zone instead of
+  // no-op'ing through `renderer?.unmount()`.
+  // eslint-disable-next-line prefer-const
   let renderer: ReturnType<typeof createManagedNatuiRenderer> | undefined;
   let startupCancellation: Error | undefined;
   let startupComplete = false;
@@ -114,6 +126,10 @@ export async function runWithController(
     // Rejects the pending ready waiter (startup) and any dump/shot waiters.
     bridge.hostExited(code);
     if (phase !== 'running') return; // startup throws / quit() is intentional
+    if (onHostExit) {
+      onHostExit(code);
+      return;
+    }
     if (code === null) {
       // Killed by a signal: never a clean shutdown, say so and fail.
       console.error('[natui] host was terminated by a signal');
@@ -161,8 +177,14 @@ export async function runWithController(
 
   const handleWindowClose = () => {
     if (!startupComplete) {
+      // run() is about to reject with this error. Still notify onClose (the
+      // caller asked to hear about window closes), but never take the default
+      // exit branch: process.exit(0) would race that rejection and kill the
+      // process with a *success* code while the caller is still handling it.
       startupCloseError ??= new Error('natui: host closed during application startup');
       renderer?.cancelPendingRender(startupCloseError);
+      onClose?.();
+      return;
     }
     if (onClose) onClose();
     else {

@@ -429,21 +429,9 @@ public sealed class App : Application, IXamlMetadataProvider
         thread.Start();
     }
 
-    private static Brush PageBackground()
-    {
-        try
-        {
-            if (Current.Resources["ApplicationPageBackgroundThemeBrush"] is Brush brush)
-            {
-                return brush;
-            }
-        }
-        catch (Exception)
-        {
-            // Resource lookup throws on a missing key; fall through.
-        }
-        return new SolidColorBrush(Microsoft.UI.Colors.White);
-    }
+    private static Brush PageBackground() =>
+        Theme.Resource<Brush>("ApplicationPageBackgroundThemeBrush")
+        ?? new SolidColorBrush(Microsoft.UI.Colors.White);
 }
 
 /// <summary>Dispatches inbound protocol messages. Runs on the UI thread.</summary>
@@ -464,11 +452,15 @@ internal sealed class Router(
                 store.Apply(Json.Arr(message, "ops") ?? []);
                 break;
             case "dump":
-                Ipc.Tree(store.DumpTree());
+                // rid is required from host API v2; 0 keeps an older renderer
+                // from hanging on a reply it cannot match.
+                Ipc.Tree(store.DumpTree(), (int)(Json.Int(message, "rid") ?? 0));
                 break;
             case "screenshot":
-                _ = ScreenshotAsync(Json.Str(message, "path")
-                    ?? Path.Combine(Path.GetTempPath(), "natui-shot.png"));
+                _ = ScreenshotAsync(
+                    Json.Str(message, "path")
+                        ?? Path.Combine(Path.GetTempPath(), "natui-shot.png"),
+                    (int)(Json.Int(message, "rid") ?? 0));
                 break;
             case "emit":
                 // Debug: synthesize a user event, exercising the full round trip.
@@ -495,6 +487,7 @@ internal sealed class Router(
                 app.WindowClosed();
                 break;
             case "quit":
+                Ipc.QuitAck();
                 app.Quit();
                 break;
             default:
@@ -520,8 +513,8 @@ internal sealed class Router(
             && Json.Num(props, "minHeight") is { } minHeight
             && window.AppWindow.Presenter is OverlappedPresenter presenter)
         {
-            // WASDK 1.7 presenter-enforced minimum (WM_GETMINMAXINFO under
-            // the hood), same physical-pixel convention as ResizeClient.
+            // Presenter-enforced minimum (WM_GETMINMAXINFO under the hood),
+            // same physical-pixel convention as ResizeClient.
             // Constrains the whole window frame rather than the client area;
             // close enough to the macOS host's contentMinSize for this alpha.
             presenter.PreferredMinimumWidth = (int)Math.Round(minWidth * scale);
@@ -548,7 +541,7 @@ internal sealed class Router(
     /// promise pending (on failure the reply carries an error and no file is
     /// written).
     /// </summary>
-    private async Task ScreenshotAsync(string path)
+    private async Task ScreenshotAsync(string path, int rid)
     {
         try
         {
@@ -583,12 +576,12 @@ internal sealed class Router(
                 pngReader.ReadBytes(png);
             }
             await File.WriteAllBytesAsync(path, png);
-            Ipc.Shot(path);
+            Ipc.Shot(path, rid);
         }
         catch (Exception ex)
         {
             Ipc.Log($"screenshot failed: {ex.Message}");
-            Ipc.Shot(path, string.IsNullOrEmpty(ex.Message) ? ex.GetType().Name : ex.Message);
+            Ipc.Shot(path, rid, string.IsNullOrEmpty(ex.Message) ? ex.GetType().Name : ex.Message);
         }
     }
 }

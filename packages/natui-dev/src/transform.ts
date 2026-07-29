@@ -104,11 +104,10 @@ async function instrumentationNames(
   const allocate = (base: string) => {
     let candidate = base;
     let suffix = 2;
-    while (
-      source.includes(candidate) ||
-      occupiedNames.has(candidate) ||
-      reserved.has(candidate)
-    ) {
+    // The identifier set comes from the parsed AST, which is authoritative for
+    // anything that can actually bind. A raw `source.includes` on top of it
+    // only ever defended a name mentioned inside a string or comment.
+    while (occupiedNames.has(candidate) || reserved.has(candidate)) {
       candidate = `${base}${suffix}`;
       suffix += 1;
     }

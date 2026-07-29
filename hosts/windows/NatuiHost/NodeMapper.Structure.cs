@@ -79,18 +79,8 @@ internal sealed class NatuiListRow : ContentControl
 
     public void ReleaseContent() => _layout.Children.Remove(_content);
 
-    private static Brush ResourceBrush(string key, Brush fallback)
-    {
-        try
-        {
-            if (Application.Current.Resources[key] is Brush brush) return brush;
-        }
-        catch (Exception)
-        {
-            // Missing theme resource, use the stable fallback.
-        }
-        return fallback;
-    }
+    private static Brush ResourceBrush(string key, Brush fallback) =>
+        Theme.Resource<Brush>(key) ?? fallback;
 }
 
 /// <summary>
@@ -781,18 +771,40 @@ internal sealed partial class NodeMapper
         }
         else
         {
-            var id = list.SelectedItem is { } selected ? rowId(selected) : "";
-            if (id.Length == 0)
+            var id = list.SelectedItem is { } selected ? rowId(selected) : null;
+            if (id is { Length: 0 })
             {
                 // Clicking the structural Section item must not clear or
                 // replace the controlled row selection.
                 ReapplyListSelection(node, list);
                 return;
             }
-            value = JsonValue.Create(id);
+            if (id is null && !SelectedRowIsPresent(node, list, rowId))
+            {
+                // SelectedItem also clears when the selected row is removed,
+                // and stays clear while the controlled value names a Section
+                // row (those are not in Items). Neither is a user edit.
+                ReapplyListSelection(node, list);
+                return;
+            }
+            // Deselecting a row (Ctrl+click) reports a real null selection.
+            value = id is null ? null : JsonValue.Create(id);
         }
         node.UserEdit(value);
         ReapplyListSelection(node, list);
+    }
+
+    /// <summary>True when the controlled value names a row still in the list.</summary>
+    private static bool SelectedRowIsPresent(
+        NatuiNode node, ListView list, Func<object, string> rowId)
+    {
+        var value = node.Props.TryGetPropertyValue("value", out var v) ? v : null;
+        if (StringOf(value) is not { } wanted) return false;
+        foreach (var entry in list.Items)
+        {
+            if (rowId(entry) == wanted) return true;
+        }
+        return false;
     }
 
     private bool OnSectionListRowTapped(NatuiNode row)

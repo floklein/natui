@@ -54,8 +54,17 @@ function executableArchitecture(bytes) {
   throw new Error(`packaged executable has unsupported Mach-O CPU type 0x${cpuType.toString(16)}`);
 }
 
+let demoConfigCache;
+
+// The packaged version is whatever natui.app.json declared at package time, so
+// read it from there instead of repeating the literal in the expectations.
+async function readDemoConfig() {
+  demoConfigCache ??= JSON.parse(await readFile(demoConfig, 'utf8'));
+  return demoConfigCache;
+}
+
 async function configuredMacIconPath() {
-  const config = JSON.parse(await readFile(demoConfig, 'utf8'));
+  const config = await readDemoConfig();
   assert.equal(
     typeof config.icons?.macos,
     'string',
@@ -67,9 +76,11 @@ async function configuredMacIconPath() {
 export async function verifyMacPackage(appPath = defaultApp, {
   expectedArchitecture = process.arch,
   expectedIconPath,
+  expectedVersion,
   enforceExecutableMode = process.platform !== 'win32',
   lintPlist = process.platform === 'darwin',
 } = {}) {
+  const version = expectedVersion ?? (await readDemoConfig()).version;
   const absoluteApp = path.resolve(appPath);
   assert.equal(path.basename(absoluteApp), 'NatUIDemo.app', 'package must be NatUIDemo.app');
 
@@ -116,7 +127,7 @@ export async function verifyMacPackage(appPath = defaultApp, {
     CFBundleIdentifier: 'dev.natui.demo',
     CFBundleName: 'NatUI Demo',
     CFBundlePackageType: 'APPL',
-    CFBundleShortVersionString: '0.2.0',
+    CFBundleShortVersionString: version,
     CFBundleVersion: '1',
     LSMinimumSystemVersion: '14.0',
   };
@@ -150,7 +161,7 @@ export async function verifyMacPackage(appPath = defaultApp, {
   assert.equal(manifest.buildNumber, expectedPlist.CFBundleVersion);
   assert.equal(manifest.entry, 'main.js');
   assert.equal(manifest.protocolVersion, 1);
-  assert.equal(manifest.minHostApi, 1);
+  assert.equal(manifest.minHostApi, 2);
   assert.equal(manifest.platform, 'macos');
   assert.equal(manifest.architecture, expectedArchitecture);
   assert.match(manifest.entrySha256, /^[a-f0-9]{64}$/);

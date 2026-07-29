@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { transform } from 'esbuild';
-import { instrumentForRefresh } from '../src/dev/transform.js';
+import { instrumentForRefresh } from '../src/transform.js';
 
 test('development transform adds stable component registrations and hook signatures', async () => {
   const root = resolve('refresh-transform-fixture');

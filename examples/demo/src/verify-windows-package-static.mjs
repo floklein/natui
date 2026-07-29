@@ -10,7 +10,9 @@ if (process.platform !== 'win32') {
 
 const exampleDirectory = fileURLToPath(new URL('..', import.meta.url));
 const demoConfig = path.join(exampleDirectory, 'natui.app.json');
-const expectedName = 'NatUIDemo-0.2.0-windows-x64.exe';
+const config = JSON.parse(await readFile(demoConfig, 'utf8'));
+// x64 only on purpose: the byte-level assertions below pin an x64 PE header.
+const expectedName = `${config.executable}-${config.version}-windows-x64.exe`;
 const packageDirectory = path.join(exampleDirectory, 'dist', 'package');
 const artifact = process.argv[2]
   ? path.resolve(process.argv[2])
@@ -76,7 +78,6 @@ assert.ok(
   'bundle header offset is outside the executable',
 );
 
-const config = JSON.parse(await readFile(demoConfig, 'utf8'));
 assert.equal(
   typeof config.icons?.windows,
   'string',

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Second-tier kind switch. NodeView's builder delegates its `default:` here
-/// so neither switch outgrows SwiftUI's per-builder branch limits; this is
-/// also where the unknown-kind fallback now lives.
+/// so neither file (nor its type-check time) grows unwieldy; this is also
+/// where the unknown-kind fallback now lives.
 struct ExtendedNodeView: View {
     let node: Node
 

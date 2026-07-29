@@ -23,7 +23,7 @@ pnpm build
 pnpm typecheck
 ```
 
-`pnpm build` emits the `natui` package into `packages/natui/dist`. The examples resolve the package through the pnpm workspace, so build the package before running a standalone typecheck.
+`pnpm build` emits the `@natui/core` package into `packages/natui/dist`. The examples resolve the package through the pnpm workspace, so build the package before running a standalone typecheck.
 
 ## Package the demo
 
@@ -53,7 +53,7 @@ The workspace exposes five package entrypoints:
 - `@natui/core` for components, `run`, and advanced protocol exports
 - `@natui/core/components` for component-only bundles that avoid Node built-ins
 - `@natui/core/inproc` for the embedded host entrypoint
-- `@natui/core/dev` for programmatic development-server startup
+- `@natui/dev` for programmatic development-server startup
 - `@natui/core/config` for loading and validating `natui.app.json`
 
 The package also installs `natui dev [entry]` for native development with

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ async function json(relativePath) {
 const manifests = new Map([
   ['package.json', await json('package.json')],
   ['packages/natui/package.json', await json('packages/natui/package.json')],
+  ['packages/natui-dev/package.json', await json('packages/natui-dev/package.json')],
   [
     'packages/create-natui-app/package.json',
     await json('packages/create-natui-app/package.json'),
@@ -30,6 +31,39 @@ assert.match(version, /^\d+\.\d+\.\d+$/, 'natui package version must be semantic
 
 for (const [path, manifest] of manifests) {
   assert.equal(manifest.version, version, `${path} version must be ${version}`);
+}
+
+const DOCUMENTATION_SOURCES = ['README.md', 'docs/content'];
+const ARTIFACT_VERSION_LITERALS = [
+  /[A-Za-z0-9_.-]*-\d+\.\d+\.\d+-(?:windows|macos)-(?:x64|arm64)\S*/,
+  /[A-Za-z0-9_.-]*-\d+\.\d+\.\d+\.tgz/,
+];
+
+async function documentationFiles(relativePath) {
+  const info = await stat(resolve(root, relativePath));
+  if (!info.isDirectory()) return /\.mdx?$/.test(relativePath) ? [relativePath] : [];
+  const entries = await readdir(resolve(root, relativePath), { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map((entry) => documentationFiles(`${relativePath}/${entry.name}`)),
+  );
+  return nested.flat();
+}
+
+for (const source of DOCUMENTATION_SOURCES) {
+  for (const relativePath of await documentationFiles(source)) {
+    const lines = (await readFile(resolve(root, relativePath), 'utf8')).split('\n');
+    lines.forEach((line, index) => {
+      for (const pattern of ARTIFACT_VERSION_LITERALS) {
+        const match = pattern.exec(line);
+        assert.equal(
+          match,
+          null,
+          `${relativePath}:${index + 1} hardcodes the artifact version literal `
+            + `"${match?.[0]}"; use a <version> placeholder so docs survive a release bump`,
+        );
+      }
+    });
+  }
 }
 
 const packageManifest = manifests.get('packages/natui/package.json');
@@ -87,6 +121,12 @@ assert.equal(
   `^${version}`,
   `create-natui-app template must depend on @natui/core@^${version}`,
 );
+assert.equal(
+  createTemplateManifest.devDependencies?.['@natui/dev'],
+  `^${version}`,
+  `create-natui-app template must devDepend on @natui/dev@^${version}; `
+    + 'without it the generated project cannot run `natui dev`',
+);
 const createTemplateConfig = JSON.parse(
   (
     await readFile(
@@ -111,6 +151,9 @@ if (requestedTag) {
   assert.equal(requestedTag, `v${version}`, `release tag must be v${version}`);
 }
 
+// Windows runs npm-cli.js under the current Node rather than spawning npm.cmd:
+// the shim needs an elevated shell on the maintainer's nvm-windows setup and
+// fails with "Access denied" otherwise. Keep the explicit path.
 const npm =
   process.platform === 'win32'
     ? {
@@ -157,17 +200,36 @@ const requiredFiles = [
   'dist/cli.js',
   'dist/components.d.ts',
   'dist/components.js',
-  'dist/dev/index.d.ts',
-  'dist/dev/index.js',
   'dist/index.d.ts',
   'dist/index.js',
   'dist/inproc.d.ts',
   'dist/inproc.js',
+  'dist/internal.d.ts',
+  'dist/internal.js',
   'package.json',
 ];
 
 for (const path of requiredFiles) {
   assert(files.has(path), `release tarball is missing ${path}`);
+}
+
+// The build toolchain must not ride along with the runtime package; that is
+// the whole point of @natui/dev being separate.
+const CORE_FORBIDDEN_DEPENDENCIES = ['@babel/core', 'rollup', 'esbuild', 'react-refresh'];
+const corePackage = manifests.get('packages/natui/package.json');
+for (const name of CORE_FORBIDDEN_DEPENDENCIES) {
+  assert(
+    corePackage.dependencies?.[name] === undefined,
+    `@natui/core must not depend on ${name}; it belongs to @natui/dev`,
+  );
+}
+
+const devTarball = packDryRun('packages/natui-dev');
+assert.equal(devTarball.name, '@natui/dev');
+assert.equal(devTarball.version, version);
+const devFiles = new Set(devTarball.files.map(({ path }) => path.replaceAll('\\', '/')));
+for (const path of ['dist/index.js', 'dist/index.d.ts', 'dist/server.js', 'package.json']) {
+  assert(devFiles.has(path), `@natui/dev tarball is missing ${path}`);
 }
 
 const createTarball = packDryRun('packages/create-natui-app');
@@ -234,7 +296,7 @@ const exportsSmoke = spawnSync(
   [
     '--input-type=module',
     '--eval',
-    "await Promise.all([import('@natui/core'), import('@natui/core/components'), import('@natui/core/inproc'), import('@natui/core/dev'), import('@natui/core/config')]);",
+    "await Promise.all([import('@natui/core'), import('@natui/core/components'), import('@natui/core/inproc'), import('@natui/core/internal'), import('@natui/core/config')]);",
   ],
   { cwd: packageDirectory, encoding: 'utf8' },
 );

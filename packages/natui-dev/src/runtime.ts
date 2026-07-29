@@ -17,7 +17,7 @@ import {
   type NatuiApp,
   type NatuiAppController,
   type RunOptions,
-} from '../run.js';
+} from '@natui/core/internal';
 
 interface PendingRun {
   element: ReactNode;
@@ -286,6 +286,7 @@ class DevRuntimeSession {
     this.pendingRun = { element, options };
     if (!this.appPromise) {
       const userOnUncaughtError = options.onUncaughtError;
+      const userOnHostExit = options.onHostExit;
       const starting = runWithController(
         element,
         {
@@ -297,6 +298,18 @@ class DevRuntimeSession {
             } catch (handlerError) {
               console.error('[natui] development onUncaughtError handler failed:', handlerError);
             }
+          },
+          // The dev server evaluates the user entry in-process, so run()'s
+          // default (process.exit) would take the watcher and HMR clients down
+          // with the host and make a restart impossible. Report and keep going.
+          onHostExit: (code) => {
+            this.app = undefined;
+            console.error(
+              code === null
+                ? '[natui] host was terminated by a signal; the development server is still watching'
+                : `[natui] host exited with code ${code}; the development server is still watching`,
+            );
+            userOnHostExit?.(code);
           },
         },
         (controller) => {

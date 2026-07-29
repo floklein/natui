@@ -48,6 +48,10 @@ extension Color {
     init?(hexString: String?) {
         guard var s = hexString?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
         if s.hasPrefix("#") { s.removeFirst() }
+        // Scanner stops at the first non-hex character and still succeeds (and
+        // accepts a leading "0x"), so validate the whole string first. The
+        // Windows host rejects the same inputs (NodeMapper.BrushFromHex).
+        guard s.count == 6 || s.count == 8, s.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
         var v: UInt64 = 0
         guard Scanner(string: s).scanHexInt64(&v) else { return nil }
         let r: Double, g: Double, b: Double, a: Double
@@ -96,45 +100,20 @@ struct NodeView: View {
         }
     }
 
-    /// Container children: element children as NodeViews, bare `#text`
-    /// children as plain Text (they are part of the typed API and must not
-    /// be dropped by stacks).
-    @ViewBuilder
-    private var childViews: some View {
-        ForEach(node.children, id: \.id) { child in
-            if child.kind == "#text" {
-                Text(child.text)
-            } else {
-                NodeView(node: child)
-            }
-        }
-    }
-
-    /// Label for Button/Toggle: pure-text fast path; mixed labels like
-    /// <Button><Image/> Delete</Button> keep every child in order.
-    @ViewBuilder
-    private var labelContent: some View {
-        if node.nonTextChildren.isEmpty {
-            Text(node.joinedText)
-        } else {
-            HStack(spacing: 4) { childViews }
-        }
-    }
-
     @ViewBuilder
     private var content: some View {
         switch node.kind {
         case "VStack":
-            VStack(alignment: hAlignFor(node.str("alignment")), spacing: node.num("spacing")) { childViews }
+            VStack(alignment: hAlignFor(node.str("alignment")), spacing: node.num("spacing")) { NodeChildren(node: node) }
         case "HStack":
-            HStack(alignment: vAlignFor(node.str("alignment")), spacing: node.num("spacing")) { childViews }
+            HStack(alignment: vAlignFor(node.str("alignment")), spacing: node.num("spacing")) { NodeChildren(node: node) }
         case "ZStack":
-            ZStack { childViews }
+            ZStack { NodeChildren(node: node) }
         case "Text", "#text":
             if node.kind == "Text" && !node.nonTextChildren.isEmpty {
                 // Mixed content (<Text>Total: <Image/></Text>): keep every
                 // child, in order, text rendered inline.
-                HStack(spacing: 0) { childViews }
+                HStack(spacing: 0) { NodeChildren(node: node) }
             } else {
                 textView
             }
@@ -150,9 +129,9 @@ struct NodeView: View {
             pickerView
         case "ScrollView":
             if node.str("axis") == "horizontal" {
-                ScrollView(.horizontal) { HStack(spacing: 0) { childViews } }
+                ScrollView(.horizontal) { HStack(spacing: 0) { NodeChildren(node: node) } }
             } else {
-                ScrollView { VStack(alignment: .leading, spacing: 0) { childViews } }
+                ScrollView { VStack(alignment: .leading, spacing: 0) { NodeChildren(node: node) } }
             }
         case "List":
             ListNodeView(node: node)
@@ -170,9 +149,9 @@ struct NodeView: View {
                 ProgressView()
             }
         default:
-            // Second-tier switch for the app-shell kinds (SwiftUI's
-            // ViewBuilder has a hard branch limit per builder; the unknown-
-            // kind fallback lives there too).
+            // Second-tier switch for the app-shell kinds, split out to keep
+            // this file (and its type-check time) manageable; the unknown-
+            // kind fallback lives there too.
             ExtendedNodeView(node: node)
         }
     }
@@ -204,9 +183,9 @@ struct NodeView: View {
         let base = Button(role: buttonRole) {
             Emitter.event(node.id, "press")
         } label: {
-            labelContent
+            NodeLabel(node: node)
         }
-        switch node.str("variant") {
+        switch node.str("style") {
         case "bordered": base.buttonStyle(.bordered)
         case "prominent": base.buttonStyle(.borderedProminent)
         case "plain": base.buttonStyle(.plain)
@@ -217,23 +196,14 @@ struct NodeView: View {
 
     // -- TextField ----------------------------------------------------------------
 
-    private var textBinding: Binding<String> {
-        Binding(
-            get: { node.str("value") ?? "" },
-            // Optimistic local write + seq so JS echoes can be
-            // staleness-checked (protocol seq/ack); see Node.userEdit.
-            set: { node.userEdit(.string($0)) }
-        )
-    }
-
     @ViewBuilder
     private var textFieldView: some View {
         let placeholder = node.str("placeholder") ?? ""
         Group {
             if node.flag("secure") {
-                SecureField(placeholder, text: textBinding)
+                SecureField(placeholder, text: node.stringBinding)
             } else {
-                TextField(placeholder, text: textBinding)
+                TextField(placeholder, text: node.stringBinding)
             }
         }
         .textFieldStyle(.roundedBorder)
@@ -246,7 +216,7 @@ struct NodeView: View {
 
     @ViewBuilder
     private var toggleView: some View {
-        let base = Toggle(isOn: node.boolBinding) { labelContent }
+        let base = Toggle(isOn: node.boolBinding) { NodeLabel(node: node) }
         switch node.str("style") {
         case "switch": base.toggleStyle(.switch)
         case "checkbox": base.toggleStyle(.checkbox)
@@ -254,34 +224,20 @@ struct NodeView: View {
         }
     }
 
-    private var sliderBinding: Binding<Double> {
-        Binding(
-            get: { node.dbl("value") ?? 0 },
-            set: { node.userEdit(.number($0)) }
-        )
-    }
-
     @ViewBuilder
     private var sliderView: some View {
         let range = (node.dbl("min") ?? 0) ... max(node.dbl("max") ?? 1, (node.dbl("min") ?? 0) + 0.001)
         if let step = node.dbl("step"), step > 0 {
-            Slider(value: sliderBinding, in: range, step: step)
+            Slider(value: node.doubleBinding, in: range, step: step)
         } else {
-            Slider(value: sliderBinding, in: range)
+            Slider(value: node.doubleBinding, in: range)
         }
-    }
-
-    private var pickerBinding: Binding<String> {
-        Binding(
-            get: { node.str("value") ?? "" },
-            set: { node.userEdit(.string($0)) }
-        )
     }
 
     @ViewBuilder
     private var pickerView: some View {
         let options = node.props["options"]?.arrayValue ?? []
-        let base = Picker(node.str("label") ?? "", selection: pickerBinding) {
+        let base = Picker(node.str("label") ?? "", selection: node.stringBinding) {
             ForEach(options.indices, id: \.self) { i in
                 let opt = options[i].objectValue
                 Text(opt?["label"]?.stringValue ?? "")

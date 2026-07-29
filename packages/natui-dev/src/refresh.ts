@@ -16,7 +16,6 @@ export interface ReactRefreshRuntime {
   getFamilyByID(id: string): RefreshFamily | undefined;
 }
 
-export const REFRESH_RUNTIME_GLOBAL = '__natui_react_refresh_runtime__';
 export const REFRESH_MODULE_RUNTIME_GLOBAL =
   '__natui_react_refresh_module_runtime__';
 const REFRESH_INSTALLED_GLOBAL = '__natui_react_refresh_installed__';
@@ -208,7 +207,11 @@ function scheduleRefresh(): void {
   });
 }
 
-const refreshRuntimeFacade = new Proxy(refreshRuntime, {
+/**
+ * The runtime as module code sees it: registrations are routed into the active
+ * transaction, or published immediately when there is none.
+ */
+export const refreshRuntimeFacade = new Proxy(refreshRuntime, {
   get(target, property, receiver) {
     if (property === 'register') {
       return (type: unknown, id: string) => {
@@ -247,13 +250,11 @@ export function captureRefreshWorkRunner(): <T>(work: () => T) => T {
 }
 
 type RefreshGlobal = typeof globalThis & {
-  [REFRESH_RUNTIME_GLOBAL]?: ReactRefreshRuntime;
   [REFRESH_INSTALLED_GLOBAL]?: boolean;
 };
 
 export function installRefreshRuntime(): void {
   const target = globalThis as RefreshGlobal;
-  target[REFRESH_RUNTIME_GLOBAL] = refreshRuntimeFacade;
   if (target[REFRESH_INSTALLED_GLOBAL]) return;
 
   refreshRuntime.injectIntoGlobalHook(globalThis);

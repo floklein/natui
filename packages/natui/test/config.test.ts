@@ -34,8 +34,8 @@ test('NatUI app config resolves entry and platform icons from the config directo
 
   assert.equal(config.entry, 'src/main.tsx');
   assert.equal(config.entryPath, path.join(root, 'src', 'main.tsx'));
-  assert.equal(config.icons.macos, path.join(root, 'assets', 'AppIcon.icns'));
-  assert.equal(config.icons.windows, path.join(root, 'assets', 'AppIcon.ico'));
+  assert.equal(config.iconPaths.macos, path.join(root, 'assets', 'AppIcon.icns'));
+  assert.equal(config.iconPaths.windows, path.join(root, 'assets', 'AppIcon.ico'));
 });
 
 test('NatUI app config resolves Windows separators consistently on every platform', () => {
@@ -57,8 +57,8 @@ test('NatUI app config resolves Windows separators consistently on every platfor
   assert.equal(config.output, 'dist/package');
   assert.equal(config.entryPath, path.join(root, 'src', 'main.tsx'));
   assert.equal(config.outputPath, path.join(root, 'dist', 'package'));
-  assert.equal(config.icons.macos, path.join(root, 'assets', 'AppIcon.icns'));
-  assert.equal(config.icons.windows, path.join(root, 'assets', 'AppIcon.ico'));
+  assert.equal(config.iconPaths.macos, path.join(root, 'assets', 'AppIcon.icns'));
+  assert.equal(config.iconPaths.windows, path.join(root, 'assets', 'AppIcon.ico'));
 });
 
 test('NatUI app config loads from disk and can be optional for development', async () => {

@@ -32,6 +32,9 @@ interface ManagedNatuiRendererOptions extends NatuiRendererOptions {
   runWork?: <T>(work: () => T) => T;
 }
 
+/** Settle turns allowed before a render is declared a runaway update loop. */
+const SETTLE_TURN_LIMIT = 100;
+
 function createRenderer(
   bridge: Bridge,
   options: ManagedNatuiRendererOptions = {},
@@ -47,7 +50,6 @@ function createRenderer(
   (reconciler.injectIntoDevTools as unknown as () => boolean)();
 
   const container: RootContainer = {
-    isRoot: true,
     children: [],
     nextId: 1,
     bridge,
@@ -97,7 +99,7 @@ function createRenderer(
   // slider drags: responsiveness during a drag comes from the host's
   // optimistic local value plus seq/ack echo suppression, not from React
   // priority, and enforcement only lands once the drag settles.
-  bridge.setPriorityRunner((_kind, fn) => {
+  bridge.setPriorityRunner((fn) => {
     const dispatch = () => {
       runWithPriority(DiscreteEventPriority, fn);
       reconciler.flushSyncWork();
@@ -112,9 +114,16 @@ function createRenderer(
       reconciler.updateContainer(element, root, null, onCommitted ?? null);
     },
     renderAsync(element) {
+      // React's own model is that a newer update supersedes an older one, so
+      // overlapping calls coalesce onto the latest element rather than failing.
+      // The superseded promise rejects rather than resolving: its element never
+      // committed, and silently resolving it would report a render that did not
+      // happen.
       if (pendingRender) {
-        return Promise.reject(
-          new Error('natui: cannot start a render while another render is pending'),
+        const superseded = pendingRender;
+        pendingRender = undefined;
+        superseded.reject(
+          new Error('natui: render superseded by a newer render before it committed'),
         );
       }
 
@@ -144,12 +153,24 @@ function createRenderer(
           // fixed number of follow-up renders. The cap prevents a component
           // with a deliberate infinite update loop from blocking startup
           // forever.
-          if (quietTurns < 2 && settleTurns < 100) {
+          if (quietTurns < 2 && settleTurns < SETTLE_TURN_LIMIT) {
             setImmediate(settle);
             return;
           }
 
           pendingRender = undefined;
+          // "Never quiesced" and "quiesced" must not share an exit: reporting
+          // an update loop as a successful startup hides the one thing the cap
+          // exists to detect.
+          if (quietTurns < 2) {
+            reject(
+              new Error(
+                `natui: the render did not settle within ${SETTLE_TURN_LIMIT} turns; ` +
+                  'a component is most likely updating state on every commit',
+              ),
+            );
+            return;
+          }
           resolve();
         };
 

@@ -53,7 +53,6 @@ export interface CommonProps {
   accessibilityHint?: string;
   /** Stable identifier for UI automation (AX identifier / AutomationId). */
   accessibilityIdentifier?: string;
-  key?: string | number;
 }
 
 export interface ContainerProps extends CommonProps {
@@ -149,7 +148,8 @@ export interface ProgressViewProps extends CommonProps {
 export interface ButtonProps extends CommonProps {
   children?: ReactNode;
   onPress?: () => void;
-  variant?: 'automatic' | 'bordered' | 'prominent' | 'plain' | 'link';
+  /** Visual style, named `style` to match List, Toggle and Picker. */
+  style?: 'automatic' | 'bordered' | 'prominent' | 'plain' | 'link';
   role?: 'destructive' | 'cancel';
 }
 
@@ -310,7 +310,6 @@ export interface SortDescriptor {
 export interface MenuBarProps {
   menus: MenuSpec[];
   onSelect?: (id: string) => void;
-  key?: string | number;
 }
 
 /**
@@ -322,7 +321,6 @@ export interface ToolbarProps {
   items: ToolbarItemSpec[];
   onAction?: (id: string) => void;
   onSearch?: (value: string) => void;
-  key?: string | number;
 }
 
 /**

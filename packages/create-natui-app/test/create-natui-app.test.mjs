@@ -16,11 +16,31 @@ import {
   projectMetadata,
   runCli,
 } from '../src/index.mjs';
+// The real validator the framework runs on every `natui` command. Relative,
+// because create-natui-app deliberately does not depend on @natui/core.
+import { validateAppConfig } from '../../natui/app-config.js';
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const CLI = path.join(PACKAGE_ROOT, 'bin', 'create-natui-app.js');
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const APP_CONFIG_TEMPLATE = await readFile(
+  path.join(PACKAGE_ROOT, 'template', 'natui.app.json.tmpl'),
+  'utf8',
+);
+
+/**
+ * Render the real natui.app.json template with derived metadata, exactly as
+ * createProject does, so this stays honest if the template gains a field.
+ */
+function renderAppConfig(metadata) {
+  const rendered = APP_CONFIG_TEMPLATE
+    .replaceAll('__APP_ID_JSON__', JSON.stringify(metadata.appId))
+    .replaceAll('__DISPLAY_NAME_JSON__', JSON.stringify(metadata.displayName))
+    .replaceAll('__EXECUTABLE_JSON__', JSON.stringify(metadata.executable));
+  assert.doesNotMatch(rendered, /__[A-Z][A-Z_]+__/, 'unresolved token in natui.app.json.tmpl');
+  return JSON.parse(rendered);
+}
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'create-natui-app-test-'));
@@ -182,8 +202,90 @@ test('project metadata is portable and produces valid identifiers', () => {
   assert.equal(projectMetadata('natui-app').displayName, 'NatUI App');
   assert.equal(projectMetadata('123 app').executable, 'NatUI123App');
   assert.throws(() => projectMetadata('CON'), /reserved on Windows/);
-  assert.throws(() => projectMetadata('...'), /at least one letter or number/);
+  assert.throws(() => projectMetadata('...'), /must contain ASCII letters or digits/);
   assert.throws(() => projectMetadata('a'.repeat(81)), /80 characters or fewer/);
+});
+
+test('awkward directory names still derive a config the framework accepts', () => {
+  const cases = [
+    // Leading digit: npm allows it, but a native executable may not start with one.
+    {
+      directory: '9lives',
+      appId: 'com.example.9lives',
+      displayName: '9lives',
+      executable: 'NatUI9lives',
+      packageName: '9lives',
+    },
+    // Dots would read as extra reverse-DNS segments if they survived.
+    {
+      directory: 'a.b.c',
+      appId: 'com.example.a-b-c',
+      displayName: 'A B C',
+      executable: 'ABC',
+      packageName: 'a-b-c',
+    },
+    // Shell metacharacters and spaces.
+    {
+      directory: 'rock&roll cash',
+      appId: 'com.example.rock-roll-cash',
+      displayName: 'Rock&roll Cash',
+      executable: 'RockrollCash',
+      packageName: 'rock-roll-cash',
+    },
+    // Accents fold to ASCII rather than being dropped.
+    {
+      directory: 'Ünïcödé',
+      appId: 'com.example.unicode',
+      displayName: 'Unicode',
+      executable: 'Unicode',
+      packageName: 'unicode',
+    },
+    // Trailing dots and spaces are illegal in Windows directory names.
+    {
+      directory: 'trailing dots...',
+      appId: 'com.example.trailing-dots',
+      displayName: 'Trailing Dots',
+      executable: 'TrailingDots',
+      packageName: 'trailing-dots',
+    },
+    {
+      directory: '  padded name  ',
+      appId: 'com.example.padded-name',
+      displayName: 'Padded Name',
+      executable: 'PaddedName',
+      packageName: 'padded-name',
+    },
+    // Runs of separators must not leave empty identifier segments.
+    {
+      directory: '--dashes--',
+      appId: 'com.example.dashes',
+      displayName: 'Dashes',
+      executable: 'Dashes',
+      packageName: 'dashes',
+    },
+  ];
+
+  const configDirectory = path.join(tmpdir(), 'natui-app-config-check');
+  for (const expected of cases) {
+    const { directory, ...metadataFields } = expected;
+    const metadata = projectMetadata(directory);
+    assert.deepEqual(metadata, metadataFields, `metadata for ${JSON.stringify(directory)}`);
+
+    const config = validateAppConfig(
+      renderAppConfig(metadata),
+      configDirectory,
+      'natui.app.json',
+    );
+    assert.equal(config.id, metadata.appId);
+    assert.equal(config.name, metadata.displayName);
+    assert.equal(config.executable, metadata.executable);
+    assert.equal(config.entry, 'src/main.tsx');
+    assert.deepEqual(Object.keys(config.icons).sort(), ['macos', 'windows']);
+  }
+});
+
+test('a directory name with no ASCII letters or digits is rejected with the real reason', () => {
+  assert.throws(() => projectMetadata('日本語'), /must contain ASCII letters or digits/);
 });
 
 test('createProject writes a complete app with native icon containers', async (t) => {
@@ -350,7 +452,7 @@ test('runCli prints non-command JSON for project paths containing metacharacters
   });
 
   assert.equal(exitCode, 0);
-  assert.doesNotMatch(output.value(), /\n  cd /);
+  assert.doesNotMatch(output.value(), /\n {2}cd /);
   assert.match(output.value(), /Open the project directory shown as a JSON string/);
   assert.ok(output.value().includes(`    ${JSON.stringify(projectDirectory)}\n`));
 });
