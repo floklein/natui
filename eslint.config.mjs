@@ -21,6 +21,12 @@ export default tseslint.config(
       '**/.natui/**',
       'docs/next-env.d.ts',
       'packages/create-natui-app/template/**',
+      // Agent scratch space. `.claude/worktrees/` holds whole checkouts of
+      // other branches, which would otherwise be linted as if they were part of
+      // this one and report errors already fixed here. It is excluded through
+      // .git/info/exclude, so it is invisible to CI and only bites locally.
+      // The one tracked file under it, launch.json, is not lintable anyway.
+      '.claude/**',
       // Scratch fixtures the dev-server integration tests mkdtemp under the
       // package root; present only after a killed run.
       'packages/*/natui-dev-*/**',
