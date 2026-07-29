@@ -59,14 +59,6 @@ function roundedRectangleCoverage(x, y, size) {
   return clamp(0.5 - distance);
 }
 
-function rectangleCoverage(x, y, left, top, right, bottom) {
-  const dx = Math.max(left - x, 0, x - right);
-  const dy = Math.max(top - y, 0, y - bottom);
-  const outside = Math.hypot(dx, dy);
-  const inside = Math.min(Math.max(left - x, x - right, top - y, y - bottom), 0);
-  return clamp(0.5 - (outside + inside));
-}
-
 function segmentCoverage(x, y, startX, startY, endX, endY, width) {
   const deltaX = endX - startX;
   const deltaY = endY - startY;
@@ -79,49 +71,57 @@ function segmentCoverage(x, y, startX, startY, endX, endY, width) {
   return clamp(0.5 + width / 2 - Math.hypot(x - nearestX, y - nearestY));
 }
 
+function arcCoverage(x, y, centerX, centerY, radius, upperHalf, width) {
+  const onArcSide = upperHalf ? y <= centerY : y >= centerY;
+  const distance = onArcSide
+    ? Math.abs(Math.hypot(x - centerX, y - centerY) - radius)
+    : Math.min(
+        Math.hypot(x - (centerX - radius), y - centerY),
+        Math.hypot(x - (centerX + radius), y - centerY),
+      );
+  return clamp(0.5 + width / 2 - distance);
+}
+
+// The glyph geometry mirrors docs/public/icon.svg, drawn in its 501x490
+// viewBox: a stroked "n" with two semicircular arches plus a dot.
 function renderRgba(size, { fullSquare = false } = {}) {
   const pixels = Buffer.allocUnsafe(size * size * 4);
-  const left = size * 0.29;
-  const right = size * 0.71;
-  const top = size * 0.27;
-  const bottom = size * 0.73;
-  const stroke = Math.max(1.5, size * 0.09);
+  const scale = (size * 0.5) / 501;
+  const offsetX = (size - 501 * scale) / 2;
+  const offsetY = (size - 490 * scale) / 2;
+  const stroke = Math.max(1.5, 90 * scale);
+  const leftX = offsetX + 45 * scale;
+  const middleX = offsetX + 246 * scale;
+  const rightX = offsetX + 445 * scale;
+  const archTopY = offsetY + 145.5 * scale;
+  const archBottomY = offsetY + 345.5 * scale;
+  const rightStemTopY = offsetY + 245.5 * scale;
+  const topArchCenterX = offsetX + 145.5 * scale;
+  const bottomArchCenterX = offsetX + 345.5 * scale;
+  const topArchRadius = 100.5 * scale;
+  const bottomArchRadius = 99.5 * scale;
+  const dotX = offsetX + 445.5 * scale;
+  const dotY = offsetY + 99.5 * scale;
+  const dotRadius = 55 * scale;
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const pixelX = x + 0.5;
       const pixelY = y + 0.5;
       const background = fullSquare ? 1 : roundedRectangleCoverage(pixelX, pixelY, size);
-      const verticalLeft = rectangleCoverage(
-        pixelX,
-        pixelY,
-        left - stroke / 2,
-        top,
-        left + stroke / 2,
-        bottom,
+      const glyphShape = Math.max(
+        segmentCoverage(pixelX, pixelY, leftX, archTopY, leftX, archBottomY, stroke),
+        arcCoverage(pixelX, pixelY, topArchCenterX, archTopY, topArchRadius, true, stroke),
+        segmentCoverage(pixelX, pixelY, middleX, archTopY, middleX, archBottomY, stroke),
+        arcCoverage(pixelX, pixelY, bottomArchCenterX, archBottomY, bottomArchRadius, false, stroke),
+        segmentCoverage(pixelX, pixelY, rightX, rightStemTopY, rightX, archBottomY, stroke),
+        clamp(0.5 + dotRadius - Math.hypot(pixelX - dotX, pixelY - dotY)),
       );
-      const verticalRight = rectangleCoverage(
-        pixelX,
-        pixelY,
-        right - stroke / 2,
-        top,
-        right + stroke / 2,
-        bottom,
-      );
-      const diagonal = segmentCoverage(
-        pixelX,
-        pixelY,
-        left,
-        top,
-        right,
-        bottom,
-        stroke,
-      );
-      const glyph = Math.max(verticalLeft, verticalRight, diagonal) * background;
+      const glyph = glyphShape * background;
       const verticalPosition = y / Math.max(1, size - 1);
-      const red = Math.round(70 + verticalPosition * 116);
-      const green = Math.round(78 + verticalPosition * 2);
-      const blue = Math.round(238 - verticalPosition * 47);
+      const red = Math.round(244 - verticalPosition * 41);
+      const green = Math.round(112 - verticalPosition * 60);
+      const blue = Math.round(74 - verticalPosition * 36);
       const offset = (y * size + x) * 4;
       pixels[offset] = Math.round(red + (255 - red) * glyph);
       pixels[offset + 1] = Math.round(green + (255 - green) * glyph);

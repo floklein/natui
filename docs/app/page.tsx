@@ -2,6 +2,7 @@ import { highlight } from 'fumadocs-core/highlight';
 import Image from 'next/image';
 import Link from 'next/link';
 import { CopyCommand } from '@/components/copy-command';
+import { NatuiMark } from '@/components/natui-mark';
 
 const heroCode = `<VStack spacing={14} padding={20} alignment="leading">
   <HStack spacing={8} alignment="center">
@@ -66,7 +67,7 @@ export default async function HomePage() {
       <header className="home-nav">
         <Link className="home-brand" href="/" aria-label="NatUI home">
           <span className="home-brand-mark" aria-hidden="true">
-            N
+            <NatuiMark size={17} />
           </span>
           <span>NatUI</span>
         </Link>

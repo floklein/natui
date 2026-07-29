@@ -11,6 +11,9 @@ export const metadata: Metadata = {
     template: '%s | NatUI',
   },
   description: siteDescription,
+  icons: {
+    icon: '/icon.svg',
+  },
   alternates: {
     canonical: '/',
   },

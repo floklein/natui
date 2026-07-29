@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/public/icon.svg" width="88" alt="NatUI logo">
+</p>
+
 # NatUI
 
 [![CI](https://github.com/floklein/natui/actions/workflows/ci.yml/badge.svg)](https://github.com/floklein/natui/actions/workflows/ci.yml)
