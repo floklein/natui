@@ -97,11 +97,15 @@ Only after both platform checks and the exact release commit are approved:
    1. Builds the prebuilt host release archives: a universal macOS binary and
       the self-contained x64 and arm64 Windows folders, each with a `.sha256`
       sibling.
-   2. Creates the GitHub release from the tag with the matching `CHANGELOG.md`
+   2. Verifies the tag matches every workspace package version before
+      anything goes public (`tools/verify-release-tag.mjs`). A mismatched or
+      prerelease tag fails here with nothing published; prerelease tags are
+      not supported.
+   3. Creates the GitHub release from the tag with the matching `CHANGELOG.md`
       section (the workflow fails when the section is missing) and attaches
       the host archives. This happens before npm so an installed package can
       always download its host.
-   3. Re-runs the release check against the tag, then publishes
+   4. Re-runs the release check against the tag, then publishes
       `packages/natui`, `packages/natui-dev`, and `packages/create-natui-app`
       through npm trusted publishing.
 

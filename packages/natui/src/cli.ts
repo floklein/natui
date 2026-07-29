@@ -147,6 +147,11 @@ main(process.argv.slice(2)).catch((error) => {
   if (error instanceof CliUsageError) {
     console.error(error.message);
     console.error(`\n${HELP}`);
+  } else if (error instanceof Error && error.message.startsWith('natui:')) {
+    // An expected failure state that carries its own guidance (host not
+    // found, download failed); a stack trace only buries it.
+    console.error(error.message);
+    if (error.cause !== undefined) console.error(String(error.cause));
   } else {
     console.error(error instanceof Error ? error.stack ?? error.message : String(error));
   }

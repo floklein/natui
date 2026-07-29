@@ -45,6 +45,9 @@ of time, for example when preparing an offline machine, run:
 npx natui host install
 ```
 
+Behind a corporate proxy, run the download with `NODE_USE_ENV_PROXY=1`
+(Node 22.18 or newer) so Node's fetch honors `HTTPS_PROXY`.
+
 Prefer a self-built host? Build the [macOS](/docs/start/macos) or
 [Windows](/docs/start/windows) host from the NatUI source repository and set
 the `NATUI_HOST` environment variable to that executable; it always wins over

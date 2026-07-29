@@ -5,18 +5,25 @@
  */
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = join(PACKAGE_ROOT, 'src', 'cli.ts');
+// An absolute specifier keeps the loader resolvable from any working
+// directory the test picks.
+const TSX = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 
 async function natui(
   args: string[],
   env?: Record<string, string>,
+  cwd: string = PACKAGE_ROOT,
 ): Promise<{
   code: number;
   stdout: string;
@@ -25,8 +32,8 @@ async function natui(
   try {
     const { stdout, stderr } = await run(
       process.execPath,
-      ['--import', 'tsx', CLI, ...args],
-      { cwd: PACKAGE_ROOT, env: env ? { ...process.env, ...env } : undefined },
+      ['--import', TSX, CLI, ...args],
+      { cwd, env: env ? { ...process.env, ...env } : undefined },
     );
     return { code: 0, stdout, stderr };
   } catch (error) {
@@ -103,4 +110,21 @@ test('host install rejects unknown options before touching the network', async (
   const { code, stderr } = await natui(['host', 'install', '--offline']);
   assert.equal(code, 1);
   assert.match(stderr, /unknown option "--offline"/);
+});
+
+test('host path without any host prints guidance, not a stack', async (t) => {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    t.skip('no host resolution on this platform');
+    return;
+  }
+  const workDir = mkdtempSync(join(tmpdir(), 'natui-cli-nohost-'));
+  const cacheDir = mkdtempSync(join(tmpdir(), 'natui-cli-nocache-'));
+  const { code, stderr } = await natui(
+    ['host', 'path'],
+    { NATUI_HOST: '', NATUI_HOST_CACHE_DIR: cacheDir },
+    workDir,
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /host binary not found/);
+  assert.doesNotMatch(stderr, /at ModuleJob|at async|\.ts:\d+:\d+/);
 });

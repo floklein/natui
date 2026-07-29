@@ -9,8 +9,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   findCachedHost,
   hostAssetName,
@@ -190,6 +191,60 @@ test('installHost reports a missing release asset with guidance', async (t) => {
         installHost({ version: '9.9.9', log: () => {} }),
         /no prebuilt native host/,
       );
+    },
+  );
+});
+
+test('package-host.mjs output installs through installHost unchanged', async (t) => {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    t.skip('no host target for this platform');
+    return;
+  }
+  // The real producer: the release workflow runs this exact script, so this
+  // round trip is what pins the asset naming, checksum format, and archive
+  // layout the downloader must agree with.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const version = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+    .version as string;
+  const target = hostTarget();
+  const executableName = process.platform === 'win32' ? 'NatuiHost.exe' : 'natui-host';
+  const payload = mkdtempSync(join(tmpdir(), 'natui-roundtrip-input-'));
+  writeFileSync(join(payload, executableName), 'packager payload\n');
+  const input = process.platform === 'darwin' ? join(payload, executableName) : payload;
+
+  const packaged = spawnSync(
+    process.execPath,
+    [join(repoRoot, 'tools', 'package-host.mjs'), target, '--input', input],
+    { encoding: 'utf8' },
+  );
+  assert.equal(packaged.status, 0, packaged.stderr);
+  const [archivePath, checksumPath] = packaged.stdout.trim().split(/\r?\n/);
+  assert.ok(archivePath && checksumPath);
+  assert.equal(basename(archivePath), hostAssetName(version, target));
+  assert.equal(basename(checksumPath), `${hostAssetName(version, target)}.sha256`);
+
+  const dist = dirname(archivePath);
+  const server = createServer((request, response) => {
+    const file = join(dist, basename(request.url ?? ''));
+    if (!existsSync(file)) {
+      response.writeHead(404).end();
+      return;
+    }
+    response.end(readFileSync(file));
+  });
+  await new Promise<void>((ready) => server.listen(0, '127.0.0.1', ready));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  t.after(() => server.close());
+
+  await withProcessEnv(
+    {
+      NATUI_HOST_BASE_URL: `http://127.0.0.1:${address.port}`,
+      NATUI_HOST_CACHE_DIR: mkdtempSync(join(tmpdir(), 'natui-roundtrip-cache-')),
+    },
+    async () => {
+      const executable = await installHost({ version, log: () => {} });
+      assert.equal(readFileSync(executable, 'utf8'), 'packager payload\n');
     },
   );
 });

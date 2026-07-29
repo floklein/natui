@@ -67,6 +67,13 @@ jobs:
         with:
           path: dist-host
           merge-multiple: true
+      # Fail before anything goes public: a tag that does not match the
+      # workspace versions (or a prerelease tag) would publish host assets
+      # no package can resolve, and the release could not be re-cut for the
+      # same tag. release:check still runs in the npm job for the full
+      # validation; this is the part of it that must run first.
+      - name: Verify the tag matches the package versions
+        run: node tools/verify-release-tag.mjs "$GITHUB_REF_NAME"
       - name: Extract release notes from CHANGELOG.md
         run: node tools/release-notes.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
       # The release goes live here, before npm: an installed package

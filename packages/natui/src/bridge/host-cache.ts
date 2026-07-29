@@ -59,9 +59,18 @@ export function hostAssetName(version: string, target: string): string {
 /** The version of `@natui/core` this module shipped in. */
 export function packageVersion(): string {
   const packageJson = new URL('../../package.json', import.meta.url);
-  const { version } = JSON.parse(readFileSync(packageJson, 'utf8')) as {
-    version: string;
-  };
+  let raw: string;
+  try {
+    raw = readFileSync(packageJson, 'utf8');
+  } catch (cause) {
+    // Bundlers rewrite import.meta.url, so the manifest can be unreachable.
+    throw new Error(
+      'natui: could not read the @natui/core package manifest to pick a host release. ' +
+        'Set NATUI_HOST to a host binary.',
+      { cause },
+    );
+  }
+  const { version } = JSON.parse(raw) as { version: string };
   return version;
 }
 
@@ -117,14 +126,17 @@ export function hostRelease(
  * Synchronous so `defaultHostCommand()` can keep its public signature.
  */
 export function findCachedHost(
-  version: string = packageVersion(),
+  version?: string,
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   let release: HostRelease;
   try {
-    release = hostRelease(version, platform, arch, env);
+    // The version default stays inside the try: packageVersion() can throw
+    // (default parameters evaluate before the body), and a cache probe must
+    // never take down a resolver that has other fallbacks.
+    release = hostRelease(version ?? packageVersion(), platform, arch, env);
   } catch {
     return undefined;
   }
@@ -145,16 +157,31 @@ async function fetchOk(url: string, accept: string): Promise<Response> {
   try {
     response = await fetch(url, { headers: { accept } });
   } catch (cause) {
+    // Node's fetch ignores proxy env vars unless NODE_USE_ENV_PROXY is set
+    // (Node 22.18+), which is the usual reason npm install worked but this
+    // download cannot connect.
+    const proxy =
+      process.env.HTTPS_PROXY ??
+      process.env.https_proxy ??
+      process.env.HTTP_PROXY ??
+      process.env.http_proxy;
+    const proxyHint =
+      proxy && !process.env.NODE_USE_ENV_PROXY
+        ? ' A proxy is configured but Node fetch does not use it by default; retry with NODE_USE_ENV_PROXY=1.'
+        : '';
     throw new Error(
-      `natui: could not reach ${url} to download the native host. ` +
-        'Check the network connection, or build the host from source and set NATUI_HOST.',
+      `natui: could not reach ${url} to download the native host.` +
+        proxyHint +
+        ' Check the network connection, or build the host from source and set NATUI_HOST.',
       { cause },
     );
   }
   if (response.status === 404) {
     throw new Error(
       `natui: this release has no prebuilt native host at ${url}. ` +
-        'Build the host from a NatUI checkout and set NATUI_HOST, or upgrade @natui/core.',
+        'Only tagged releases publish host assets; a git or pack install reuses ' +
+        'the last released version number without a matching host. ' +
+        'Build the host from a NatUI checkout and set NATUI_HOST, or install a released @natui/core.',
     );
   }
   if (!response.ok) {
@@ -250,7 +277,27 @@ export async function installHost(options?: {
     writeFileSync(join(extracted, OK_MARKER), `${expected}\n`);
 
     mkdirSync(join(release.directory, '..'), { recursive: true });
-    rmSync(release.directory, { recursive: true, force: true });
+    // A concurrent install may have completed while this one downloaded;
+    // take its result instead of deleting an entry an app may already be
+    // running from (on Windows that delete would throw EPERM mid-way and
+    // tear the entry).
+    if (!options?.force) {
+      const winner = findCachedHost(release.version);
+      if (winner) return winner;
+    }
+    // Drop the completion marker before the recursive delete: if the delete
+    // is interrupted partway, later runs must see the entry as incomplete,
+    // never trust a torn one.
+    rmSync(join(release.directory, OK_MARKER), { force: true });
+    try {
+      rmSync(release.directory, { recursive: true, force: true });
+    } catch (cause) {
+      throw new Error(
+        `natui: could not replace the cached host at ${release.directory}. ` +
+          'Close applications running this host and retry.',
+        { cause },
+      );
+    }
     try {
       renameSync(extracted, release.directory);
     } catch (error) {

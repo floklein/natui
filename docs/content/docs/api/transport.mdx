@@ -39,7 +39,7 @@ Spawns a host process and exchanges newline-delimited JSON over its standard inp
 
 ## defaultHostCommand
 
-Checks `NATUI_HOST` first, then searches upward from the current directory for known macOS or Windows build outputs, then the per-user download cache. Synchronous; it never downloads.
+Checks `NATUI_HOST` first, then searches upward from the current directory for known macOS or Windows build outputs, then the per-user download cache. Inside a NatUI source checkout the download cache is skipped, so a stale download never shadows the source build. Synchronous; it never downloads.
 
 ## ensureHostCommand
 
