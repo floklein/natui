@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs",
+      "runtimeExecutable": "docs\\node_modules\\.bin\\next.cmd",
+      "runtimeArgs": ["dev", "docs"],
+      "port": 3000
+    }
+  ]
+}
