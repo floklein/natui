@@ -115,6 +115,15 @@ jobs:
           name: NatUIDemo-${{ steps.version.outputs.value }}-macos-${{ steps.mac-package.outputs.architecture }}
           path: ${{ steps.mac-package.outputs.archive }}
           if-no-files-found: error
+      # Build and package the universal host binary exactly as the Publish
+      # workflow will, so a release tag never hits a broken host asset build.
+      - run: swift build -c release --arch arm64 --arch x86_64 --package-path hosts/macos
+      - run: node tools/package-host.mjs macos-universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: natui-host-${{ steps.version.outputs.value }}-macos-universal
+          path: dist-host/*
+          if-no-files-found: error
       # The GUI end-to-end suites, including verify:package, need a real
       # window session and run locally per README; CI stays headless.
 
@@ -156,4 +165,15 @@ jobs:
         with:
           name: NatUIDemo-${{ steps.version.outputs.value }}-windows-x64
           path: examples/demo/dist/package/NatUIDemo-${{ steps.version.outputs.value }}-windows-x64.exe
+          if-no-files-found: error
+      # Package both host release assets exactly as the Publish workflow
+      # will, so a release tag never hits a broken host asset build. The
+      # arm64 host cross-compiles on the x64 runner; only x64 can be run.
+      - run: node tools/package-host.mjs windows-x64
+      - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=arm64 -p:RuntimeIdentifier=win-arm64
+      - run: node tools/package-host.mjs windows-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: natui-host-${{ steps.version.outputs.value }}-windows
+          path: dist-host/*
           if-no-files-found: error

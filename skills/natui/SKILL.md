@@ -62,10 +62,10 @@ because NatUI is in alpha.
 
 ## Preserve alpha boundaries
 
-- `@natui/core` and `create-natui-app` are published npm packages, but they
-  ship only the JavaScript side. Do not claim that an installed package
-  provides a native host; the SwiftUI and WinUI 3 hosts are still built from a
-  source checkout.
+- `@natui/core` and `create-natui-app` are published npm packages that ship
+  only the JavaScript side; the runtime downloads a prebuilt SwiftUI or
+  WinUI 3 host from the matching GitHub release on first launch. Inside a
+  framework checkout, the host always builds from source.
 - Do not promise stable packaging or permanent component behavior.
 - Do not treat a successful host build or JavaScript test as a real-window UI
   result.
