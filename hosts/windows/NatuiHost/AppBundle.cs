@@ -22,7 +22,7 @@ internal static class AppBundle
 {
     private const int SchemaVersion = 1;
     private const int ProtocolVersion = 1;
-    private const int HostApiVersion = 1;
+    private const int HostApiVersion = 2;
 
     private const string ManifestResource = "NatuiHost.App.manifest.json";
     private const string ScriptResource = "NatuiHost.App.main.js";

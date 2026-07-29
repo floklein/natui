@@ -2,7 +2,7 @@
 
 All notable changes to NatUI are documented in this file.
 
-## 0.2.0, 2026-07-26
+## 0.2.0, 2026-07-29
 
 ### Added
 
@@ -12,6 +12,11 @@ All notable changes to NatUI are documented in this file.
 - The `create-natui-app` project generator with TypeScript starter files and
   generated native icon assets
 - A copyable `npx create-natui-app@latest` command in the documentation hero
+
+### Fixed
+
+- Packaged Windows applications now start. The Windows bundle loader still
+  declared host API 1, so it rejected every bundle built for host API 2.
 
 ## 0.1.0, 2026-07-26
 
