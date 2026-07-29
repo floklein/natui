@@ -1,0 +1,39 @@
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+
+# id-token lets npm authenticate this workflow run through OpenID Connect.
+# There is no npm token anywhere; npmjs.com must list this workflow file as
+# the trusted publisher for both packages.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    name: Publish npm packages (trusted publishing)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 bundles npm 10.
+      - run: npm install -g npm@11
+      - run: pnpm install --frozen-lockfile
+      # Build before test: @natui/dev resolves @natui/core from packages/natui/dist.
+      - run: pnpm build
+      - run: pnpm test
+      # Confirms the workspace versions match the pushed tag and re-validates
+      # both tarballs before anything reaches the registry.
+      - run: pnpm release:check "$GITHUB_REF_NAME"
+      - name: Publish @natui/core
+        working-directory: packages/natui
+        run: npm publish
+      - name: Publish create-natui-app
+        working-directory: packages/create-natui-app
+        run: npm publish

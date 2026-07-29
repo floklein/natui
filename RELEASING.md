@@ -88,16 +88,23 @@ do not already exist.
 
 Only after both platform checks and the exact release commit are approved:
 
-1. Create the signed `v0.2.0` tag on the approved commit and push the tag.
-2. Publish `packages/natui` to npm with public access.
-3. Publish `packages/create-natui-app` to npm with public access.
-4. Create the GitHub release from the same tag using the matching changelog
+1. Create the signed release tag on the approved commit and push the tag.
+2. The tag push starts the `Publish` workflow. It re-runs the release check
+   against the tag, then publishes `packages/natui` and
+   `packages/create-natui-app` through npm trusted publishing. Confirm the run
+   succeeds.
+3. Create the GitHub release from the same tag using the matching changelog
    section.
-5. Attach the macOS archive and Windows executable produced from that commit.
-6. Verify both npm versions, `npx create-natui-app@0.2.0 --version`, the remote
-   tag, the GitHub release, and both downloaded native artifacts independently.
+4. Attach the macOS archive and Windows executable produced from that commit.
+5. Verify both npm versions, `npx create-natui-app@<version> --version`, the
+   remote tag, the GitHub release, and both downloaded native artifacts
+   independently.
 
-Publishing both packages needs an account authorized for `@natui/core` and
-`create-natui-app`. Version 0.2.0 is the first `create-natui-app` publication.
-After both packages exist, configure npm trusted publishing for a dedicated
-GitHub Actions workflow before automating later releases.
+The `Publish` workflow authenticates with an OpenID Connect token, so no npm
+account token exists in the repository, and npm generates provenance
+attestations automatically. Both packages must name `publish.yml` in this
+repository as their trusted publisher: on npmjs.com, open each package's
+Settings, then Trusted Publisher, and select GitHub Actions with this
+repository and that workflow filename. A version already on the registry
+cannot be republished; a failed run after a partial publish needs a new
+patch version.
