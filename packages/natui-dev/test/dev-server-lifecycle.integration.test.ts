@@ -344,6 +344,27 @@ async function waitForLog(
   }
 }
 
+/**
+ * The log count once the stream has been quiet for `quietMs`. macOS fsevents
+ * can deliver a duplicate change event for an earlier write, producing a
+ * benign extra rebuild; a baseline captured while that straggler is still in
+ * flight would misattribute its "refreshed" line to whatever the test does
+ * next.
+ */
+async function settledLogCount(logs: string[], quietMs = 500): Promise<number> {
+  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  for (;;) {
+    const count = logs.length;
+    await delay(quietMs);
+    if (logs.length === count) return count;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `log stream did not settle within ${WAIT_TIMEOUT_MS}ms:\n${logs.join('\n')}`,
+      );
+    }
+  }
+}
+
 interface SourceResolutionProbe {
   addonFile: 'addons.js' | 'default.js';
   commaFile: 'condition.js' | 'default.js';
@@ -1324,7 +1345,7 @@ test(
       const currentCountedTree = await waitForTreeText(app, 'current:3');
       assert.deepEqual(nativeIds(currentCountedTree), preservedIds);
 
-      const logCountBeforeStaleRelease = logs.length;
+      const logCountBeforeStaleRelease = await settledLogCount(logs);
       firstGate.resolve();
       await waitFor('stale module continuation to run', () =>
         globals[firstWaiting.releasedKey] === true ? true : undefined,
@@ -1680,7 +1701,7 @@ test(
       assert.deepEqual(nativeIds(returnedTree), preservedIds);
       assert.equal(lazyGate.resolved, false);
 
-      const logCountBeforeStaleRelease = logs.length;
+      const logCountBeforeStaleRelease = await settledLogCount(logs);
       lazyGate.resolve();
       await waitFor('canceled lazy module continuation to run', () =>
         globals[lazyKeys.releasedKey] === true ? true : undefined,
@@ -1811,7 +1832,7 @@ test(
       );
       await waitForTreeText(app, 'current-v2');
 
-      const logCountBeforeStaleRelease = logs.length;
+      const logCountBeforeStaleRelease = await settledLogCount(logs);
       staleGate.resolve();
       await waitFor('stale lazy v1 continuation to run', () =>
         globals[lazyKeys.releasedKey] === true ? true : undefined,
@@ -2092,7 +2113,7 @@ export function Leaf() {
       );
       await waitForTreeText(app, 'current-v3');
 
-      const logCountBeforeStaleRelease = logs.length;
+      const logCountBeforeStaleRelease = await settledLogCount(logs);
       staleGate.resolve();
       await waitFor('retired nested import continuation', () =>
         globals[releasedKey] === true ? true : undefined,
