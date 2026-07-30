@@ -303,7 +303,7 @@ test('createProject writes a complete app with native icon containers', async (t
   assert.equal(manifest.version, '0.1.0');
   assert.equal(manifest.scripts.dev, 'natui dev');
   assert.equal(manifest.scripts.package, undefined);
-  assert.equal(manifest.dependencies['@natui/core'], '^0.2.0');
+  assert.equal(manifest.dependencies['@natui/core'], '^0.2.1');
 
   const config = JSON.parse(await readFile(path.join(target, 'natui.app.json'), 'utf8'));
   assert.deepEqual(config.icons, {
@@ -483,7 +483,7 @@ test('the executable handles help, version, generation, and typed cancellation e
   assert.match(help.stdout, /^Usage: create-natui-app/);
 
   const version = await execFileAsync(process.execPath, [CLI, '--version'], { cwd });
-  assert.equal(version.stdout.trim(), '0.2.0');
+  assert.equal(version.stdout.trim(), '0.2.1');
 
   const generated = await execFileAsync(
     process.execPath,

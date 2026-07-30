@@ -1,6 +1,6 @@
 {
   "name": "@natui/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
   "license": "MIT",
   "keywords": [
