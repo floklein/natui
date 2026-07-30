@@ -4,15 +4,18 @@ This project was created with `create-natui-app`.
 
 ## Run in development
 
-NatUI 0.2.x requires Node.js 22 or newer and a native host built from the
-[NatUI framework repository](https://github.com/floklein/natui). Follow the
-platform setup at [natui.dev](https://natui.dev), then set `NATUI_HOST` to the
-built host executable when running this standalone project.
+NatUI requires Node.js 22 or newer.
 
 ```bash
 __INSTALL_COMMAND__
 __RUN_COMMAND__ dev
 ```
+
+The first launch downloads the prebuilt native host for the installed NatUI
+release and caches it per user; later launches start from that cache. Run
+`npx natui host install` to download it ahead of time, or set `NATUI_HOST` to
+a self-built host executable from the
+[NatUI framework repository](https://github.com/floklein/natui).
 
 The development server watches `src/main.tsx` and applies React Fast Refresh
 to the existing native window.
@@ -31,6 +34,6 @@ Keep the configured file formats, use complete PNG or JPEG 2000
 representations inside the macOS `.icns`, and
 include the platform-recommended sizes.
 
-NatUI 0.2.x does not include native host source in `@natui/core`, so standalone
-projects cannot package a native artifact yet. The configuration is ready for
-the packager in a NatUI framework repository checkout.
+`@natui/core` does not include native host sources, so standalone projects
+cannot package a native artifact yet. The configuration is ready for the
+packager in a NatUI framework repository checkout.

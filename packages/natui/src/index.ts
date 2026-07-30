@@ -18,4 +18,5 @@ export {
   type Transport,
   type HostCommand,
 } from './bridge/transport.js';
-export { defaultHostCommand } from './bridge/locate.js';
+export { defaultHostCommand, ensureHostCommand } from './bridge/locate.js';
+export { installHost } from './bridge/host-cache.js';

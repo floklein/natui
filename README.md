@@ -13,10 +13,10 @@ browser layout engine. The platform owns layout, controls, dark mode, focus,
 and accessibility.
 
 > [!IMPORTANT]
-> NatUI 0.2.0 is an alpha release. The npm package contains the JavaScript
-> renderer and development tooling, while the native hosts are still built
-> from a source checkout. Release signing and stable compatibility policy are
-> still evolving.
+> NatUI is an alpha release. The npm package contains the JavaScript renderer
+> and development tooling; the first launch downloads the release's prebuilt
+> native host and caches it per user. Release signing and stable compatibility
+> policy are still evolving.
 
 ## Create an app
 
@@ -35,9 +35,11 @@ directly for a non-interactive name:
 npx create-natui-app@latest my-app
 ```
 
-NatUI 0.2 still requires a separately built native host. Follow the platform
-setup below and set `NATUI_HOST` when the application is outside this source
-checkout.
+The first `npm run dev` downloads the prebuilt native host for the installed
+release, verifies its checksum, and caches it per user. No source checkout is
+needed. `npx natui host install` performs the download ahead of time, and the
+`NATUI_HOST` environment variable selects a self-built host instead. Inside
+this repository, the freshly built host always wins over the download cache.
 
 ```tsx
 import { useState } from 'react';

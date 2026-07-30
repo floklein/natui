@@ -4,17 +4,97 @@ on:
   push:
     tags: ['v*']
 
-# id-token lets npm authenticate this workflow run through OpenID Connect.
+# id-token lets npm authenticate the publish job through OpenID Connect.
 # There is no npm token anywhere; npmjs.com must list this workflow file as
-# the trusted publisher for all three packages.
+# the trusted publisher for all three packages. contents:write exists only
+# for the release job, which creates the GitHub release and attaches host
+# assets.
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  host-macos:
+    name: Build macOS host asset
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # One universal binary covers Apple silicon and Intel; host-cache.ts
+      # downloads the same asset on both.
+      - run: node tools/build-host-macos-universal.mjs
+      - run: node tools/package-host.mjs macos-universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-macos-universal
+          path: dist-host/*
+          if-no-files-found: error
+
+  host-windows:
+    name: Build Windows host assets
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=x64
+      - run: node tools/package-host.mjs windows-x64
+      - run: dotnet build hosts/windows/NatuiHost -c Release -p:Platform=arm64 -p:RuntimeIdentifier=win-arm64
+      - run: node tools/package-host.mjs windows-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-windows
+          path: dist-host/*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release with host assets
+    needs: [host-macos, host-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-host
+          merge-multiple: true
+      # Fail before anything goes public: a tag that does not match the
+      # workspace versions (or a prerelease tag) would publish host assets
+      # no package can resolve, and the release could not be re-cut for the
+      # same tag. release:check still runs in the npm job for the full
+      # validation; this is the part of it that must run first.
+      - name: Verify the tag matches the package versions
+        run: node tools/verify-release-tag.mjs "$GITHUB_REF_NAME"
+      - name: Extract release notes from CHANGELOG.md
+        run: node tools/release-notes.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
+      # The release goes live here, before npm: an installed package
+      # downloads its host from these assets, so they must never lag the
+      # registry. Publishing twice for one tag fails, which is intended.
+      - name: Create release and attach host assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist-host/* \
+            --verify-tag \
+            --title "NatUI ${GITHUB_REF_NAME#v}" \
+            --notes-file release-notes.md
+
   npm:
     name: Publish npm packages (trusted publishing)
+    needs: [release]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

@@ -324,7 +324,9 @@ test('createProject writes a complete app with native icon containers', async (t
   assert.match(readme, /pnpm install/);
   assert.match(readme, /pnpm dev/);
   assert.match(readme, /framework repository/);
-  assert.match(readme, /standalone\s+projects cannot package/);
+  assert.match(readme, /standalone\s+projects\s+cannot package/);
+  assert.match(readme, /downloads the prebuilt native host/);
+  assert.match(readme, /natui host install/);
   assert.match(pnpmWorkspace, /allowBuilds:\s+esbuild: true/);
   await stat(path.join(target, '.gitignore'));
 
