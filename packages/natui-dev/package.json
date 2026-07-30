@@ -1,6 +1,6 @@
 {
   "name": "@natui/dev",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Development server with React Fast Refresh for NatUI applications.",
   "license": "MIT",
   "keywords": [

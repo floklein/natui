@@ -1,7 +1,7 @@
 {
   "name": "natui-monorepo",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Write React TypeScript, render real native UI: SwiftUI on macOS, WinUI 3 on Windows.",
   "scripts": {
     "build": "pnpm --filter @natui/core build && pnpm --filter @natui/dev build",

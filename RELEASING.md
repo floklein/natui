@@ -20,7 +20,7 @@ checkout of `main`.
 - Update artifact names that contain the version.
 - Add the release notes to `CHANGELOG.md`.
 - Run `pnpm release:check`. For a tag candidate, also run
-  `pnpm release:check v0.2.0`.
+  `pnpm release:check v0.2.1`.
 
 The release check rebuilds the npm packages through their `prepack` hooks,
 confirms version alignment, validates provenance metadata, checks both
@@ -37,7 +37,7 @@ pnpm build
 pnpm typecheck
 pnpm docs:check
 pnpm docs:build
-pnpm release:check v0.2.0
+pnpm release:check v0.2.1
 ```
 
 The latest `main` CI run must also be green. The Linux job uploads the

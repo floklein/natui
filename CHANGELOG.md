@@ -2,6 +2,19 @@
 
 All notable changes to NatUI are documented in this file.
 
+## 0.2.1, 2026-07-30
+
+### Added
+
+- Prebuilt native host archives on every GitHub release. `@natui/core` now
+  downloads the matching archive on demand, verifies its published SHA-256,
+  and installs it into a per-user cache, so applications installed from npm
+  no longer need a NatUI source checkout.
+- The `natui host install [--force]` and `natui host path` CLI commands
+- An automated publishing pipeline: pushing a release tag builds the host
+  archives, creates the GitHub release, and publishes all three npm packages
+  through trusted publishing with provenance attestations.
+
 ## 0.2.0, 2026-07-29
 
 ### Added
