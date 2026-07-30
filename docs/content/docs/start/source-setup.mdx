@@ -60,7 +60,9 @@ The package also installs `natui dev [entry]` for native development with
 React Fast Refresh. Without a positional entry, it reads `entry` from
 `natui.app.json`, then falls back to `src/main.tsx`.
 
-`@natui/core` and `create-natui-app` are registry packages, but the 0.2 package
-does not include native hosts. Build the host from this checkout and set
-`NATUI_HOST` when an application lives elsewhere. The application packager
-also remains a repository-local reference workflow.
+`@natui/core` and `create-natui-app` are registry packages. Outside a
+checkout, the runtime downloads the release's prebuilt host on first launch.
+Inside a checkout, the bridge only uses the host built from these sources, so
+a stale download can never shadow your build; set `NATUI_HOST` to point an
+application elsewhere at your build. The application packager remains a
+repository-local reference workflow.

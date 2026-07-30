@@ -29,19 +29,29 @@ the detected package manager, and writes:
 Use `--package-manager npm|pnpm|yarn|bun` to select a package manager or
 `--no-install` to create the project without installing dependencies.
 
-## Build the native host
-
-NatUI 0.2 does not include native host binaries in `@natui/core`. Build the
-[macOS](/docs/start/macos) or [Windows](/docs/start/windows) host from the NatUI
-source repository, then set `NATUI_HOST` to that executable when developing
-the generated project outside the framework checkout.
-
-After the host is available:
+## Start developing
 
 ```bash
 cd my-app
 npm run dev
 ```
+
+The first launch downloads the prebuilt native host for the installed release
+from its GitHub release, verifies the archive checksum, and caches the host
+per user. Later launches start instantly from that cache. To download ahead
+of time, for example when preparing an offline machine, run:
+
+```bash
+npx natui host install
+```
+
+Behind a corporate proxy, run the download with `NODE_USE_ENV_PROXY=1`
+(Node 22.18 or newer) so Node's fetch honors `HTTPS_PROXY`.
+
+Prefer a self-built host? Build the [macOS](/docs/start/macos) or
+[Windows](/docs/start/windows) host from the NatUI source repository and set
+the `NATUI_HOST` environment variable to that executable; it always wins over
+the download cache.
 
 `natui dev` reads the entry from `natui.app.json`, bundles its local source
 graph, and applies React Fast Refresh to the existing native window.

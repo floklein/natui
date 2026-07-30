@@ -4,11 +4,14 @@ NatUI lets React and TypeScript render real native desktop UI through SwiftUI
 on macOS and WinUI 3 on Windows. It does not use a webview, Electron, or a
 browser layout engine.
 
-Version 0.2.0 is an alpha release. The npm package contains the JavaScript
-renderer, typed components, embedded runtime entry point, development server,
-and `natui` CLI. The native host is not bundled with the npm package yet. Build
-it from the [NatUI repository](https://github.com/floklein/natui) and set
-`NATUI_HOST` when the application is outside that checkout.
+This is an alpha release. The npm package contains the JavaScript renderer,
+typed components, embedded runtime entry point, development server, and
+`natui` CLI. The native host is too large to bundle with the npm package, so
+the first launch downloads the prebuilt host for this release from the
+matching [GitHub release](https://github.com/floklein/natui/releases),
+verifies its checksum, and caches it per user. `npx natui host install`
+downloads it ahead of time; the `NATUI_HOST` environment variable points at a
+self-built host instead.
 
 ## Install
 

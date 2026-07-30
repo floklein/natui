@@ -28,11 +28,12 @@ The generated `natui.app.json` uses `src/main.tsx` for development and native
 application packaging. Replace the generated `assets/AppIcon.icns` and
 `assets/AppIcon.ico` when the application has its own artwork.
 
-NatUI 0.2 requires a separately built native host. See
-[natui.dev](https://natui.dev) for platform setup and the `NATUI_HOST`
-environment variable. The 0.2 package does not include native host sources, so
-native packaging remains a reference workflow in a NatUI framework repository
-checkout.
+On first launch, `@natui/core` downloads the prebuilt native host for this
+release and caches it per user, so no separate build or checkout is needed.
+Run `npx natui host install` to download it ahead of time, or set the
+`NATUI_HOST` environment variable to use a self-built host instead. See
+[natui.dev](https://natui.dev) for details. Native application packaging
+remains a reference workflow in a NatUI framework repository checkout.
 
 ## License
 
