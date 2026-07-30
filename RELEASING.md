@@ -127,5 +127,6 @@ attestations automatically. All three packages must name `publish.yml` in
 this repository as their trusted publisher: on npmjs.com, open each package's
 Settings, then Trusted Publisher, and select GitHub Actions with this
 repository and that workflow filename. A version already on the registry
-cannot be republished; a failed run after a partial publish needs a new
-patch version.
+cannot be republished, but each publish step skips versions the registry
+already has. After a partial publish, fix the cause and re-run the failed
+job; it resumes with the missing packages.

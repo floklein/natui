@@ -111,17 +111,39 @@ jobs:
       # Confirms the workspace versions match the pushed tag and re-validates
       # all three tarballs before anything reaches the registry.
       - run: pnpm release:check "$GITHUB_REF_NAME"
+      # Each publish step skips a version the registry already has, so
+      # re-running this job after a partial publish resumes with the missing
+      # packages instead of failing on a republish conflict. npm view's exit
+      # code for a missing version varies across npm releases; compare its
+      # output instead.
       - name: Publish @natui/core
         working-directory: packages/natui
-        run: npm publish
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$(npm view "@natui/core@${version}" version 2>/dev/null || true)" = "${version}" ]; then
+            echo "@natui/core@${version} is already on the registry; skipping."
+          else
+            npm publish
+          fi
       # @natui/dev declares its @natui/core peer with the workspace protocol,
       # which only pnpm rewrites to a real version range. Pack with pnpm, then
       # let npm publish the tarball so OIDC trusted publishing still applies.
       - name: Publish @natui/dev
         working-directory: packages/natui-dev
         run: |
-          pnpm pack
-          npm publish "natui-dev-$(node -p "require('./package.json').version").tgz"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$(npm view "@natui/dev@${version}" version 2>/dev/null || true)" = "${version}" ]; then
+            echo "@natui/dev@${version} is already on the registry; skipping."
+          else
+            pnpm pack
+            npm publish "natui-dev-${version}.tgz"
+          fi
       - name: Publish create-natui-app
         working-directory: packages/create-natui-app
-        run: npm publish
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$(npm view "create-natui-app@${version}" version 2>/dev/null || true)" = "${version}" ]; then
+            echo "create-natui-app@${version} is already on the registry; skipping."
+          else
+            npm publish
+          fi
