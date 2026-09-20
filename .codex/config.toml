@@ -1,0 +1,7 @@
+[mcp_servers.coolify]
+command = "sh"
+args = ["-c", "set -eu; . \"$HOME/.config/mcp/coolify.env\"; exec npx -y @masonator/coolify-mcp@latest"]
+
+[mcp_servers.namecheap]
+command = "npx"
+args = ["-y", "mcp-remote@0.1.38", "https://mcp.namecheap.com/mcp", "--transport", "http-only"]

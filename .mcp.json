@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "coolify": {
+      "type": "stdio",
+      "command": "sh",
+      "args": [
+        "-c",
+        "set -eu; . \"$HOME/.config/mcp/coolify.env\"; exec npx -y @masonator/coolify-mcp@latest"
+      ]
+    },
+    "namecheap": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.1.38",
+        "https://mcp.namecheap.com/mcp",
+        "--transport",
+        "http-only"
+      ]
+    }
+  }
+}
