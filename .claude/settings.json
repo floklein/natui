@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "nextjs@nextjs": true
+  },
+  "extraKnownMarketplaces": {
+    "nextjs": {
+      "source": {
+        "source": "github",
+        "repo": "vercel/next.js"
+      }
+    }
+  }
+}
